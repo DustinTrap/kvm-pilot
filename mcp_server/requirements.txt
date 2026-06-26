@@ -1,0 +1,7 @@
+# MCP server dependencies (separate from the stdlib-only core library).
+mcp>=1.2
+
+# The core package. It is an early alpha and yanked on PyPI, so either install
+# the repo checkout with `pip install -e ".[totp,ws]"` from the repo root, or
+# pin the exact version:
+kvm-pilot[totp,ws]==0.1.0a1
