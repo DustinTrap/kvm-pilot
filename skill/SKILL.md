@@ -18,9 +18,12 @@ client logic into a script.
 ## Setup
 
 ```bash
-pip install kvm-pilot            # core, stdlib-only
-pip install "kvm-pilot[totp]"    # if the device has 2FA enabled
+pip install kvm-pilot==0.1.0a1            # core, stdlib-only
+pip install "kvm-pilot[totp]==0.1.0a1"    # if the device has 2FA enabled
 ```
+
+`0.1.0a1` is an early alpha and is **yanked** on PyPI (opt-in only), so pin the
+exact version — a bare `pip install kvm-pilot` installs nothing.
 
 Credentials resolve from `KVM_PILOT_HOST` / `KVM_PILOT_USER` / `KVM_PILOT_PASSWD`
 (or a `--profile` in `~/.config/kvm-pilot/config.toml`). For Claude vision set

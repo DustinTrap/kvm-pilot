@@ -44,3 +44,15 @@ issue with what worked and what didn't — that's directly useful.
 
 The test suite mocks the HTTP and vision layers, so you can run and extend it
 with no device. See `tests/conftest.py` for the fakes.
+
+## Recommended Claude skills
+
+If you use Claude Code, these skills help keep contributions consistent with the
+project's standards (optional aids — `ruff`, `mypy`, and `pytest` remain the gates):
+
+- **`/security-review`** — run before opening a PR. This project drives real
+  hardware and handles credentials + secret redaction, so security review matters.
+- **`/code-review`** — review your own diff for bugs and `CLAUDE.md` compliance.
+- **`/claude-api`** — read before changing anything under `src/kvm_pilot/vision/`;
+  it covers current Anthropic model ids and vision parameters.
+- **`/find-skills`** — discover other useful skills in the ecosystem.
