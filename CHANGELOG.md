@@ -16,6 +16,19 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   reports the `Logs` capability (`/api/log`); the rest are the seam for the
   Redfish and IPMI drivers, where boot phase is a structured enum and the
   console is a serial text stream.
+- `KVMClient.has_video_signal()` — a cheap "is there a screen?" probe over
+  `/api/streamer`, parsed defensively (only `False` on a positive offline
+  report).
+- `ScreenAnalyzer` gates: `gate_on_power_signal`, `skip_unchanged_frames` (both
+  default on) and opt-in `ocr_rules` (with `DEFAULT_OCR_RULES`), plus
+  `vlm_calls` / `cheap_resolves` counters.
+
+### Changed
+- `ScreenAnalyzer.classify()` now resolves from cheap signals before calling the
+  vision backend: a `power_off` / `no_signal` short-circuit (no snapshot, no
+  model), an unchanged-frame skip (reuse the last result), and optional
+  OCR-assist for text screens. In a typical boot-watch this avoids most model
+  calls; set the flags to `False` to restore unconditional classification.
 
 ## [0.1.0a1] — 2026-06-26
 
