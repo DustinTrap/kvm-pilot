@@ -43,7 +43,10 @@ issue with what worked and what didn't — that's directly useful.
 ## Testing without hardware
 
 The test suite mocks the HTTP and vision layers, so you can run and extend it
-with no device. See `tests/conftest.py` for the fakes.
+with no device. See `tests/conftest.py` for the fakes. For end-to-end transport
+coverage, `tests/test_emulator.py` drives the real `KVMClient` against a
+pure-stdlib fake kvmd (`tests/emulator.py`) on `127.0.0.1` — no Docker, runs on
+macOS and Linux.
 
 ## Recommended Claude skills
 
