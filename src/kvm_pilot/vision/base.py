@@ -1,0 +1,194 @@
+"""
+Pluggable vision backends for screen-state classification.
+
+A VisionBackend takes a base64 JPEG (a KVM snapshot) plus a hint and returns a
+ScreenState. Concrete backends:
+  * AnthropicBackend     -> Claude vision via the Anthropic Messages API
+  * OpenAICompatBackend  -> any OpenAI-compatible /chat/completions endpoint
+                            (LM Studio, Ollama, vLLM, llama.cpp server, etc.)
+
+No model version is hard-coded anywhere. The Anthropic backend resolves the
+newest vision-capable model at runtime (overridable via env/arg); the
+OpenAI-compatible backend uses whatever model name you give it.
+"""
+
+from __future__ import annotations
+
+import time
+from abc import ABC, abstractmethod
+
+# --- recognised boot/run phases -------------------------------------------
+
+PHASE_NO_SIGNAL = "no_signal"
+PHASE_POWER_OFF = "power_off"
+PHASE_POST_SCREEN = "post_screen"
+PHASE_BIOS_MENU = "bios_menu"
+PHASE_UEFI_SHELL = "uefi_shell"
+PHASE_GRUB_MENU = "grub_menu"
+PHASE_BOOTING = "booting"
+PHASE_LOGIN_PROMPT = "login_prompt"
+PHASE_DESKTOP = "desktop"
+PHASE_INSTALLER_WELCOME = "installer_welcome"
+PHASE_INSTALLER_PARTITIONING = "installer_partitioning"
+PHASE_INSTALLER_PROGRESS = "installer_progress"
+PHASE_INSTALLER_COMPLETE = "installer_complete"
+PHASE_CRASH_SCREEN = "crash_screen"
+PHASE_UNKNOWN = "unknown"
+
+ALL_PHASES: list[str] = [
+    PHASE_NO_SIGNAL,
+    PHASE_POWER_OFF,
+    PHASE_POST_SCREEN,
+    PHASE_BIOS_MENU,
+    PHASE_UEFI_SHELL,
+    PHASE_GRUB_MENU,
+    PHASE_BOOTING,
+    PHASE_LOGIN_PROMPT,
+    PHASE_DESKTOP,
+    PHASE_INSTALLER_WELCOME,
+    PHASE_INSTALLER_PARTITIONING,
+    PHASE_INSTALLER_PROGRESS,
+    PHASE_INSTALLER_COMPLETE,
+    PHASE_CRASH_SCREEN,
+    PHASE_UNKNOWN,
+]
+
+SYSTEM_PROMPT = """\
+You are a remote KVM screen classifier. You receive a JPEG screenshot from a
+KVM console and classify the current boot/run phase of the remote machine.
+
+Respond ONLY with a single valid JSON object, no other text, with exactly:
+  phase        (string)  one of the known phase tokens below
+  description  (string)  one or two sentences describing what is visible
+  confidence   (float)   0.0 to 1.0
+  raw_text     (string)  any legible on-screen text, verbatim, or ""
+
+Known phase tokens:
+  no_signal, power_off, post_screen, bios_menu, uefi_shell, grub_menu,
+  booting, login_prompt, desktop, installer_welcome, installer_partitioning,
+  installer_progress, installer_complete, crash_screen, unknown
+
+Example:
+{"phase":"grub_menu","description":"A GRUB boot menu lists several kernels.","confidence":0.95,"raw_text":"GNU GRUB version 2.06"}
+"""
+
+
+def build_user_text(hint: str) -> str:
+    base = "Classify the attached KVM screenshot."
+    if hint:
+        base += f"\nHint: {hint}"
+    base += "\nReturn only the JSON object described in the system prompt."
+    return base
+
+
+class ScreenState:
+    """Result of a single classification."""
+
+    __slots__ = ("phase", "description", "confidence", "raw_text", "image_b64", "timestamp")
+
+    def __init__(
+        self,
+        phase: str,
+        description: str,
+        confidence: float,
+        raw_text: str,
+        image_b64: str = "",
+        timestamp: float | None = None,
+    ):
+        self.phase = phase
+        self.description = description
+        self.confidence = confidence
+        self.raw_text = raw_text
+        self.image_b64 = image_b64
+        self.timestamp = timestamp if timestamp is not None else time.time()
+
+    def to_dict(self, include_image: bool = False) -> dict:
+        d = {
+            "phase": self.phase,
+            "description": self.description,
+            "confidence": self.confidence,
+            "raw_text": self.raw_text,
+            "timestamp": self.timestamp,
+        }
+        if include_image:
+            d["image_b64"] = self.image_b64
+        return d
+
+    def __repr__(self) -> str:
+        return f"ScreenState(phase={self.phase!r}, confidence={self.confidence:.2f})"
+
+
+def parse_classification(text: str, image_b64: str) -> ScreenState:
+    """Parse a model's JSON text (tolerating ``` fences) into a ScreenState.
+
+    This is backend-independent and is the unit under test for the vision path,
+    so it never makes a network call.
+    """
+    import json
+
+    from ..errors import VisionError
+
+    cleaned = text.strip()
+    if cleaned.startswith("```"):
+        lines = [ln for ln in cleaned.splitlines() if not ln.strip().startswith("```")]
+        cleaned = "\n".join(lines).strip()
+
+    try:
+        data = json.loads(cleaned)
+    except json.JSONDecodeError as exc:
+        raise VisionError(f"Classifier did not return valid JSON: {cleaned[:200]}") from exc
+
+    phase = str(data.get("phase", PHASE_UNKNOWN)).lower()
+    if phase not in ALL_PHASES:
+        phase = PHASE_UNKNOWN
+
+    try:
+        confidence = float(data.get("confidence", 0.0))
+    except (TypeError, ValueError):
+        confidence = 0.0
+
+    return ScreenState(
+        phase=phase,
+        description=str(data.get("description", "")),
+        confidence=confidence,
+        raw_text=str(data.get("raw_text", "")),
+        image_b64=image_b64,
+    )
+
+
+class VisionBackend(ABC):
+    """Abstract base for a vision classification backend."""
+
+    @abstractmethod
+    def classify(self, image_b64: str, hint: str = "") -> ScreenState:
+        """Classify a base64 JPEG and return a ScreenState."""
+
+    @property
+    @abstractmethod
+    def model(self) -> str:
+        """The resolved model identifier this backend will use."""
+
+
+__all__ = [
+    "VisionBackend",
+    "ScreenState",
+    "parse_classification",
+    "build_user_text",
+    "SYSTEM_PROMPT",
+    "ALL_PHASES",
+    "PHASE_NO_SIGNAL",
+    "PHASE_POWER_OFF",
+    "PHASE_POST_SCREEN",
+    "PHASE_BIOS_MENU",
+    "PHASE_UEFI_SHELL",
+    "PHASE_GRUB_MENU",
+    "PHASE_BOOTING",
+    "PHASE_LOGIN_PROMPT",
+    "PHASE_DESKTOP",
+    "PHASE_INSTALLER_WELCOME",
+    "PHASE_INSTALLER_PARTITIONING",
+    "PHASE_INSTALLER_PROGRESS",
+    "PHASE_INSTALLER_COMPLETE",
+    "PHASE_CRASH_SCREEN",
+    "PHASE_UNKNOWN",
+]

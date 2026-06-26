@@ -1,0 +1,18 @@
+# kvm-pilot config — copy to ~/.config/kvm-pilot/config.toml and edit.
+# Precedence: CLI flags / kwargs  >  KVM_PILOT_* env vars  >  this file.
+# Do NOT commit a copy that contains real secrets.
+
+[hosts.homelab]
+host = "192.168.8.1"
+user = "admin"
+passwd = "changeme"        # prefer env injection (KVM_PILOT_PASSWD) over storing here
+port = 443
+scheme = "https"
+verify_ssl = false          # GL/PiKVM ship self-signed certs
+timeout = 30.0
+# totp_secret = "BASE32SECRET"   # only if 2FA is enabled (needs the 'totp' extra)
+
+[hosts.rack2]
+host = "10.0.0.42"
+user = "admin"
+passwd = "changeme"
