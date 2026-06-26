@@ -99,3 +99,22 @@ def test_network_error_wrapped(monkeypatch):
     monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
     with pytest.raises(ConnectionError):
         h.get("/api/thing")
+
+
+def test_effective_password_with_totp_redacted_in_error(monkeypatch):
+    monkeypatch.setattr("kvm_pilot.http._totp_now", lambda secret: "123456")
+    h = HTTP("host", "admin", "supersecret", totp_secret="ABC", max_retries=0)
+
+    def fake_urlopen(req, context=None, timeout=None):
+        # Worst case: the device reflects the full X-KVMD-Passwd header (pw+TOTP).
+        raise urllib.error.HTTPError(
+            req.full_url, 400, "bad", {}, io.BytesIO(b"got supersecret123456 back")
+        )
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    with pytest.raises(Exception) as ei:
+        h.get("/api/thing")
+    msg = str(ei.value)
+    assert "supersecret123456" not in msg
+    assert "123456" not in msg  # the live TOTP code must be redacted too
+    assert "REDACTED" in msg

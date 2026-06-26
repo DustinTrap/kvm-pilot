@@ -304,6 +304,11 @@ class KVMClient(CapabilityMixin):
     def msd_set_params(
         self, image: str | None = None, cdrom: bool = True, rw: bool = False
     ) -> None:
+        if not self.safety.guard(
+            "msd.set_params",
+            f"Select MSD image {image!r} on {self.host} (cdrom={cdrom}, rw={rw})",
+        ):
+            return
         params: dict[str, Any] = {"cdrom": "1" if cdrom else "0"}
         if image:
             params["image"] = image
@@ -394,7 +399,14 @@ class KVMClient(CapabilityMixin):
             "X-KVMD-User": self._http._user,
             "X-KVMD-Passwd": self._http._effective_passwd(),
         }
-        ws = websocket.WebSocket(sslopt={"cert_reqs": ssl.CERT_NONE})
+        # Honor the client's verify_ssl choice on this credential-bearing
+        # channel instead of always disabling verification.
+        sslopt: dict = {
+            "cert_reqs": ssl.CERT_REQUIRED if self._http._verify_ssl else ssl.CERT_NONE
+        }
+        if not self._http._verify_ssl:
+            sslopt["check_hostname"] = False
+        ws = websocket.WebSocket(sslopt=sslopt)
         ws.connect(uri, header=headers)
         deadline = time.time() + timeout if timeout else None
         try:

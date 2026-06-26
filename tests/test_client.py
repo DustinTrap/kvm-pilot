@@ -55,6 +55,14 @@ def test_mount_iso_sequence(fake_http, tmp_path):
     assert "/api/msd/set_connected" in paths
 
 
+def test_msd_set_params_gated_by_confirm(fake_http):
+    c = KVMClient("fake", confirm=deny_all)
+    c._http = fake_http
+    with pytest.raises(SafetyError):
+        c.msd_set_params(image="x.iso")
+    assert fake_http.calls == []  # boot-media selection must not fire when denied
+
+
 def test_pikvmclient_alias():
     from kvm_pilot import PiKVMClient
 

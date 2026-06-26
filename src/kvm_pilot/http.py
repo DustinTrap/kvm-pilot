@@ -72,6 +72,7 @@ class HTTP:
         self._totp_secret = totp_secret
         self._max_retries = max(0, max_retries)
         self._backoff_base = backoff_base
+        self._verify_ssl = verify_ssl
         self._ssl_ctx = ssl.create_default_context()
         if not verify_ssl:
             self._ssl_ctx.check_hostname = False
@@ -98,6 +99,13 @@ class HTTP:
 
     def _redact(self, text: str) -> str:
         out = text
+        # Redact the full transmitted credential first: with TOTP enabled the
+        # value on the wire is password+code, not just the base password.
+        if self._totp_secret:
+            try:
+                out = out.replace(self._effective_passwd(), _REDACTION)
+            except Exception:  # noqa: BLE001 - redaction must never raise
+                pass
         if self._passwd:
             out = out.replace(self._passwd, _REDACTION)
         if self._auth_token:
