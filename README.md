@@ -42,6 +42,16 @@ default and need no change.
 
 ---
 
+## How it works
+
+`kvm-pilot` runs a **see → decide → act** loop, and the screen is its only sensor:
+it pulls a screenshot from the KVM, a vision model classifies the boot phase, and
+`kvm-pilot` acts back through the KVM's keyboard and power. Because it works at the
+pixel level, there is **no agent on the target** — the same loop drives POST,
+firmware, the bootloader, and an OS install.
+
+![kvm-pilot reads a screenshot from the KVM, a vision backend (Claude or a local VLM) classifies the boot phase, and kvm-pilot drives keyboard and power back through the KVM — a closed loop with no agent on the target machine.](docs/how-it-works.svg)
+
 ## Install
 
 ```bash
@@ -91,6 +101,16 @@ The CLI prompts for confirmation before any destructive action. Use `--yes` to
 skip prompts in automation, or `--dry-run` to log intended actions without
 sending them.
 
+## Boot-phase detection
+
+The vision classifier maps each screenshot to a **phase** — `bios_menu`,
+`grub_menu`, `installer_progress`, `login_prompt`, `crash_screen`, and so on.
+`wait_for_state()` polls the screen and blocks until the phase you asked for
+appears (or a timeout fires), so an unattended install becomes a few waits with
+actions wired between them:
+
+![Timeline of boot phases — POST, bios_menu, grub_menu, installer_progress, installer_complete, login_prompt — with the unattended-install example wiring mount_iso and hard_cycle at the start, wait_for_state on grub_menu then Enter, and wait_for_state on installer_complete; any phase can branch to crash_screen.](docs/boot-phases.svg)
+
 ## Safety model
 
 Power-offs, hard resets, virtual-media connect/disconnect, GPIO, and Redfish
@@ -100,6 +120,8 @@ resets are classified as **destructive** and pass through a safety layer:
 - **confirmation** — a callback that can veto any destructive call. The library
   default allows everything (so plain scripts work); the CLI installs an
   interactive `y/N` prompt unless you pass `--yes`.
+
+![Decision flow for a destructive call: if the op is not in DESTRUCTIVE_OPS it executes directly; if it is, dry-run logs and skips it, otherwise a confirm callback can veto it, and only an allowed call is sent to the device.](docs/safety.svg)
 
 The destructive set is defined explicitly in `kvm_pilot.safety.DESTRUCTIVE_OPS`
 so it is auditable rather than guessed. A vision classification can never

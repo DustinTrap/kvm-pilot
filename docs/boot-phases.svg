@@ -1,0 +1,99 @@
+<svg viewBox="0 0 860 410" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="ttl dsc">
+  <title id="ttl">Boot-phase detection and wait_for_state</title>
+  <desc id="dsc">A left-to-right timeline of boot phases the vision classifier recognizes — POST, bios_menu, grub_menu, installer_progress, installer_complete, login_prompt. Above the timeline, the unattended-install example wires actions to phases: mount_iso and hard_cycle to start, wait_for_state on grub_menu then press Enter, and wait_for_state on installer_complete. Below, any phase can transition to crash_screen, which you branch on. Each check is a snapshot followed by a classify call; wait_for_state polls until the phase matches or the timeout fires.</desc>
+  <style>
+    text{font-family:var(--font-sans,ui-sans-serif,system-ui,sans-serif);}
+    .band{fill:#f1efe8;stroke:#d3d1c7;stroke-width:1;}
+    .pill{fill:#fff;stroke:#b4b2a9;stroke-width:1.5;}
+    .purple{fill:#eeedfe;stroke:#534ab7;stroke-width:1.25;}
+    .red{fill:#fcebeb;stroke:#a32d2d;stroke-width:1.5;}
+    .h{fill:#2c2c2a;font-weight:500;font-size:18px;}
+    .sub{fill:#5f5e5a;font-weight:400;font-size:12px;}
+    .lab{fill:#888780;font-weight:500;font-size:11px;}
+    .ts{fill:#5f5e5a;font-weight:400;font-size:11.5px;}
+    .pillt{fill:#2c2c2a;font-family:var(--font-mono,ui-monospace,monospace);font-weight:500;font-size:11px;}
+    .mono{fill:#2c2c2a;font-family:var(--font-mono,ui-monospace,monospace);font-weight:400;font-size:11px;}
+    .actm{fill:#3c3489;font-family:var(--font-mono,ui-monospace,monospace);font-weight:400;font-size:11px;}
+    .crasht{fill:#791f1f;font-family:var(--font-mono,ui-monospace,monospace);font-weight:500;font-size:11.5px;}
+    .cn{stroke:#888780;}
+    .cr{stroke:#a32d2d;}
+    .mkn{fill:#888780;}
+    .mkr{fill:#a32d2d;}
+    @media (prefers-color-scheme:dark){
+      .band{fill:#211f1b;stroke:#4a4641;}
+      .pill{fill:#2a2723;stroke:#5f5e5a;}
+      .purple{fill:#3c3489;stroke:#afa9ec;}
+      .red{fill:#791f1f;stroke:#f09595;}
+      .h{fill:#f1efe8;} .sub{fill:#b4b2a9;} .lab{fill:#908d85;} .ts{fill:#b4b2a9;}
+      .pillt{fill:#f1efe8;} .mono{fill:#f1efe8;} .actm{fill:#cecbf6;} .crasht{fill:#f7c1c1;}
+      .cr{stroke:#f09595;} .mkr{fill:#f09595;}
+    }
+  </style>
+
+  <text x="30" y="34" class="h">kvm-pilot — boot-phase detection</text>
+  <text x="30" y="54" class="sub">ScreenAnalyzer maps each screenshot to a phase. wait_for_state() blocks until the phase you asked for appears.</text>
+
+  <defs>
+    <marker id="af" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path class="mkn" d="M0,0 L6,3 L0,6 Z"/></marker>
+    <marker id="ad" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path class="mkn" d="M0,0 L5,3 L0,6 Z"/></marker>
+    <marker id="adr" markerWidth="8" markerHeight="8" refX="5" refY="3" orient="auto"><path class="mkr" d="M0,0 L5,3 L0,6 Z"/></marker>
+  </defs>
+
+  <text x="40" y="90" class="lab">Your script wires actions to phases</text>
+
+  <!-- action callouts -->
+  <rect class="purple" x="40" y="100" width="150" height="46" rx="4"/>
+  <text x="52" y="120" class="actm">mount_iso(url)</text>
+  <text x="52" y="137" class="actm">hard_cycle()</text>
+
+  <rect class="purple" x="258" y="100" width="210" height="46" rx="4"/>
+  <text x="270" y="120" class="actm">wait_for_state('grub_menu')</text>
+  <text x="270" y="137" class="actm">press_key('Enter')</text>
+
+  <rect class="purple" x="522" y="100" width="210" height="46" rx="4"/>
+  <text x="534" y="120" class="actm">wait_for_state(</text>
+  <text x="534" y="137" class="actm">  'installer_complete', 1800)</text>
+
+  <!-- connectors callout -> pill -->
+  <line x1="99" y1="146" x2="99" y2="196" class="cn" stroke-width="1.2" stroke-dasharray="3,3" marker-end="url(#ad)"/>
+  <line x1="363" y1="146" x2="363" y2="196" class="cn" stroke-width="1.2" stroke-dasharray="3,3" marker-end="url(#ad)"/>
+  <line x1="627" y1="146" x2="627" y2="196" class="cn" stroke-width="1.2" stroke-dasharray="3,3" marker-end="url(#ad)"/>
+
+  <text x="40" y="190" class="ts">power on</text>
+
+  <!-- phase pills -->
+  <rect class="pill" x="40" y="200" width="118" height="46" rx="10"/>
+  <text x="99" y="228" class="pillt" text-anchor="middle">POST</text>
+  <rect class="pill" x="172" y="200" width="118" height="46" rx="10"/>
+  <text x="231" y="228" class="pillt" text-anchor="middle">bios_menu</text>
+  <rect class="pill" x="304" y="200" width="118" height="46" rx="10"/>
+  <text x="363" y="228" class="pillt" text-anchor="middle">grub_menu</text>
+  <rect class="pill" x="436" y="200" width="118" height="46" rx="10"/>
+  <text x="495" y="224" class="pillt" text-anchor="middle">installer_</text>
+  <text x="495" y="238" class="pillt" text-anchor="middle">progress</text>
+  <rect class="pill" x="568" y="200" width="118" height="46" rx="10"/>
+  <text x="627" y="224" class="pillt" text-anchor="middle">installer_</text>
+  <text x="627" y="238" class="pillt" text-anchor="middle">complete</text>
+  <rect class="pill" x="700" y="200" width="118" height="46" rx="10"/>
+  <text x="759" y="228" class="pillt" text-anchor="middle">login_prompt</text>
+
+  <!-- arrows between pills -->
+  <line x1="159" y1="223" x2="171" y2="223" class="cn" stroke-width="1.5" marker-end="url(#af)"/>
+  <line x1="291" y1="223" x2="303" y2="223" class="cn" stroke-width="1.5" marker-end="url(#af)"/>
+  <line x1="423" y1="223" x2="435" y2="223" class="cn" stroke-width="1.5" marker-end="url(#af)"/>
+  <line x1="555" y1="223" x2="567" y2="223" class="cn" stroke-width="1.5" marker-end="url(#af)"/>
+  <line x1="687" y1="223" x2="699" y2="223" class="cn" stroke-width="1.5" marker-end="url(#af)"/>
+
+  <!-- crash branch -->
+  <rect class="red" x="304" y="296" width="250" height="40" rx="10"/>
+  <text x="429" y="321" class="crasht" text-anchor="middle">crash_screen</text>
+  <text x="572" y="313" class="ts">any phase →</text>
+  <text x="572" y="329" class="ts">you branch to recovery</text>
+  <line x1="363" y1="246" x2="363" y2="294" class="cr" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#adr)"/>
+  <line x1="495" y1="246" x2="429" y2="294" class="cr" stroke-width="1.2" stroke-dasharray="4,3" marker-end="url(#adr)"/>
+
+  <!-- poll-loop note + legend -->
+  <rect class="band" x="30" y="356" width="800" height="44" rx="8"/>
+  <text x="430" y="375" class="ts" text-anchor="middle"><tspan class="mono">Every check = snapshot() → classify().</tspan>  wait_for_state polls until the phase matches, or raises at the timeout.</text>
+  <text x="430" y="392" class="lab" text-anchor="middle">grey = phase the classifier sees · purple = your script's calls · red = error branch</text>
+</svg>
