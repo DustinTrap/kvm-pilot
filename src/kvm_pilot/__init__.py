@@ -21,9 +21,11 @@ from __future__ import annotations
 from .__about__ import __version__
 from .client import KVMClient, PiKVMClient
 from .config import HostConfig, resolve_host
+from .drivers.base import Capability, KVMDriver
 from .errors import (
     AuthError,
     BusyError,
+    CapabilityError,
     ConnectionError,
     KVMPilotError,
     SafetyError,
@@ -50,4 +52,7 @@ __all__ = [
     "ConnectionError",
     "SafetyError",
     "VisionError",
+    "CapabilityError",
+    "Capability",
+    "KVMDriver",
 ]
