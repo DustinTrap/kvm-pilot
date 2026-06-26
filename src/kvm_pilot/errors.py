@@ -39,6 +39,10 @@ class VisionError(KVMPilotError):
     """The vision backend failed or returned an unusable result."""
 
 
+class CapabilityError(KVMPilotError):
+    """The driver does not support the requested capability."""
+
+
 __all__ = [
     "KVMPilotError",
     "AuthError",
@@ -48,4 +52,5 @@ __all__ = [
     "ConnectionError",
     "SafetyError",
     "VisionError",
+    "CapabilityError",
 ]

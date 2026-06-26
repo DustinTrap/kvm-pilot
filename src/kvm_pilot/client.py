@@ -26,6 +26,7 @@ from collections.abc import Generator
 from pathlib import Path
 from typing import Any
 
+from .drivers.base import CapabilityMixin
 from .errors import AuthError, TimeoutError
 from .http import HTTP
 from .safety import SafetyPolicy
@@ -33,7 +34,7 @@ from .safety import SafetyPolicy
 logger = logging.getLogger("kvm_pilot.client")
 
 
-class KVMClient:
+class KVMClient(CapabilityMixin):
     """Full PiKVM / GLKVM API client.
 
     Args:

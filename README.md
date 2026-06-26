@@ -150,6 +150,14 @@ require the optional ATX add-on board; without it, ATX calls will return errors
 from the device. Reports of success or failure on *any* hardware are exactly
 what this alpha needs — please open an issue.
 
+## Architecture
+
+`kvm-pilot` is moving to a modular, **driver-plugin** architecture so support can
+expand to many KVM/BMC devices (PiKVM family, Redfish BMCs, JetKVM, …). Each
+device implements only the capability protocols its hardware supports; the CLI,
+safety layer, and vision subsystem stay device-agnostic. See
+[docs/architecture.md](docs/architecture.md) for the design and diagram.
+
 ## License
 
 Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE). `kvm-pilot` is

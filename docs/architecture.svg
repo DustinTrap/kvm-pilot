@@ -1,0 +1,80 @@
+<svg viewBox="0 0 860 588" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="ttl dsc">
+  <title id="ttl">Proposed driver-plugin architecture for kvm-pilot</title>
+  <desc id="dsc">A layered stack: consumers (CLI, KVMClient facade, ScreenAnalyzer) talk to a KVMDriver capability-protocol interface, resolved by a driver registry into concrete drivers (PiKVM family, Redfish, JetKVM, Fake) over pluggable transports. Safety, config, errors and vision are shared cross-cutting concerns.</desc>
+  <style>
+    .b{fill:var(--color-background-primary,#fff);stroke:var(--color-border-secondary,#d4d4d8);stroke-width:1.5;}
+    .bn{fill:var(--color-background-primary,#fff);stroke:#3b82f6;stroke-width:2;}
+    .band{fill:var(--color-border-tertiary,#f3f4f6);stroke:var(--color-border-secondary,#d4d4d8);stroke-width:1;}
+    text{font-family:var(--font-sans,ui-sans-serif,system-ui,sans-serif);}
+    .ti{fill:var(--color-text-primary,#18181b);font-weight:600;font-size:13.5px;}
+    .tia{fill:#2563eb;font-weight:700;font-size:13.5px;}
+    .su{fill:var(--color-text-secondary,#71717a);font-size:11px;}
+    .mono{font-family:var(--font-mono,ui-monospace,monospace);fill:var(--color-text-secondary,#71717a);font-size:11.5px;}
+    .lab{fill:var(--color-text-secondary,#9598a1);font-weight:700;font-size:10px;letter-spacing:.08em;}
+    .h{fill:var(--color-text-primary,#18181b);font-weight:700;font-size:16px;}
+    .lg{fill:var(--color-text-secondary,#71717a);font-size:10.5px;}
+    .pill{fill:#3b82f6;}
+    .pt{fill:#fff;font-size:8.5px;font-weight:700;}
+  </style>
+
+  <text x="30" y="26" class="h">kvm-pilot — driver-plugin architecture</text>
+  <text x="30" y="44" class="lg">Blue = new components to add · grey = exists today (refactored in place)</text>
+
+  <defs>
+    <marker id="ar" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto">
+      <path d="M0,0 L6,3 L0,6 Z" fill="var(--color-border-secondary,#b8b8be)"/>
+    </marker>
+  </defs>
+
+  <text x="30" y="68" class="lab">CONSUMERS</text>
+  <g>
+    <rect class="b" x="30" y="74" width="250" height="54" rx="8"/>
+    <text x="46" y="98" class="ti">CLI</text><text x="46" y="116" class="su">argparse · --driver flag</text>
+    <rect class="b" x="305" y="74" width="250" height="54" rx="8"/>
+    <text x="321" y="98" class="ti">KVMClient (facade)</text><text x="321" y="116" class="su">resolves + delegates to driver</text>
+    <rect class="b" x="580" y="74" width="250" height="54" rx="8"/>
+    <text x="596" y="98" class="ti">ScreenAnalyzer</text><text x="596" y="116" class="su">needs Video capability only</text>
+  </g>
+  <line x1="430" y1="128" x2="430" y2="150" stroke="var(--color-border-secondary,#b8b8be)" stroke-width="1.5" marker-end="url(#ar)"/>
+
+  <text x="30" y="146" class="lab">DRIVER INTERFACE · the plugin seam</text>
+  <rect class="bn" x="30" y="152" width="800" height="60" rx="8"/>
+  <rect class="pill" x="772" y="160" width="34" height="15" rx="7.5"/><text x="789" y="171" class="pt" text-anchor="middle">NEW</text>
+  <text x="430" y="178" class="tia" text-anchor="middle">KVMDriver — capability protocols (implement only what the hardware has)</text>
+  <text x="430" y="199" class="mono" text-anchor="middle">Power · HID · Video · VirtualMedia · GPIO · Events · SystemInfo</text>
+  <line x1="430" y1="212" x2="430" y2="234" stroke="var(--color-border-secondary,#b8b8be)" stroke-width="1.5" marker-end="url(#ar)"/>
+
+  <text x="30" y="230" class="lab">REGISTRY</text>
+  <rect class="bn" x="30" y="236" width="800" height="50" rx="8"/>
+  <rect class="pill" x="772" y="243" width="34" height="15" rx="7.5"/><text x="789" y="254" class="pt" text-anchor="middle">NEW</text>
+  <text x="430" y="258" class="tia" text-anchor="middle">Driver registry</text>
+  <text x="430" y="276" class="mono" text-anchor="middle">make_driver(kind) · entry-points (kvm_pilot.drivers) · autodetect(host)</text>
+  <line x1="430" y1="286" x2="430" y2="308" stroke="var(--color-border-secondary,#b8b8be)" stroke-width="1.5" marker-end="url(#ar)"/>
+
+  <text x="30" y="304" class="lab">DRIVERS</text>
+  <g>
+    <rect class="b" x="30" y="310" width="185" height="62" rx="8"/>
+    <text x="44" y="333" class="ti">PiKVMDriver</text><text x="44" y="350" class="su">+ GLKVM · BliKVM</text><text x="44" y="365" class="su">(today's code, refactored)</text>
+    <rect class="bn" x="235" y="310" width="185" height="62" rx="8"/>
+    <text x="249" y="333" class="tia">RedfishDriver</text><text x="249" y="350" class="su">iDRAC · iLO · OpenBMC</text><text x="249" y="365" class="su">huge BMC coverage</text>
+    <rect class="bn" x="440" y="310" width="185" height="62" rx="8"/>
+    <text x="454" y="333" class="tia">JetKVMDriver</text><text x="454" y="350" class="su">WS JSON-RPC</text><text x="454" y="365" class="su">(community)</text>
+    <rect class="bn" x="645" y="310" width="185" height="62" rx="8"/>
+    <text x="659" y="333" class="tia">FakeDriver</text><text x="659" y="350" class="su">tests / CI</text><text x="659" y="365" class="su">smoke harness (#2)</text>
+  </g>
+  <line x1="430" y1="372" x2="430" y2="394" stroke="var(--color-border-secondary,#b8b8be)" stroke-width="1.5" marker-end="url(#ar)"/>
+
+  <text x="30" y="390" class="lab">TRANSPORT</text>
+  <g>
+    <rect class="b" x="30" y="396" width="250" height="52" rx="8"/>
+    <text x="46" y="419" class="ti">HttpTransport + Auth</text><text x="46" y="437" class="su">urllib · retry · redaction</text>
+    <rect class="b" x="305" y="396" width="250" height="52" rx="8"/>
+    <text x="321" y="419" class="ti">WS transport</text><text x="321" y="437" class="su">JSON-RPC devices</text>
+    <rect class="b" x="580" y="396" width="250" height="52" rx="8"/>
+    <text x="596" y="419" class="ti">IPMI / ipmitool</text><text x="596" y="437" class="su">legacy BMCs (optional)</text>
+  </g>
+
+  <rect class="band" x="30" y="472" width="800" height="44" rx="8"/>
+  <text x="430" y="491" class="ti" text-anchor="middle" font-size="12px">Cross-cutting &amp; shared (one implementation, all drivers)</text>
+  <text x="430" y="507" class="su" text-anchor="middle">SafetyPolicy (gates destructive ops) · Config(driver=) · Errors · Vision backends — already pluggable</text>
+</svg>
