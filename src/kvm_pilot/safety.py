@@ -34,6 +34,7 @@ DESTRUCTIVE_OPS: set[str] = {
     "atx.reset_hard",
     "atx.power_on",  # included: powering a box on is a state change worth gating
     "atx.click",
+    "msd.set_params",
     "msd.connect",
     "msd.disconnect",
     "msd.remove_image",
