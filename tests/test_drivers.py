@@ -6,16 +6,37 @@ from kvm_pilot import KVMClient
 from kvm_pilot.drivers.base import (
     GPIO,
     HID,
+    BootProgress,
     Capability,
     Events,
+    Logs,
     Power,
+    Sensors,
+    SerialConsole,
     SystemInfo,
     Video,
     VirtualMedia,
+    Watchdog,
     detect_capabilities,
 )
 
-ALL_PROTOCOLS = (SystemInfo, Power, HID, Video, VirtualMedia, GPIO, Events)
+# Protocols the PiKVM client implements today: the original seven plus Logs
+# (/api/log). The remaining sensing protocols are the seam for future BMC
+# drivers (Redfish/IPMI), so the PiKVM client does not satisfy them.
+ALL_PROTOCOLS = (SystemInfo, Power, HID, Video, VirtualMedia, GPIO, Events, Logs)
+
+FORWARD_LOOKING_PROTOCOLS = (BootProgress, Sensors, SerialConsole, Watchdog)
+
+PIKVM_CAPABILITIES = {
+    Capability.SYSTEM_INFO,
+    Capability.POWER,
+    Capability.HID,
+    Capability.VIDEO,
+    Capability.VIRTUAL_MEDIA,
+    Capability.GPIO,
+    Capability.EVENTS,
+    Capability.LOGS,
+}
 
 
 def make_client() -> KVMClient:
@@ -29,8 +50,21 @@ def test_pikvm_client_satisfies_every_capability_protocol() -> None:
         assert isinstance(client, proto), proto.__name__
 
 
-def test_capabilities_reports_the_full_set() -> None:
-    assert make_client().capabilities() == set(Capability)
+def test_capabilities_reports_the_pikvm_subset() -> None:
+    assert make_client().capabilities() == PIKVM_CAPABILITIES
+
+
+def test_forward_looking_sensing_caps_unsupported_by_pikvm() -> None:
+    client = make_client()
+    for proto in FORWARD_LOOKING_PROTOCOLS:
+        assert not isinstance(client, proto), proto.__name__
+    for cap in (
+        Capability.BOOT_PROGRESS,
+        Capability.SENSORS,
+        Capability.SERIAL_CONSOLE,
+        Capability.WATCHDOG,
+    ):
+        assert not client.supports(cap)
 
 
 def test_supports_accepts_enum_and_string() -> None:

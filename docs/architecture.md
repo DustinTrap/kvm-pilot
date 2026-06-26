@@ -29,9 +29,12 @@ implements only the capability protocols its hardware supports.
 
 Rather than one monolithic interface, each feature area is a small,
 `@runtime_checkable` `Protocol` in [`kvm_pilot.drivers.base`](../src/kvm_pilot/drivers/base.py):
-`SystemInfo`, `Power`, `HID`, `Video`, `VirtualMedia`, `GPIO`, `Events`. A driver
-implements only the ones it has and reports them via `capabilities()`. Support is
-detected **structurally** — drivers never hand-maintain a list:
+`SystemInfo`, `Power`, `HID`, `Video`, `VirtualMedia`, `GPIO`, `Events`, plus the
+sensing protocols `Logs`, `BootProgress`, `Sensors`, `SerialConsole`, and
+`Watchdog` (the cheaper-than-vision signals — see the sensing model in the
+README). A driver implements only the ones it has and reports them via
+`capabilities()`. Support is detected **structurally** — drivers never
+hand-maintain a list:
 
 ```python
 from kvm_pilot import KVMClient, Capability
@@ -52,6 +55,11 @@ than assumed:
 | Virtual media | ✅ | ✅ (many) | partial | ❌ |
 | GPIO | ✅ | ❌ | ❌ | ❌ |
 | Event stream | ✅ WebSocket | ⚠️ event svc | ✅ | ❌ |
+| Logs | ✅ kvmd journal | ✅ SEL + lifecycle | ❌ | ✅ SEL |
+| Boot progress | ❌ (vision) | ✅ structured enum | ❌ (vision) | ⚠️ POST codes |
+| Sensors (temp/fan/watts) | ⚠️ Prometheus | ✅ | ⚠️ DC power | ✅ SDR/DCMI |
+| Serial console (text) | ❌ unless wired | ✅ SOL | ❌ | ✅ SOL |
+| Watchdog | ❌ | ⚠️ | ❌ | ✅ |
 
 `ScreenAnalyzer` already depends only on `Video` (it calls `snapshot_base64()`),
 so vision works against any driver that captures frames — and is simply
