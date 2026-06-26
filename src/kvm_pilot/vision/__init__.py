@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .analyzer import ScreenAnalyzer
+from .analyzer import DEFAULT_OCR_RULES, ScreenAnalyzer
 from .anthropic import AnthropicBackend
 from .base import (
     ALL_PHASES,
@@ -41,6 +41,7 @@ def make_backend(
 
 __all__ = [
     "ScreenAnalyzer",
+    "DEFAULT_OCR_RULES",
     "VisionBackend",
     "AnthropicBackend",
     "OpenAICompatBackend",
