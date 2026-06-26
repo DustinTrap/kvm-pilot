@@ -4,9 +4,10 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.0] — unreleased
+## [0.1.0a1] — 2026-06-26
 
-Initial public release.
+First public **alpha** pre-release, published to solicit hardware testing and
+user feedback. **Not validated on real hardware** — see Notes.
 
 ### Added
 - `KVMClient`: full PiKVM / GLKVM REST client covering auth (incl. TOTP/2FA),
@@ -31,7 +32,10 @@ Initial public release.
   network) and password/token redaction in error text.
 
 ### Notes
-- Tested against GL-RM1PE. PiKVM v3/v4, BliKVM, and GL-RM1 are expected to work
-  but are not yet verified.
+- **Not tested on real hardware.** Every feature is covered only by unit tests
+  with mocked HTTP and vision responses; no device — including the GL-RM1PE this
+  project targets — has been exercised end to end. Hardware validation and user
+  feedback are the explicit goals of this alpha. Reports welcome in the issue
+  tracker.
 
-[0.1.0]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0
+[0.1.0a1]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a1

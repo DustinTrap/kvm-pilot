@@ -13,7 +13,7 @@ license-files = ["LICENSE", "NOTICE"]
 authors = [{ name = "kvm-pilot contributors" }]
 keywords = ["pikvm", "glkvm", "gl-rm1", "kvm", "ipkvm", "bare-metal", "automation", "vision", "llm"]
 classifiers = [
-    "Development Status :: 4 - Beta",
+    "Development Status :: 3 - Alpha",
     "Intended Audience :: System Administrators",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: Apache Software License",
