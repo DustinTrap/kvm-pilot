@@ -1,0 +1,38 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+build/
+dist/
+.eggs/
+
+# Tooling
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+.tox/
+
+# Virtualenvs
+.venv/
+venv/
+env/
+
+# Local config / secrets — never commit these
+.env
+config.toml
+*.local.toml
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Captured screenshots from runs
+*.jpg
+*.jpeg
+*.png
+!docs/**/*.png
