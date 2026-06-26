@@ -63,6 +63,22 @@ def test_msd_set_params_gated_by_confirm(fake_http):
     assert fake_http.calls == []  # boot-media selection must not fire when denied
 
 
+def test_has_video_signal_reads_online_flag(client, fake_http):
+    fake_http.results["/api/streamer"] = {"source": {"online": True}}
+    assert client.has_video_signal() is True
+    fake_http.results["/api/streamer"] = {"source": {"online": False}}
+    assert client.has_video_signal() is False
+
+
+def test_has_video_signal_handles_nested_and_unknown_shapes(client, fake_http):
+    # Nested under "streamer" still resolves.
+    fake_http.results["/api/streamer"] = {"streamer": {"source": {"online": False}}}
+    assert client.has_video_signal() is False
+    # Unknown shape must default to True so a real frame is never suppressed.
+    fake_http.results["/api/streamer"] = {}
+    assert client.has_video_signal() is True
+
+
 def test_pikvmclient_alias():
     from kvm_pilot import PiKVMClient
 
