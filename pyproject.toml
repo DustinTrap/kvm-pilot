@@ -36,6 +36,8 @@ dev = [
     "pytest-cov>=5.0",
     "ruff>=0.6",
     "mypy>=1.11",
+    "bandit>=1.7",
+    "pip-audit>=2.7",
 ]
 
 [project.scripts]
@@ -73,3 +75,13 @@ ignore = ["E501"]  # long lines tolerated in docstrings/tables
 python_version = "3.11"
 ignore_missing_imports = true
 warn_unused_ignores = false
+
+[tool.bandit]
+# Stdlib-only HTTP client for self-managed KVM hardware. These bandit findings
+# are intentional design, not vulnerabilities:
+#   B101 assert_used     - a defensive assert guarding an unreachable retry branch
+#   B107 hardcoded_password - the documented PiKVM default credential ("admin")
+#   B110 try_except_pass - secret redaction must never raise
+#   B310 urllib urlopen  - the core REST/vision calls; scheme is http(s) from config
+exclude_dirs = ["tests"]
+skips = ["B101", "B107", "B110", "B310"]
