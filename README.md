@@ -14,9 +14,13 @@ Vision runs on Claude **or** any local OpenAI-compatible VLM (LM Studio, Ollama,
 vLLM, llama.cpp). Point it at a model on your own GPU and the screenshots never
 leave your network and cost nothing per frame.
 
-> **Status:** v0.1, beta. The API may shift before 1.0. Tested against GL-RM1PE;
-> stock PiKVM v3/v4 and BliKVM are expected to work but are currently untested —
-> see [Compatibility](#compatibility).
+> **Status:** v0.1.0a1 — **early alpha.** This code has **not been run against
+> real hardware** — not even the GL-RM1PE it targets. It is unit-tested only
+> (mocked HTTP and vision responses), so treat every feature as unverified,
+> expect bugs and breaking API changes before 1.0, and don't point it at a
+> machine you can't afford to have power-cycled unexpectedly. Hardware reports —
+> success *or* failure — are exactly what this release is asking for; see
+> [Compatibility](#compatibility).
 
 ---
 
@@ -41,13 +45,14 @@ default and need no change.
 ## Install
 
 ```bash
-pip install kvm-pilot                 # core, zero runtime dependencies
-pip install "kvm-pilot[totp]"         # + 2FA / TOTP support (pyotp)
-pip install "kvm-pilot[ws]"           # + WebSocket event streaming
+pip install --pre kvm-pilot           # core, zero runtime dependencies
+pip install --pre "kvm-pilot[totp]"   # + 2FA / TOTP support (pyotp)
+pip install --pre "kvm-pilot[ws]"     # + WebSocket event streaming
 ```
 
-The core has **no third-party runtime dependencies** — it is pure standard
-library. Extras are opt-in.
+`--pre` is required: `0.1.0a1` is an **alpha pre-release**, so a plain
+`pip install kvm-pilot` will not select it. The core has **no third-party
+runtime dependencies** — it is pure standard library. Extras are opt-in.
 
 ## Quickstart
 
@@ -132,14 +137,16 @@ the vision layer, `pikvm-lib` may be the simpler choice.
 
 | Device | Status |
 |--------|--------|
-| GL-RM1PE (Comet PoE) | Tested |
+| GL-RM1PE (Comet PoE) | Primary development target — **not yet hardware-tested** |
 | GL-RM1 (Comet) | Expected to work (same firmware family); untested |
 | PiKVM v3 / v4 | Expected to work (upstream API); untested |
 | BliKVM | Expected to work (PiKVM-compatible API); untested |
 
-The ATX power features require the optional ATX add-on board. Without it, ATX
-calls will return errors from the device. Reports of success or failure on
-untested hardware are welcome in the issue tracker.
+**Nothing in this table has been verified on real hardware yet** — the entire
+matrix is "expected to work" pending validation. The ATX power features also
+require the optional ATX add-on board; without it, ATX calls will return errors
+from the device. Reports of success or failure on *any* hardware are exactly
+what this alpha needs — please open an issue.
 
 ## License
 
