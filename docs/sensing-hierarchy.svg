@@ -1,0 +1,75 @@
+<svg viewBox="0 0 860 520" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="ttl dsc">
+  <title id="ttl">kvm-pilot sensing hierarchy — answer from the cheapest signal first</title>
+  <desc id="dsc">A three-tier efficiency ladder for sensing target state. Tier one, structured: poll a field or subscribe to an event — events, power and LED state, video signal and resolution, Redfish BootProgress enum, sensors and power and temperatures, SEL and lifecycle logs. Tier two, text: the serial or SOL console as a parseable stream — GRUB, dmesg, kernel panic, getty, installer — when the host redirects to serial. Tier three, pixels, the last resort: local signal, resolution and frame-diff, then OCR, then a vision model, escalating left to right. Colour encodes cost: green means no pixels, amber means cheap on-device pixels, red means a vision model. KVM-capture devices answer in amber and red; BMCs answer in green plus serial text.</desc>
+  <style>
+    text{font-family:var(--font-sans,ui-sans-serif,system-ui,sans-serif);}
+    .card{fill:#fff;stroke:#d3d1c7;stroke-width:1.5;}
+    .band{fill:#f1efe8;stroke:#d3d1c7;stroke-width:1;}
+    .green{fill:#eaf3de;stroke:#3b6d11;stroke-width:1.25;}
+    .amber{fill:#faeeda;stroke:#854f0b;stroke-width:1.25;}
+    .red{fill:#fcebeb;stroke:#a32d2d;stroke-width:1.5;}
+    .h{fill:#2c2c2a;font-weight:500;font-size:18px;}
+    .sub{fill:#5f5e5a;font-weight:400;font-size:12px;}
+    .ts{fill:#5f5e5a;font-weight:400;font-size:11.5px;}
+    .lab{fill:#888780;font-weight:500;font-size:11px;}
+    .tg{fill:#27500a;font-weight:500;font-size:11.5px;}
+    .ta{fill:#633806;font-weight:500;font-size:11.5px;}
+    .tr{fill:#791f1f;font-weight:500;font-size:11.5px;}
+    .ttl{font-weight:500;font-size:13px;}
+    .cn{stroke:#888780;}
+    .mkn{fill:#888780;}
+    @media (prefers-color-scheme:dark){
+      .card{fill:#2a2723;stroke:#4a4641;}
+      .band{fill:#211f1b;stroke:#4a4641;}
+      .green{fill:#27500a;stroke:#97c459;}
+      .amber{fill:#633806;stroke:#ef9f27;}
+      .red{fill:#791f1f;stroke:#f09595;}
+      .h{fill:#f1efe8;} .sub{fill:#b4b2a9;} .ts{fill:#b4b2a9;} .lab{fill:#908d85;}
+      .tg{fill:#c0dd97;} .ta{fill:#fac775;} .tr{fill:#f7c1c1;} .cn{stroke:#b4b2a9;} .mkn{fill:#b4b2a9;}
+    }
+  </style>
+
+  <text x="30" y="34" class="h">kvm-pilot — sensing hierarchy</text>
+  <text x="30" y="54" class="sub">Answer from the cheapest signal the device exposes. Vision is the residual, not the default.</text>
+
+  <defs>
+    <marker id="a" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path class="mkn" d="M0,0 L6,3 L0,6 Z"/></marker>
+  </defs>
+
+  <!-- escalation spine -->
+  <line x1="48" y1="92" x2="48" y2="452" class="cn" stroke-width="1.5" marker-end="url(#a)"/>
+  <text transform="rotate(-90 40 272)" x="40" y="272" class="lab" text-anchor="middle">escalate only when the tier above can't answer</text>
+
+  <!-- Tier 1: structured -->
+  <rect class="card" x="70" y="86" width="760" height="150" rx="6"/>
+  <text x="86" y="110" class="ttl tg">1 · Structured — poll a field or subscribe to an event</text>
+  <rect class="green" x="86" y="124" width="233" height="34" rx="4"/><text x="202" y="145" class="tg" text-anchor="middle">events — push</text>
+  <rect class="green" x="333" y="124" width="233" height="34" rx="4"/><text x="449" y="145" class="tg" text-anchor="middle">power &amp; LED state</text>
+  <rect class="green" x="580" y="124" width="233" height="34" rx="4"/><text x="696" y="145" class="tg" text-anchor="middle">video signal + resolution</text>
+  <rect class="green" x="86" y="168" width="233" height="34" rx="4"/><text x="202" y="189" class="tg" text-anchor="middle">BootProgress enum</text>
+  <rect class="green" x="333" y="168" width="233" height="34" rx="4"/><text x="449" y="189" class="tg" text-anchor="middle">sensors · power · temps</text>
+  <rect class="green" x="580" y="168" width="233" height="34" rx="4"/><text x="696" y="189" class="tg" text-anchor="middle">SEL &amp; lifecycle logs</text>
+  <text x="86" y="222" class="ts">ms-latency JSON or a push subscription — authoritative, no inference, fleet-cheap.</text>
+
+  <!-- Tier 2: text -->
+  <rect class="card" x="70" y="248" width="760" height="80" rx="6"/>
+  <text x="86" y="272" class="ttl tg">2 · Text — when the host redirects to serial (SOL)</text>
+  <rect class="green" x="86" y="284" width="233" height="34" rx="4"/><text x="202" y="305" class="tg" text-anchor="middle">serial / SOL console</text>
+  <text x="333" y="298" class="ts">GRUB · dmesg · kernel panic · getty · installer</text>
+  <text x="333" y="316" class="ts">parse a text stream with regex / expect — no OCR, no model.</text>
+
+  <!-- Tier 3: pixels -->
+  <rect class="card" x="70" y="340" width="760" height="120" rx="6"/>
+  <text x="86" y="364" class="ttl tr">3 · Pixels — look at the screen (last resort)</text>
+  <rect class="amber" x="86" y="378" width="220" height="36" rx="4"/><text x="196" y="400" class="ta" text-anchor="middle">signal · res · frame-diff</text>
+  <line x1="310" y1="396" x2="334" y2="396" class="cn" stroke-width="1.5" marker-end="url(#a)"/>
+  <rect class="amber" x="338" y="378" width="150" height="36" rx="4"/><text x="413" y="400" class="ta" text-anchor="middle">OCR — Tesseract</text>
+  <line x1="492" y1="396" x2="516" y2="396" class="cn" stroke-width="1.5" marker-end="url(#a)"/>
+  <rect class="red" x="520" y="378" width="180" height="36" rx="4"/><text x="610" y="400" class="tr" text-anchor="middle">vision VLM</text>
+  <text x="86" y="438" class="ts">Escalate left → right. OCR before a model; the VLM only for graphical or ambiguous screens.</text>
+
+  <!-- legend + device note -->
+  <rect class="band" x="70" y="472" width="760" height="38" rx="8"/>
+  <text x="86" y="489" class="lab">colour = cost · green = no pixels (structured + serial text) · amber = cheap on-device pixels · red = vision model</text>
+  <text x="86" y="504" class="ts">KVM-capture devices (PiKVM · GLKVM · JetKVM) answer mostly in tier 3; BMCs (Redfish · IPMI) answer in tier 1 + serial text.</text>
+</svg>

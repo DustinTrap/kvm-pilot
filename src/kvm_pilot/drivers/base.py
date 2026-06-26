@@ -28,6 +28,14 @@ class Capability(StrEnum):
     VIRTUAL_MEDIA = "virtual_media"
     GPIO = "gpio"
     EVENTS = "events"
+    # Sensing capabilities — cheaper-than-vision signals. A driver that has any
+    # of these lets the analyzer answer "what phase / is it alive / did it crash"
+    # without a VLM. See docs/sensing-hierarchy.svg.
+    LOGS = "logs"
+    BOOT_PROGRESS = "boot_progress"
+    SENSORS = "sensors"
+    SERIAL_CONSOLE = "serial_console"
+    WATCHDOG = "watchdog"
 
 
 @runtime_checkable
@@ -91,6 +99,64 @@ class Events(Protocol):
     def watch_events(self) -> object: ...
 
 
+# -- sensing protocols -----------------------------------------------------
+#
+# These are the structured / text signals that let a driver report state more
+# cheaply than classifying a screenshot. The PiKVM client implements ``Logs``
+# today (``/api/log``); the rest are the seam for the Redfish and IPMI drivers
+# (``BootProgress`` from ComputerSystem, ``Sensors``/``SerialConsole`` from the
+# BMC, ``Watchdog`` from IPMI). A driver implements only what its hardware has;
+# ``ScreenAnalyzer``/``PhaseResolver`` prefers them over the vision backend.
+
+
+@runtime_checkable
+class Logs(Protocol):
+    """Read device or host event logs (kvmd journal, Redfish SEL / lifecycle
+    log, IPMI SEL)."""
+
+    def get_logs(self, seek: int = 0, follow: bool = False) -> str: ...
+
+
+@runtime_checkable
+class BootProgress(Protocol):
+    """Report the host POST / boot phase as a structured value rather than a
+    screenshot (e.g. Redfish ``ComputerSystem.BootProgress.LastState``).
+
+    ``get_boot_progress`` returns a driver-agnostic phase token (the same
+    vocabulary the vision backend emits) or ``None`` when the device cannot
+    report it.
+    """
+
+    def get_boot_progress(self) -> str | None: ...
+
+
+@runtime_checkable
+class Sensors(Protocol):
+    """Read structured environmental / power telemetry — temperatures, fan
+    RPM, voltages, watts (Redfish Sensors/Power, IPMI SDR/DCMI)."""
+
+    def read_sensors(self) -> dict: ...
+
+
+@runtime_checkable
+class SerialConsole(Protocol):
+    """Read and write the host serial console as text (Redfish SOL, IPMI SOL,
+    or a wired serial line) — GRUB, dmesg, kernel panics, getty."""
+
+    def serial_read(self, timeout: float = 1.0) -> str: ...
+    def serial_write(self, data: str) -> None: ...
+
+
+@runtime_checkable
+class Watchdog(Protocol):
+    """Arm / pet / inspect a hardware watchdog timer (IPMI) — an OS-liveness
+    primitive whose expiry pinpoints a hang."""
+
+    def watchdog_status(self) -> dict: ...
+    def watchdog_arm(self, timeout_s: int) -> None: ...
+    def watchdog_pet(self) -> None: ...
+
+
 # Maps each capability to the protocol that defines it, so support can be
 # detected structurally rather than declared by hand.
 CAPABILITY_PROTOCOLS: dict[Capability, type] = {
@@ -101,6 +167,11 @@ CAPABILITY_PROTOCOLS: dict[Capability, type] = {
     Capability.VIRTUAL_MEDIA: VirtualMedia,
     Capability.GPIO: GPIO,
     Capability.EVENTS: Events,
+    Capability.LOGS: Logs,
+    Capability.BOOT_PROGRESS: BootProgress,
+    Capability.SENSORS: Sensors,
+    Capability.SERIAL_CONSOLE: SerialConsole,
+    Capability.WATCHDOG: Watchdog,
 }
 
 
@@ -143,6 +214,11 @@ __all__ = [
     "VirtualMedia",
     "GPIO",
     "Events",
+    "Logs",
+    "BootProgress",
+    "Sensors",
+    "SerialConsole",
+    "Watchdog",
     "KVMDriver",
     "CapabilityMixin",
     "CAPABILITY_PROTOCOLS",
