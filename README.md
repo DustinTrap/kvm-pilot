@@ -45,14 +45,16 @@ default and need no change.
 ## Install
 
 ```bash
-pip install --pre kvm-pilot           # core, zero runtime dependencies
-pip install --pre "kvm-pilot[totp]"   # + 2FA / TOTP support (pyotp)
-pip install --pre "kvm-pilot[ws]"     # + WebSocket event streaming
+pip install kvm-pilot==0.1.0a1                 # core, zero runtime dependencies
+pip install "kvm-pilot[totp]==0.1.0a1"         # + 2FA / TOTP support (pyotp)
+pip install "kvm-pilot[ws]==0.1.0a1"           # + WebSocket event streaming
 ```
 
-`--pre` is required: `0.1.0a1` is an **alpha pre-release**, so a plain
-`pip install kvm-pilot` will not select it. The core has **no third-party
-runtime dependencies** — it is pure standard library. Extras are opt-in.
+This release is **yanked on PyPI on purpose** — a deliberate "don't install me
+unless you mean it" marker for untested alpha code. A plain
+`pip install kvm-pilot` will therefore install **nothing**; opt in by pinning
+the exact version as shown above. The core has **no third-party runtime
+dependencies** — it is pure standard library. Extras are opt-in.
 
 ## Quickstart
 
