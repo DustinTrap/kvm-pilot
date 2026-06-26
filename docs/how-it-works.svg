@@ -1,0 +1,98 @@
+<svg viewBox="0 0 860 400" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="ttl dsc">
+  <title id="ttl">How kvm-pilot works — the vision control loop</title>
+  <desc id="dsc">A closed loop. A headless target machine outputs video to a KVM device. kvm-pilot pulls a screenshot from the KVM and sends the image to a vision backend — Claude in the cloud or a local VLM — which returns a boot phase. kvm-pilot then sends keyboard or power actions back through the KVM to the target. The perception path runs left to right; the action path runs right to left. No agent runs on the target.</desc>
+  <style>
+    text{font-family:var(--font-sans,ui-sans-serif,system-ui,sans-serif);}
+    .card{fill:#fff;stroke:#d3d1c7;stroke-width:1.5;}
+    .band{fill:#f1efe8;stroke:#d3d1c7;stroke-width:1;}
+    .purple{fill:#eeedfe;stroke:#534ab7;stroke-width:1.75;}
+    .green{fill:#eaf3de;stroke:#3b6d11;stroke-width:1;}
+    .h{fill:#2c2c2a;font-weight:500;font-size:18px;}
+    .sub{fill:#5f5e5a;font-weight:400;font-size:12px;}
+    .t{fill:#2c2c2a;font-weight:500;font-size:13px;}
+    .ts{fill:#5f5e5a;font-weight:400;font-size:11.5px;}
+    .lab{fill:#888780;font-weight:500;font-size:11px;}
+    .tp{fill:#3c3489;font-weight:500;font-size:13px;}
+    .tps{fill:#534ab7;font-weight:400;font-size:11.5px;}
+    .mps{font-family:var(--font-mono,ui-monospace,monospace);fill:#534ab7;font-weight:400;font-size:11.5px;}
+    .actp{fill:#534ab7;font-weight:500;font-size:11px;}
+    .tg{fill:#27500a;font-weight:500;font-size:11px;}
+    .dotp{fill:#534ab7;}
+    .dotg{fill:#3b6d11;}
+    .cn{stroke:#888780;}
+    .cp{stroke:#534ab7;}
+    .mkn{fill:#888780;}
+    .mkp{fill:#534ab7;}
+    @media (prefers-color-scheme:dark){
+      .card{fill:#2a2723;stroke:#4a4641;}
+      .band{fill:#211f1b;stroke:#4a4641;}
+      .purple{fill:#3c3489;stroke:#afa9ec;}
+      .green{fill:#27500a;stroke:#97c459;}
+      .h{fill:#f1efe8;} .sub{fill:#b4b2a9;} .t{fill:#f1efe8;} .ts{fill:#b4b2a9;} .lab{fill:#908d85;}
+      .tp{fill:#cecbf6;} .tps{fill:#afa9ec;} .mps{fill:#afa9ec;} .actp{fill:#afa9ec;} .tg{fill:#c0dd97;}
+      .dotp{fill:#afa9ec;} .dotg{fill:#97c459;} .cp{stroke:#afa9ec;} .mkp{fill:#afa9ec;}
+    }
+  </style>
+
+  <text x="30" y="34" class="h">kvm-pilot — how it works</text>
+  <text x="30" y="54" class="sub">See the screen with a vision model, decide, then act through the KVM — nothing runs on the target.</text>
+
+  <defs>
+    <marker id="ms" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path class="mkn" d="M0,0 L6,3 L0,6 Z"/></marker>
+    <marker id="ma" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path class="mkp" d="M0,0 L6,3 L0,6 Z"/></marker>
+  </defs>
+
+  <text x="30" y="100" class="lab">1 · see →</text>
+  <text x="30" y="266" class="lab">2 · act ←</text>
+
+  <!-- target -->
+  <rect class="card" x="30" y="124" width="175" height="108" rx="4"/>
+  <text x="46" y="152" class="t">Headless target</text>
+  <text x="46" y="176" class="ts">POST · BIOS · GRUB · OS</text>
+  <rect class="green" x="46" y="192" width="120" height="22" rx="4"/>
+  <text x="106" y="207" class="tg" text-anchor="middle">no agent · no SSH</text>
+
+  <!-- KVM -->
+  <rect class="card" x="225" y="124" width="175" height="108" rx="4"/>
+  <text x="241" y="152" class="t">KVM device</text>
+  <text x="241" y="176" class="ts">PiKVM · GL-RM1PE</text>
+  <text x="241" y="200" class="ts">HDMI · USB-HID · ATX</text>
+
+  <!-- pilot -->
+  <rect class="purple" x="420" y="124" width="180" height="108" rx="4"/>
+  <text x="436" y="152" class="tp">kvm-pilot</text>
+  <text x="436" y="176" class="tps">REST client + safety</text>
+  <text x="436" y="200" class="mps">see → decide → act</text>
+
+  <!-- vision -->
+  <rect class="purple" x="620" y="124" width="210" height="108" rx="4"/>
+  <text x="636" y="150" class="tp">Vision backend</text>
+  <circle class="dotp" cx="641" cy="170" r="3.5"/>
+  <text x="652" y="174" class="tps">Claude — cloud</text>
+  <circle class="dotg" cx="641" cy="190" r="3.5"/>
+  <text x="652" y="194" class="tps">Local VLM</text>
+  <text x="636" y="216" class="tps">LM Studio · Ollama · vLLM</text>
+
+  <!-- SEE arrows -->
+  <text x="215" y="116" class="ts" text-anchor="middle">video</text>
+  <line x1="207" y1="160" x2="223" y2="160" class="cn" stroke-width="1.5" marker-end="url(#ms)"/>
+  <text x="410" y="116" class="ts" text-anchor="middle">snapshot</text>
+  <line x1="402" y1="160" x2="418" y2="160" class="cn" stroke-width="1.5" marker-end="url(#ms)"/>
+  <text x="610" y="116" class="ts" text-anchor="middle">image</text>
+  <line x1="602" y1="160" x2="618" y2="160" class="cn" stroke-width="1.5" marker-end="url(#ms)"/>
+
+  <!-- ACT arrows -->
+  <line x1="618" y1="200" x2="602" y2="200" class="cp" stroke-width="1.5" marker-end="url(#ma)"/>
+  <text x="610" y="252" class="actp" text-anchor="middle">phase</text>
+  <line x1="418" y1="200" x2="402" y2="200" class="cp" stroke-width="1.5" marker-end="url(#ma)"/>
+  <text x="410" y="252" class="actp" text-anchor="middle">press_key / power</text>
+  <line x1="223" y1="200" x2="207" y2="200" class="cp" stroke-width="1.5" marker-end="url(#ma)"/>
+  <text x="215" y="252" class="actp" text-anchor="middle">USB-HID · ATX</text>
+
+  <!-- summary band -->
+  <rect class="band" x="30" y="288" width="800" height="96" rx="8"/>
+  <text x="430" y="312" class="t" text-anchor="middle">wait_for_state(phase) blocks until the screen matches — no agent on the target.</text>
+  <text x="430" y="333" class="ts" text-anchor="middle">Pixel-level classification drives POST, firmware, the bootloader and OS install alike.</text>
+  <text x="430" y="352" class="ts" text-anchor="middle">Choose the local backend and screenshots never leave your network.</text>
+  <text x="430" y="373" class="lab" text-anchor="middle">Purple = kvm-pilot and the vision loop · grey = the hardware it drives.</text>
+</svg>

@@ -19,6 +19,8 @@ SDK.
 | `classify_screen` | read-only | boot/run phase via the vision backend (needs `ANTHROPIC_API_KEY`) |
 | `power` | **destructive** | `on`/`off`/`off-hard`/`reset`; **refuses unless `confirm=true`** |
 
+![The kvm-pilot MCP server exposes four read-only tools — info, power_state, snapshot, classify_screen — built with a deny-all confirm callback, plus one gated power tool that refuses unless the agent passes confirm=true and then runs through the same safety gate.](../docs/mcp-tools.svg)
+
 The read-only tools build the client with a deny-all confirm callback; the
 `power` tool refuses unless an agent explicitly passes `confirm=true`. A model
 can never power-cycle a machine implicitly.

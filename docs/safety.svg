@@ -1,0 +1,105 @@
+<svg viewBox="0 0 860 470" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="ttl dsc">
+  <title id="ttl">Safety gate for destructive operations</title>
+  <desc id="dsc">A decision flow. A caller — CLI, script, or MCP server — issues an operation. If the op is not in DESTRUCTIVE_OPS it executes directly. If it is destructive, dry-run short-circuits to log-only; otherwise a confirm callback can veto it; only an allowed call is sent to the device. A side panel lists the explicit DESTRUCTIVE_OPS set and the default confirm behavior per consumer. A vision classification never enters this path on its own.</desc>
+  <style>
+    text{font-family:var(--font-sans,ui-sans-serif,system-ui,sans-serif);}
+    .band{fill:#f1efe8;stroke:#d3d1c7;stroke-width:1;}
+    .card{fill:#fff;stroke:#b4b2a9;stroke-width:1.5;}
+    .dia{fill:#f1efe8;stroke:#b4b2a9;stroke-width:1.5;}
+    .skip{fill:#fff;stroke:#b4b2a9;stroke-width:1.5;stroke-dasharray:5,3;}
+    .green{fill:#eaf3de;stroke:#3b6d11;stroke-width:1.5;}
+    .greenb{fill:#eaf3de;stroke:#3b6d11;stroke-width:1.75;}
+    .red{fill:#fcebeb;stroke:#a32d2d;stroke-width:1.5;}
+    .h{fill:#2c2c2a;font-weight:500;font-size:18px;}
+    .sub{fill:#5f5e5a;font-weight:400;font-size:12px;}
+    .t{fill:#2c2c2a;font-weight:500;font-size:12.5px;}
+    .ts{fill:#5f5e5a;font-weight:400;font-size:11px;}
+    .diat{fill:#2c2c2a;font-family:var(--font-mono,ui-monospace,monospace);font-weight:500;font-size:11px;}
+    .mono{fill:#5f5e5a;font-family:var(--font-mono,ui-monospace,monospace);font-weight:400;font-size:11px;}
+    .edge{fill:#5f5e5a;font-weight:500;font-size:11px;}
+    .lab{fill:#888780;font-weight:500;font-size:11px;}
+    .okt{fill:#27500a;font-weight:500;font-size:12px;}
+    .vetot{fill:#791f1f;font-weight:500;font-size:12px;}
+    .cn{stroke:#888780;}
+    .mkn{fill:#888780;}
+    .div{stroke:#d3d1c7;}
+    @media (prefers-color-scheme:dark){
+      .band{fill:#211f1b;stroke:#4a4641;}
+      .card{fill:#2a2723;stroke:#5f5e5a;}
+      .dia{fill:#2a2723;stroke:#5f5e5a;}
+      .skip{fill:#2a2723;stroke:#5f5e5a;}
+      .green,.greenb{fill:#27500a;stroke:#97c459;}
+      .red{fill:#791f1f;stroke:#f09595;}
+      .h{fill:#f1efe8;} .sub{fill:#b4b2a9;} .t{fill:#f1efe8;} .ts{fill:#b4b2a9;} .lab{fill:#908d85;}
+      .diat{fill:#f1efe8;} .mono{fill:#b4b2a9;} .edge{fill:#b4b2a9;}
+      .okt{fill:#c0dd97;} .vetot{fill:#f7c1c1;} .div{stroke:#4a4641;}
+    }
+  </style>
+
+  <text x="30" y="34" class="h">kvm-pilot — safety gate</text>
+  <text x="30" y="54" class="sub">Power, reset, virtual-media, GPIO and Redfish resets are gated. A vision result never enters this path on its own.</text>
+
+  <defs>
+    <marker id="a" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path class="mkn" d="M0,0 L6,3 L0,6 Z"/></marker>
+  </defs>
+
+  <!-- caller -->
+  <rect class="card" x="60" y="74" width="200" height="46" rx="4"/>
+  <text x="160" y="94" class="t" text-anchor="middle">Caller</text>
+  <text x="160" y="111" class="ts" text-anchor="middle">CLI · script · MCP server</text>
+  <line x1="160" y1="120" x2="160" y2="124" class="cn" stroke-width="1.5" marker-end="url(#a)"/>
+
+  <!-- D1 -->
+  <polygon class="dia" points="160,124 256,158 160,192 64,158"/>
+  <text x="160" y="154" class="diat" text-anchor="middle">op in</text>
+  <text x="160" y="168" class="diat" text-anchor="middle">DESTRUCTIVE_OPS?</text>
+  <line x1="256" y1="158" x2="330" y2="158" class="cn" stroke-width="1.5" marker-end="url(#a)"/>
+  <text x="293" y="150" class="edge" text-anchor="middle">no</text>
+  <rect class="green" x="330" y="136" width="210" height="44" rx="4"/>
+  <text x="435" y="156" class="okt" text-anchor="middle">execute — not gated</text>
+  <text x="435" y="171" class="ts" text-anchor="middle">info · snapshot · classify · key</text>
+  <line x1="160" y1="192" x2="160" y2="222" class="cn" stroke-width="1.5" marker-end="url(#a)"/>
+  <text x="171" y="211" class="edge">yes</text>
+
+  <!-- D2 -->
+  <polygon class="dia" points="160,222 256,256 160,290 64,256"/>
+  <text x="160" y="260" class="diat" text-anchor="middle">dry_run?</text>
+  <line x1="256" y1="256" x2="330" y2="256" class="cn" stroke-width="1.5" marker-end="url(#a)"/>
+  <text x="293" y="248" class="edge" text-anchor="middle">yes</text>
+  <rect class="skip" x="330" y="234" width="210" height="44" rx="4"/>
+  <text x="435" y="254" class="t" text-anchor="middle">log intended call, skip</text>
+  <text x="435" y="269" class="ts" text-anchor="middle">nothing sent to the device</text>
+  <line x1="160" y1="290" x2="160" y2="320" class="cn" stroke-width="1.5" marker-end="url(#a)"/>
+  <text x="171" y="309" class="edge">no</text>
+
+  <!-- D3 -->
+  <polygon class="dia" points="160,320 256,354 160,388 64,354"/>
+  <text x="160" y="350" class="diat" text-anchor="middle">confirm(op)</text>
+  <text x="160" y="364" class="diat" text-anchor="middle">allows?</text>
+  <line x1="256" y1="354" x2="330" y2="354" class="cn" stroke-width="1.5" marker-end="url(#a)"/>
+  <text x="293" y="346" class="edge" text-anchor="middle">no</text>
+  <rect class="red" x="330" y="332" width="210" height="44" rx="4"/>
+  <text x="435" y="352" class="vetot" text-anchor="middle">vetoed — not sent</text>
+  <text x="435" y="367" class="ts" text-anchor="middle">callback returned False</text>
+  <line x1="160" y1="388" x2="160" y2="410" class="cn" stroke-width="1.5" marker-end="url(#a)"/>
+  <text x="171" y="404" class="edge">yes</text>
+  <rect class="greenb" x="60" y="410" width="200" height="42" rx="4"/>
+  <text x="160" y="435" class="okt" text-anchor="middle">execute on device</text>
+
+  <!-- side panel -->
+  <rect class="band" x="582" y="120" width="248" height="300" rx="8"/>
+  <text x="600" y="144" class="lab">DESTRUCTIVE_OPS · safety.py</text>
+  <text x="600" y="167" class="mono">power.on · power.off</text>
+  <text x="600" y="186" class="mono">power.off_hard · power.reset</text>
+  <text x="600" y="205" class="mono">media.connect · media.disconnect</text>
+  <text x="600" y="224" class="mono">gpio.switch · redfish.reset</text>
+  <line x1="600" y1="242" x2="812" y2="242" class="div" stroke-width="1"/>
+  <text x="600" y="265" class="lab">Default confirm behavior</text>
+  <text x="600" y="288" class="ts">dry_run=True → always log-only</text>
+  <text x="600" y="310" class="ts">library default → allow (scripts run)</text>
+  <text x="600" y="332" class="ts">CLI → interactive y/N unless --yes</text>
+  <text x="600" y="354" class="ts">MCP power tool → needs confirm=true</text>
+  <line x1="600" y1="372" x2="812" y2="372" class="div" stroke-width="1"/>
+  <text x="600" y="394" class="lab">green = runs · red = blocked</text>
+  <text x="600" y="410" class="ts">The set is explicit and auditable.</text>
+</svg>
