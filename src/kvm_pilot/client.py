@@ -145,6 +145,25 @@ class KVMClient(CapabilityMixin):
     def get_streamer_state(self) -> dict:
         return self._http.get("/api/streamer")
 
+    def has_video_signal(self) -> bool:
+        """True if the capture pipeline reports a live video source.
+
+        Parses ``/api/streamer`` defensively: it returns ``False`` only when the
+        device *positively* reports the source offline, so a missing or unknown
+        field never suppresses a real frame. Lets the vision layer skip a model
+        call when there is simply nothing on screen (powered off, between mode
+        sets, sleeping).
+        """
+        try:
+            state = self.get_streamer_state()
+        except Exception:  # noqa: BLE001 - a liveness probe must never raise
+            return True
+        source = state.get("source") or {}
+        if not source and isinstance(state.get("streamer"), dict):
+            source = state["streamer"].get("source") or {}
+        online = source.get("online") if isinstance(source, dict) else None
+        return True if online is None else bool(online)
+
     # -- HID: keyboard ---------------------------------------------------
 
     def get_hid_state(self) -> dict:
