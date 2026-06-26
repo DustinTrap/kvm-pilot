@@ -111,6 +111,26 @@ actions wired between them:
 
 ![Timeline of boot phases — POST, bios_menu, grub_menu, installer_progress, installer_complete, login_prompt — with the unattended-install example wiring mount_iso and hard_cycle at the start, wait_for_state on grub_menu then Enter, and wait_for_state on installer_complete; any phase can branch to crash_screen.](docs/boot-phases.svg)
 
+## Sensing model
+
+Vision is the most expensive way to read a screen — a model call per frame — and
+most of what it infers (power state, boot phase, liveness, a crash) is also
+available as a **field, an event, or a line of text**. The direction of
+`kvm-pilot` is to treat classification as a hierarchy: answer from the cheapest
+signal the device exposes, and fall through to OCR and finally a vision model
+only when nothing cheaper can.
+
+![Sensing hierarchy: structured signals (events, power and LED state, video signal and resolution, Redfish BootProgress, sensors, logs) and serial-console text are preferred; local frame-diff, OCR, and a vision model are the escalating last resort. Colour encodes cost — vision is the only expensive tier.](docs/sensing-hierarchy.svg)
+
+The PiKVM/GLKVM client already exposes the cheap end — ATX and HID LEDs,
+video-signal and resolution, on-device OCR (`?ocr=true`), logs, Prometheus
+metrics, and a WebSocket event stream. The [capability protocols](docs/architecture.md)
+add `Logs`, `BootProgress`, `Sensors`, `SerialConsole`, and `Watchdog` as the
+seam for BMC drivers (Redfish/IPMI), where the boot phase is a structured enum
+(`BootProgress.LastState`) and the console is a serial text stream rather than
+pixels. Different device classes are nearly complementary: capture devices are
+strong on pixels, BMCs on structured state and serial text.
+
 ## Safety model
 
 Power-offs, hard resets, virtual-media connect/disconnect, GPIO, and Redfish

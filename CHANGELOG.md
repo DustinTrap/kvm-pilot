@@ -4,6 +4,19 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Sensing model.** A `docs/sensing-hierarchy.svg` diagram and a "Sensing
+  model" section documenting why structured/text signals are preferred over
+  vision (answer from the cheapest signal the device exposes; escalate to OCR
+  and a vision model only as a last resort).
+- Forward-looking capability protocols in `drivers/base.py`: `Logs`,
+  `BootProgress`, `Sensors`, `SerialConsole`, `Watchdog`. The PiKVM client now
+  reports the `Logs` capability (`/api/log`); the rest are the seam for the
+  Redfish and IPMI drivers, where boot phase is a structured enum and the
+  console is a serial text stream.
+
 ## [0.1.0a1] — 2026-06-26
 
 First public **alpha** pre-release, published to solicit hardware testing and
