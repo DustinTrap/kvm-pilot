@@ -91,15 +91,19 @@ kvm.press_key("Enter")
 
 ```bash
 kvm-pilot info     --host 192.168.8.1 --user admin --passwd secret
+kvm-pilot capabilities --profile homelab                 # what this driver supports
 kvm-pilot snapshot screen.jpg --profile homelab
-kvm-pilot power-cycle --profile homelab --dry-run        # log, don't send
+kvm-pilot --timeout 60 power-cycle --profile homelab --dry-run   # log, don't send
+kvm-pilot events --profile homelab --count 5             # stream events ('ws' extra)
 kvm-pilot watch grub_menu --profile homelab \
     --backend local --vision-url http://127.0.0.1:1234/v1 --vision-model qwen2.5-vl-7b
 ```
 
 The CLI prompts for confirmation before any destructive action. Use `--yes` to
 skip prompts in automation, or `--dry-run` to log intended actions without
-sending them.
+sending them. `--timeout` (HTTP per-request timeout) is a global flag and goes
+*before* the subcommand; `watch` keeps its own `--timeout` for the vision wait
+deadline.
 
 ## Boot-phase detection
 
@@ -197,8 +201,27 @@ what this alpha needs — please open an issue.
 `kvm-pilot` is moving to a modular, **driver-plugin** architecture so support can
 expand to many KVM/BMC devices (PiKVM family, Redfish BMCs, JetKVM, …). Each
 device implements only the capability protocols its hardware supports; the CLI,
-safety layer, and vision subsystem stay device-agnostic. See
+safety layer, and vision subsystem stay device-agnostic. A `make_driver(kind)`
+registry (mirroring `make_backend`) builds drivers by name, and a hardware-free
+`FakeDriver` lets you exercise the whole loop — capabilities, safety gating, the
+analyzer — with no device (`kvm-pilot capabilities --driver fake`). See
 [docs/architecture.md](docs/architecture.md) for the design and diagram.
+
+A **`RedfishDriver`** (`make_driver("redfish")`) speaks the DMTF Redfish API to
+server BMCs — Dell iDRAC, HPE iLO, Supermicro, Lenovo XCC, OpenBMC — in one
+stdlib-only client. It shows why capabilities are segmented: a BMC's set is
+*complementary* to a PiKVM's (strong on structured state — power, boot phase,
+sensors, logs, virtual media — with no keyboard/mouse/screenshot), and the driver
+stays portable by following Redfish hypermedia rather than hard-coding vendor ids:
+
+```python
+from kvm_pilot.drivers import make_driver
+
+bmc = make_driver("redfish", host="idrac.lan", user="root", passwd="…")
+bmc.get_boot_progress()        # 'os_running'  — structured, no screenshot
+bmc.read_sensors()["temperatures"]
+bmc.power_off(wait=True)       # mapped to the target's actual ResetType, gated
+```
 
 ## License
 

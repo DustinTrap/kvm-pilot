@@ -79,12 +79,6 @@ class ScreenAnalyzer:
     def backend(self) -> VisionBackend:
         return self._backend
 
-    def __enter__(self) -> ScreenAnalyzer:
-        return self
-
-    def __exit__(self, *_) -> None:
-        pass
-
     # -- single shot -----------------------------------------------------
 
     def classify(self, hint: str = "", image_b64: str | None = None) -> ScreenState:
@@ -124,8 +118,6 @@ class ScreenAnalyzer:
         state = self._backend.classify(image_b64, hint=hint)
         self.vlm_calls += 1
         return self._finalize(state)
-
-    detect_state = classify  # ergonomic alias
 
     # -- gates -----------------------------------------------------------
 

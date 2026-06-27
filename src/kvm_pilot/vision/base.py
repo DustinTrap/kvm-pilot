@@ -14,8 +14,13 @@ OpenAI-compatible backend uses whatever model name you give it.
 
 from __future__ import annotations
 
+import json
 import time
+import urllib.error
+import urllib.request
 from abc import ABC, abstractmethod
+
+from ..errors import VisionError
 
 # --- recognised boot/run phases -------------------------------------------
 
@@ -28,6 +33,11 @@ PHASE_GRUB_MENU = "grub_menu"
 PHASE_BOOTING = "booting"
 PHASE_LOGIN_PROMPT = "login_prompt"
 PHASE_DESKTOP = "desktop"
+# The OS has handed off and is running, but the specific on-screen state
+# (a login prompt vs. a desktop vs. a headless console) is not distinguishable
+# from the signal at hand. Emitted by the vision backend and mapped to from a
+# BMC's structured BootProgress=OSRunning.
+PHASE_OS_RUNNING = "os_running"
 PHASE_INSTALLER_WELCOME = "installer_welcome"
 PHASE_INSTALLER_PARTITIONING = "installer_partitioning"
 PHASE_INSTALLER_PROGRESS = "installer_progress"
@@ -45,6 +55,7 @@ ALL_PHASES: list[str] = [
     PHASE_BOOTING,
     PHASE_LOGIN_PROMPT,
     PHASE_DESKTOP,
+    PHASE_OS_RUNNING,
     PHASE_INSTALLER_WELCOME,
     PHASE_INSTALLER_PARTITIONING,
     PHASE_INSTALLER_PROGRESS,
@@ -53,7 +64,10 @@ ALL_PHASES: list[str] = [
     PHASE_UNKNOWN,
 ]
 
-SYSTEM_PROMPT = """\
+# ``ALL_PHASES`` is the single source of truth for the token vocabulary; the
+# prompt interpolates it so the list can never drift from what the parser
+# validates against. (Braces in the example are doubled to survive the f-string.)
+SYSTEM_PROMPT = f"""\
 You are a remote KVM screen classifier. You receive a JPEG screenshot from a
 KVM console and classify the current boot/run phase of the remote machine.
 
@@ -64,12 +78,10 @@ Respond ONLY with a single valid JSON object, no other text, with exactly:
   raw_text     (string)  any legible on-screen text, verbatim, or ""
 
 Known phase tokens:
-  no_signal, power_off, post_screen, bios_menu, uefi_shell, grub_menu,
-  booting, login_prompt, desktop, installer_welcome, installer_partitioning,
-  installer_progress, installer_complete, crash_screen, unknown
+  {", ".join(ALL_PHASES)}
 
 Example:
-{"phase":"grub_menu","description":"A GRUB boot menu lists several kernels.","confidence":0.95,"raw_text":"GNU GRUB version 2.06"}
+{{"phase":"grub_menu","description":"A GRUB boot menu lists several kernels.","confidence":0.95,"raw_text":"GNU GRUB version 2.06"}}
 """
 
 
@@ -79,6 +91,33 @@ def build_user_text(hint: str) -> str:
         base += f"\nHint: {hint}"
     base += "\nReturn only the JSON object described in the system prompt."
     return base
+
+
+def request_json(
+    method: str,
+    url: str,
+    *,
+    headers: dict,
+    timeout: float,
+    payload: dict | None = None,
+    label: str = "vision backend",
+) -> dict:
+    """Send a JSON request over stdlib urllib, mapping failures to VisionError.
+
+    Shared by the vision backends so the ``urlopen`` + HTTP/URL error-mapping
+    boilerplate lives in exactly one place. ``label`` names the backend in the
+    error message (e.g. ``"Anthropic API"`` / ``"Local VLM"``).
+    """
+    data = json.dumps(payload).encode() if payload is not None else None
+    req = urllib.request.Request(url, data=data, method=method, headers=headers)
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode())
+    except urllib.error.HTTPError as exc:
+        body = exc.read().decode(errors="replace")
+        raise VisionError(f"{label} HTTP {exc.code}: {body[:400]}") from exc
+    except urllib.error.URLError as exc:
+        raise VisionError(f"{label} network error: {exc.reason}") from exc
 
 
 class ScreenState:
@@ -124,10 +163,6 @@ def parse_classification(text: str, image_b64: str) -> ScreenState:
     This is backend-independent and is the unit under test for the vision path,
     so it never makes a network call.
     """
-    import json
-
-    from ..errors import VisionError
-
     cleaned = text.strip()
     if cleaned.startswith("```"):
         lines = [ln for ln in cleaned.splitlines() if not ln.strip().startswith("```")]
@@ -174,6 +209,7 @@ __all__ = [
     "ScreenState",
     "parse_classification",
     "build_user_text",
+    "request_json",
     "SYSTEM_PROMPT",
     "ALL_PHASES",
     "PHASE_NO_SIGNAL",
@@ -185,6 +221,7 @@ __all__ = [
     "PHASE_BOOTING",
     "PHASE_LOGIN_PROMPT",
     "PHASE_DESKTOP",
+    "PHASE_OS_RUNNING",
     "PHASE_INSTALLER_WELCOME",
     "PHASE_INSTALLER_PARTITIONING",
     "PHASE_INSTALLER_PROGRESS",

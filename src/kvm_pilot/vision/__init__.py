@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from ..errors import VisionError
 from .analyzer import DEFAULT_OCR_RULES, ScreenAnalyzer
 from .anthropic import AnthropicBackend
 from .base import (
@@ -31,10 +32,12 @@ def make_backend(
     if kind in ("anthropic", "claude"):
         return AnthropicBackend(api_key=api_key, model=model, **kw)
     if kind in ("local", "openai", "openai_compat", "lmstudio", "ollama", "vllm"):
+        # VisionError (a KVMPilotError) so a CLI misconfiguration surfaces as a
+        # clean message instead of an uncaught ValueError traceback.
         if not base_url:
-            raise ValueError(f"backend kind={kind!r} requires base_url=")
+            raise VisionError(f"backend kind={kind!r} requires base_url=")
         if not model:
-            raise ValueError(f"backend kind={kind!r} requires model=")
+            raise VisionError(f"backend kind={kind!r} requires model=")
         return OpenAICompatBackend(base_url=base_url, model=model, api_key=api_key, **kw)
     raise ValueError(f"Unknown vision backend kind: {kind!r}")
 

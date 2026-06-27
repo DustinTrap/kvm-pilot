@@ -84,3 +84,39 @@ def test_detect_capabilities_on_a_partial_driver() -> None:
             return True
 
     assert detect_capabilities(PowerOnly()) == {Capability.POWER}
+
+
+# -- driver registry -------------------------------------------------------
+
+def test_make_driver_pikvm_aliases_build_the_client() -> None:
+    from kvm_pilot.drivers import make_driver
+
+    for kind in ("pikvm", "glkvm", "blikvm", "PiKVM"):
+        d = make_driver(kind, host="192.0.2.1")
+        assert isinstance(d, KVMClient)
+        assert d.host == "192.0.2.1"
+
+
+def test_make_driver_fake() -> None:
+    from kvm_pilot.drivers import FakeDriver, make_driver
+
+    d = make_driver("fake", host="lab")
+    assert isinstance(d, FakeDriver)
+    assert d.host == "lab"
+
+
+def test_make_driver_unknown_kind_lists_known() -> None:
+    import pytest
+
+    from kvm_pilot.drivers import make_driver
+
+    with pytest.raises(ValueError, match="Unknown driver kind"):
+        make_driver("nope")
+
+
+def test_register_driver_adds_a_kind() -> None:
+    from kvm_pilot.drivers import make_driver, register_driver
+
+    sentinel = object()
+    register_driver("sentinel", lambda **conf: sentinel)
+    assert make_driver("sentinel") is sentinel

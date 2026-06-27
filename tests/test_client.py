@@ -83,3 +83,19 @@ def test_pikvmclient_alias():
     from kvm_pilot import PiKVMClient
 
     assert PiKVMClient is KVMClient
+
+
+def test_from_config_applies_all_fields():
+    from kvm_pilot.config import HostConfig
+
+    cfg = HostConfig(
+        host="box", user="u", passwd="p", port=8080, scheme="http",
+        verify_ssl=True, timeout=5.0,
+    )
+    c = KVMClient.from_config(cfg, dry_run=True)
+    # scheme/port/timeout must survive the helper (the bug the examples had was
+    # dropping scheme and timeout in hand-rolled construction).
+    assert c._http._base == "http://box:8080"
+    assert c._http._timeout == 5.0
+    assert c._http._verify_ssl is True
+    assert c.safety.dry_run is True

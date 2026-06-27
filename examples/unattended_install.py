@@ -39,9 +39,7 @@ def main() -> int:
 
     cfg = resolve_host()
     confirm = (lambda op, desc: True) if args.yes else interactive_confirm
-    kvm = KVMClient(cfg.host, cfg.user, cfg.passwd, port=cfg.port,
-                    verify_ssl=cfg.verify_ssl, totp_secret=cfg.totp_secret,
-                    confirm=confirm)
+    kvm = KVMClient.from_config(cfg, confirm=confirm)
 
     backend = (make_backend("local", base_url=args.local[0], model=args.local[1])
                if args.local else make_backend("anthropic"))
