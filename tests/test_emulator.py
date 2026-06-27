@@ -33,7 +33,7 @@ def test_login_sets_auth_token(emu):
 
 def test_get_info_roundtrip(emu):
     info = _client(emu).get_info()
-    assert info["hw"]["platform"] == "fake"
+    assert info["hw"]["platform"]["base"] == "fake"
     assert ("GET", "/api/info") in emu.state.calls
 
 
@@ -63,7 +63,7 @@ def test_retry_on_503_then_succeeds(emu):
     emu.state.fail_status = 503
     emu.state.fail_times = 1
     info = _client(emu).get_info()
-    assert info["hw"]["platform"] == "fake"
+    assert info["hw"]["platform"]["base"] == "fake"
 
 
 def test_password_redacted_over_real_transport(emu):

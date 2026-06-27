@@ -35,6 +35,7 @@ class HostConfig:
     verify_ssl: bool = False
     timeout: float = 30.0
     totp_secret: str | None = None
+    driver: str = "pikvm"
 
 
 def _load_file(path: Path) -> dict[str, Any]:
@@ -55,6 +56,7 @@ def resolve_host(
     timeout: float | None = None,
     totp_secret: str | None = None,
     verify_ssl: bool | None = None,
+    driver: str | None = None,
     config_path: Path | None = None,
 ) -> HostConfig:
     """Resolve a HostConfig from args > env > file (in that priority)."""
@@ -75,12 +77,16 @@ def resolve_host(
             return base[key]
         return default
 
+    resolved_driver = pick("driver", driver, "KVM_PILOT_DRIVER", "pikvm")
     resolved_host = pick("host", host, "KVM_PILOT_HOST")
     if not resolved_host:
-        raise ValueError(
-            "No host specified. Provide --host, set KVM_PILOT_HOST, or name a "
-            "profile defined in the config file."
-        )
+        if resolved_driver == "fake":
+            resolved_host = "fake"  # the in-process fake driver needs no real host
+        else:
+            raise ValueError(
+                "No host specified. Provide --host, set KVM_PILOT_HOST, or name a "
+                "profile defined in the config file."
+            )
 
     port_val = pick("port", port, "KVM_PILOT_PORT", 443)
     verify_val = pick("verify_ssl", verify_ssl, "KVM_PILOT_VERIFY_SSL", False)
@@ -96,6 +102,7 @@ def resolve_host(
         verify_ssl=bool(verify_val),
         timeout=float(pick("timeout", timeout, "KVM_PILOT_TIMEOUT", 30.0)),
         totp_secret=pick("totp_secret", totp_secret, "KVM_PILOT_TOTP_SECRET"),
+        driver=resolved_driver,
     )
 
 

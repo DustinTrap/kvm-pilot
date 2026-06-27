@@ -30,6 +30,7 @@ from typing import TYPE_CHECKING
 from .__about__ import __version__
 from .client import KVMClient
 from .config import resolve_host
+from .drivers import make_driver_from_config
 from .errors import KVMPilotError, SafetyError
 from .safety import allow_all, interactive_confirm
 
@@ -42,18 +43,6 @@ if TYPE_CHECKING:
 def _build_client(args) -> KVMClient | FakeDriver:
     confirm = allow_all if getattr(args, "yes", False) else interactive_confirm
     dry_run = getattr(args, "dry_run", False)
-
-    if getattr(args, "driver", "pikvm") == "fake":
-        # Hardware-free: no host/credential resolution needed. (Library callers
-        # selecting a driver by string use drivers.make_driver(); the CLI knows
-        # the concrete type it wants here.)
-        from .drivers.fake import FakeDriver
-
-        return FakeDriver(
-            host=getattr(args, "host", None) or "fake",
-            confirm=confirm, dry_run=dry_run,
-        )
-
     cfg = resolve_host(
         getattr(args, "profile", None),
         host=getattr(args, "host", None),
@@ -64,8 +53,10 @@ def _build_client(args) -> KVMClient | FakeDriver:
         timeout=getattr(args, "http_timeout", None),
         totp_secret=getattr(args, "totp_secret", None),
         verify_ssl=getattr(args, "verify_ssl", None),
+        driver=getattr(args, "driver", None),
     )
-    return KVMClient.from_config(cfg, confirm=confirm, dry_run=dry_run)
+    # Shared with the MCP server so cfg.driver is honored the same way everywhere.
+    return make_driver_from_config(cfg, confirm=confirm, dry_run=dry_run)
 
 
 def _make_analyzer(kvm: KVMClient | FakeDriver, args):
@@ -199,8 +190,9 @@ def cmd_events(args) -> int:
 # -- parser ----------------------------------------------------------------
 
 def _add_common(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--driver", choices=["pikvm", "glkvm", "blikvm", "fake"], default="pikvm",
-                   help="Device driver (default pikvm; 'fake' = in-process, no hardware)")
+    p.add_argument("--driver", choices=["pikvm", "glkvm", "blikvm", "fake"],
+                   help="Device driver (overrides KVM_PILOT_DRIVER / config profile; "
+                        "default pikvm; 'glkvm' = GL.iNet GLKVM fork, 'fake' = no hardware)")
     p.add_argument("--host")
     p.add_argument("--user")
     p.add_argument("--passwd")
@@ -313,6 +305,11 @@ def main(argv: list | None = None) -> int:
         print(f"blocked: {exc}", file=sys.stderr)
         return 3
     except KVMPilotError as exc:
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except (ValueError, KeyError) as exc:
+        # Config/host resolution errors (missing host, unknown profile) — present
+        # cleanly instead of a traceback.
         print(f"error: {exc}", file=sys.stderr)
         return 1
 
