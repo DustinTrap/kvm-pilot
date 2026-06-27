@@ -18,10 +18,7 @@ Example (LM Studio on the workstation):
 
 from __future__ import annotations
 
-import json
 import os
-import urllib.error
-import urllib.request
 
 from ..errors import VisionError
 from .base import (
@@ -30,6 +27,7 @@ from .base import (
     VisionBackend,
     build_user_text,
     parse_classification,
+    request_json,
 )
 
 
@@ -79,25 +77,17 @@ class OpenAICompatBackend(VisionBackend):
                 },
             ],
         }
-        req = urllib.request.Request(
+        envelope = request_json(
+            "POST",
             self._base + "/chat/completions",
-            data=json.dumps(payload).encode(),
-            method="POST",
             headers={
                 "Content-Type": "application/json",
                 "Authorization": f"Bearer {self._api_key}",
             },
+            timeout=self._timeout,
+            payload=payload,
+            label=f"Local VLM at {self._base}",
         )
-        try:
-            with urllib.request.urlopen(req, timeout=self._timeout) as resp:
-                envelope = json.loads(resp.read().decode())
-        except urllib.error.HTTPError as exc:
-            body = exc.read().decode(errors="replace")
-            raise VisionError(f"Local VLM HTTP {exc.code}: {body[:400]}") from exc
-        except urllib.error.URLError as exc:
-            raise VisionError(
-                f"Could not reach local VLM at {self._base}: {exc.reason}"
-            ) from exc
 
         try:
             text = envelope["choices"][0]["message"]["content"].strip()

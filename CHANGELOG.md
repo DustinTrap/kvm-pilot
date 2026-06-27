@@ -22,6 +22,42 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `ScreenAnalyzer` gates: `gate_on_power_signal`, `skip_unchanged_frames` (both
   default on) and opt-in `ocr_rules` (with `DEFAULT_OCR_RULES`), plus
   `vlm_calls` / `cheap_resolves` counters.
+- **CLI `capabilities`** — print the capabilities the active driver supports
+  (offline; no network call).
+- **CLI `events`** — stream device events over the WebSocket (`--duration`,
+  `--count`, `--no-stream`); requires the `ws` extra.
+- **Global `--timeout`** flag (HTTP per-request timeout) plus the matching
+  `KVM_PILOT_TIMEOUT` env var; `scheme` now also resolves through the full
+  args > env > file precedence with a `--scheme` flag / `KVM_PILOT_SCHEME`.
+- `KVMClient.from_config(cfg)` — one constructor for the field-by-field build
+  the CLI, MCP server, and examples each previously repeated.
+- **Driver registry.** `make_driver(kind, **conf)` (mirroring `make_backend`)
+  plus `register_driver()` for third-party kinds; built-in kinds `pikvm` /
+  `glkvm` / `blikvm` (the `KVMClient`) and `fake`. A `--driver` CLI flag selects
+  among them.
+- **`FakeDriver`** (`kvm_pilot.drivers.FakeDriver`) — an in-process,
+  hardware-free driver implementing the capability protocols over scriptable
+  in-memory state, with destructive ops still routed through `SafetyPolicy`. It
+  is the first real implementer of a sensing protocol (`BootProgress`), so the
+  capability seam and the safety layer can be exercised end-to-end with no
+  hardware. `kvm-pilot capabilities --driver fake` runs fully offline.
+- **`RedfishDriver`** (`kvm_pilot.drivers.RedfishDriver`, `make_driver("redfish")`)
+  — a stdlib-only DMTF Redfish client for server BMCs (Dell iDRAC, HPE iLO,
+  Supermicro, Lenovo XCC, OpenBMC). It advertises a BMC's *complementary*
+  capability set — `SystemInfo`, `Power`, `BootProgress`, `Sensors`, `Logs`,
+  `VirtualMedia` (no `HID`/`Video`/`GPIO`) — and is **portable by navigating
+  hypermedia**: it follows `@odata.id` and reads `@Redfish.ActionInfo` /
+  `AllowableValues` rather than hard-coding vendor ids, mapping power intents to a
+  target's actual `ResetType` set. Session-auth-first (`X-Auth-Token`, `DELETE`
+  on logout) with HTTP Basic optional; handles async `202`/Task responses,
+  `PasswordChangeRequired`, the legacy `Thermal`/`Power` vs unified `Sensors`
+  models, and structured `BootProgress` → the phase vocabulary. Reset and
+  virtual-media insert/eject route through `SafetyPolicy` (new `redfish.*` ops).
+  Library/registry only for now — a curated `--driver redfish` CLI entry awaits
+  capability-aware command dispatch.
+- New phase token **`os_running`** (`vision.base`) for an OS that has handed off
+  but whose specific on-screen state isn't distinguishable — emitted by the
+  vision backend and mapped to from a BMC's `BootProgress=OSRunning`.
 
 ### Changed
 - `ScreenAnalyzer.classify()` now resolves from cheap signals before calling the
@@ -29,6 +65,20 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   model), an unchanged-frame skip (reuse the last result), and optional
   OCR-assist for text screens. In a typical boot-watch this avoids most model
   calls; set the flags to `False` to restore unconditional classification.
+- Internal simplifications (no public behaviour change): a single
+  `vision.base.request_json()` helper backs both vision backends; the classifier
+  system prompt interpolates `ALL_PHASES` so its token list can no longer drift
+  from the parser's; `scheme`/`timeout` no longer bypass config precedence.
+- `AnthropicBackend` validates its API key **lazily** (at first network use)
+  rather than at construction, so analyzer paths resolved by a cheap gate (e.g.
+  `power_off`) run with no key — `kvm-pilot classify --driver fake` works fully
+  offline. A `make_backend` misconfiguration now raises `VisionError` (a clean
+  CLI error) instead of an uncaught `ValueError` traceback.
+
+### Removed
+- Unused surface: `HTTP.delete()`, the no-op `KVMClient`/`ScreenAnalyzer`
+  context managers, the `detect_state` alias, and the `ctrl_c`/`ctrl_z` HID
+  shortcuts (use `send_shortcut(...)`).
 
 ## [0.1.0a1] — 2026-06-26
 

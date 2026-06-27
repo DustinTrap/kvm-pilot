@@ -15,10 +15,7 @@ The Messages API call uses only the Python standard library.
 
 from __future__ import annotations
 
-import json
 import os
-import urllib.error
-import urllib.request
 
 from ..errors import VisionError
 from .base import (
@@ -27,6 +24,7 @@ from .base import (
     VisionBackend,
     build_user_text,
     parse_classification,
+    request_json,
 )
 
 _API_BASE = "https://api.anthropic.com"
@@ -46,11 +44,10 @@ class AnthropicBackend(VisionBackend):
         timeout: float = 60.0,
         api_base: str = _API_BASE,
     ):
+        # The key is validated lazily at first network use (see _headers), not at
+        # construction, so a backend can be built for a path that never calls the
+        # model — e.g. ScreenAnalyzer resolving power_off from a cheap gate.
         self._api_key = api_key or os.environ.get("ANTHROPIC_API_KEY", "")
-        if not self._api_key:
-            raise VisionError(
-                "No Anthropic API key. Pass api_key= or set ANTHROPIC_API_KEY."
-            )
         self._max_tokens = max_tokens
         self._timeout = timeout
         self._api_base = api_base.rstrip("/")
@@ -130,6 +127,10 @@ class AnthropicBackend(VisionBackend):
     # -- stdlib HTTP -----------------------------------------------------
 
     def _headers(self) -> dict:
+        if not self._api_key:
+            raise VisionError(
+                "No Anthropic API key. Pass api_key= or set ANTHROPIC_API_KEY."
+            )
         return {
             "Content-Type": "application/json",
             "x-api-key": self._api_key,
@@ -137,29 +138,16 @@ class AnthropicBackend(VisionBackend):
         }
 
     def _http_post_json(self, path: str, payload: dict) -> dict:
-        req = urllib.request.Request(
-            self._api_base + path,
-            data=json.dumps(payload).encode(),
-            method="POST",
-            headers=self._headers(),
+        return request_json(
+            "POST", self._api_base + path, headers=self._headers(),
+            timeout=self._timeout, payload=payload, label="Anthropic API",
         )
-        return self._send(req)
 
     def _http_get_json(self, path: str) -> dict:
-        req = urllib.request.Request(
-            self._api_base + path, method="GET", headers=self._headers()
+        return request_json(
+            "GET", self._api_base + path, headers=self._headers(),
+            timeout=self._timeout, label="Anthropic API",
         )
-        return self._send(req)
-
-    def _send(self, req: urllib.request.Request) -> dict:
-        try:
-            with urllib.request.urlopen(req, timeout=self._timeout) as resp:
-                return json.loads(resp.read().decode())
-        except urllib.error.HTTPError as exc:
-            body = exc.read().decode(errors="replace")
-            raise VisionError(f"Anthropic API HTTP {exc.code}: {body[:400]}") from exc
-        except urllib.error.URLError as exc:
-            raise VisionError(f"Anthropic API network error: {exc.reason}") from exc
 
 
 __all__ = ["AnthropicBackend"]

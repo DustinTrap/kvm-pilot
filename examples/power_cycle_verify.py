@@ -30,9 +30,7 @@ def main() -> int:
     cfg = resolve_host()
     # allow_all here because this script's whole purpose is the power cycle;
     # in real automation you might pass an interactive or policy-based callback.
-    kvm = KVMClient(cfg.host, cfg.user, cfg.passwd, port=cfg.port,
-                    verify_ssl=cfg.verify_ssl, totp_secret=cfg.totp_secret,
-                    confirm=allow_all)
+    kvm = KVMClient.from_config(cfg, confirm=allow_all)
 
     if args.local:
         backend = make_backend("local", base_url=args.local[0], model=args.local[1])
