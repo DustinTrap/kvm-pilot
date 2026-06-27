@@ -37,6 +37,21 @@ def test_timeout_precedence(monkeypatch, tmp_path):
     assert resolve_host(host="h", timeout=99.0, config_path=none).timeout == 99.0  # arg wins
 
 
+def test_driver_precedence(monkeypatch, tmp_path):
+    monkeypatch.delenv("KVM_PILOT_DRIVER", raising=False)
+    none = tmp_path / "none.toml"
+    assert resolve_host(host="h", config_path=none).driver == "pikvm"  # default
+    monkeypatch.setenv("KVM_PILOT_DRIVER", "glkvm")
+    assert resolve_host(host="h", config_path=none).driver == "glkvm"  # env
+    assert resolve_host(host="h", driver="blikvm", config_path=none).driver == "blikvm"  # arg wins
+
+
+def test_driver_from_profile(tmp_path):
+    f = tmp_path / "config.toml"
+    f.write_text('[hosts.gl]\nhost = "10.0.0.9"\ndriver = "glkvm"\n')
+    assert resolve_host("gl", config_path=f).driver == "glkvm"
+
+
 def test_profile_from_file(tmp_path):
     f = tmp_path / "config.toml"
     f.write_text(

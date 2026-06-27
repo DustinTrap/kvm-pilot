@@ -105,6 +105,18 @@ def test_make_driver_fake() -> None:
     assert d.host == "lab"
 
 
+def test_make_driver_glkvm_blikvm_return_the_subclasses() -> None:
+    from kvm_pilot.client import PiKVMDriver
+    from kvm_pilot.drivers import BliKVMDriver, GLKVMDriver, make_driver
+
+    g = make_driver("glkvm", host="h")
+    b = make_driver("blikvm", host="h")
+    assert isinstance(g, GLKVMDriver) and isinstance(g, PiKVMDriver)
+    assert isinstance(b, BliKVMDriver) and isinstance(b, PiKVMDriver)
+    # And they still satisfy the original public name.
+    assert isinstance(g, KVMClient)
+
+
 def test_make_driver_unknown_kind_lists_known() -> None:
     import pytest
 
@@ -120,3 +132,18 @@ def test_register_driver_adds_a_kind() -> None:
     sentinel = object()
     register_driver("sentinel", lambda **conf: sentinel)
     assert make_driver("sentinel") is sentinel
+
+
+def test_make_driver_from_config_dispatches_on_cfg_driver() -> None:
+    # The CLI and MCP server share this so cfg.driver is honored identically.
+    import pytest
+
+    from kvm_pilot.config import HostConfig
+    from kvm_pilot.drivers import FakeDriver, make_driver_from_config
+    from kvm_pilot.drivers.pikvm import GLKVMDriver
+    from kvm_pilot.errors import KVMPilotError
+
+    assert isinstance(make_driver_from_config(HostConfig(host="h", driver="glkvm")), GLKVMDriver)
+    assert isinstance(make_driver_from_config(HostConfig(host="h", driver="fake")), FakeDriver)
+    with pytest.raises(KVMPilotError, match="does not support"):
+        make_driver_from_config(HostConfig(host="h", driver="redfish"))

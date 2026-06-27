@@ -101,6 +101,48 @@ def test_driver_fake_power_action_is_dispatched():
     assert rc == 0
 
 
+def test_driver_glkvm_builds_the_glkvm_subclass():
+    from kvm_pilot.cli import _build_client, build_parser
+    from kvm_pilot.drivers.pikvm import GLKVMDriver
+
+    args = build_parser().parse_args(["info", "--driver", "glkvm", "--host", "h"])
+    kvm = _build_client(args)  # construction only; no network
+    assert isinstance(kvm, GLKVMDriver)
+
+
+def test_driver_defaults_to_pikvm_when_unset(monkeypatch):
+    from kvm_pilot.cli import _build_client, build_parser
+    from kvm_pilot.client import PiKVMDriver
+
+    monkeypatch.delenv("KVM_PILOT_DRIVER", raising=False)
+    args = build_parser().parse_args(["info", "--host", "h"])  # no --driver
+    kvm = _build_client(args)
+    assert isinstance(kvm, PiKVMDriver) and not type(kvm).__name__.startswith(("GL", "Bli"))
+
+
+def test_unsupported_driver_via_env_is_a_clean_error(monkeypatch, capsys):
+    # The CLI can't dispatch redfish generically yet; a config/env selection must
+    # produce a clean error (exit 1), not a crash.
+    monkeypatch.setenv("KVM_PILOT_DRIVER", "redfish")
+    rc = main(["info", "--host", "h"])
+    assert rc == 1
+    assert "does not support" in capsys.readouterr().err
+
+
+def test_fake_via_env_needs_no_host(monkeypatch):
+    # Parity with --driver fake: KVM_PILOT_DRIVER=fake must not require a host.
+    monkeypatch.setenv("KVM_PILOT_DRIVER", "fake")
+    assert main(["capabilities"]) == 0
+
+
+def test_missing_host_is_a_clean_error(monkeypatch, capsys):
+    monkeypatch.delenv("KVM_PILOT_HOST", raising=False)
+    monkeypatch.delenv("KVM_PILOT_DRIVER", raising=False)
+    rc = main(["info"])  # no host, pikvm driver -> resolve_host ValueError, caught cleanly
+    assert rc == 1
+    assert "host" in capsys.readouterr().err.lower()
+
+
 def test_classify_driver_fake_is_offline_without_api_key(monkeypatch, capsys):
     # With the lazy API-key check, the analyzer resolves power_off from the fake's
     # cheap power gate with no model call — so no ANTHROPIC_API_KEY is required.

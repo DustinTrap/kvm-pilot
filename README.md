@@ -40,6 +40,25 @@ revert this**, so you may need to redo it after updates. This is a GL firmware
 behavior, not a `kvm-pilot` setting. Stock PiKVM devices expose the API by
 default and need no change.
 
+`kvm-pilot` now **detects this condition**: select the GL driver and a 404 across
+`/api/*` is surfaced as a clear, actionable `ApiDisabledError` (pointing you at
+`nginx-kvmd.conf`) instead of a bare HTTP 404 — and you can preflight with
+`check_api_enabled()`.
+
+```python
+from kvm_pilot import make_driver           # or: from kvm_pilot import GLKVMDriver
+
+gl = make_driver("glkvm", host="192.168.8.1", passwd="…")   # GL-RM1 / GL-RM1PE
+gl.check_api_enabled()        # raises ApiDisabledError with the fix if it's off
+gl.get_firmware_info()        # {'version': …, 'model': 'GL-RM1PE', …}
+gl.known_quirks()             # firmware-specific quirks we track
+```
+
+Pin it for the CLI / a profile with `--driver glkvm`, `KVM_PILOT_DRIVER=glkvm`, or
+`driver = "glkvm"` in a config profile. (`PiKVMDriver` is the canonical base;
+`GLKVMDriver` / `BliKVMDriver` are the fork subclasses. `KVMClient` remains an
+alias of `PiKVMDriver`.)
+
 ---
 
 ## How it works

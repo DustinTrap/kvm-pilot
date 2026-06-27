@@ -26,6 +26,7 @@ class FakeKVMState:
         self.fail_status: int | None = None
         self.fail_times = 0
         self.echo_password = False
+        self.api_disabled = False  # GL firmware: every /api/* returns 404
         self.last_headers: dict[str, str] = {}
         self.calls: list[tuple[str, str]] = []
 
@@ -75,6 +76,10 @@ class _Handler(BaseHTTPRequestHandler):
             st.fail_times -= 1
             self._send(b"transient", status=st.fail_status, ctype="text/plain")
             return True
+        if st.api_disabled and path.startswith("/api/"):
+            # GL.iNet firmware blocks the API at nginx -> 404 (HTML in reality).
+            self._send(b"<html>404</html>", status=404, ctype="text/html")
+            return True
         return False
 
     def do_GET(self) -> None:
@@ -84,7 +89,10 @@ class _Handler(BaseHTTPRequestHandler):
         if path == "/api/auth/check":
             self._json({})
         elif path == "/api/info":
-            self._json({"hw": {"platform": "fake"}})
+            self._json({
+                "hw": {"platform": {"base": "fake", "model": "GL-RM1PE"}},
+                "system": {"kvmd": {"version": "4.2-gl-test"}},
+            })
         elif path == "/api/atx":
             self._json({"leds": {"power": self._state.powered_on}})
         elif path == "/api/streamer/snapshot":

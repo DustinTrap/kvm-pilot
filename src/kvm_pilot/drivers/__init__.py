@@ -12,6 +12,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+from ..errors import KVMPilotError
 from .base import (
     CAPABILITY_PROTOCOLS,
     GPIO,
@@ -33,7 +34,10 @@ from .base import (
 )
 
 if TYPE_CHECKING:
+    from ..client import KVMClient
+    from ..config import HostConfig
     from .fake import FakeDriver
+    from .pikvm import BliKVMDriver, GLKVMDriver
     from .redfish import RedfishDriver
 
 
@@ -45,9 +49,21 @@ if TYPE_CHECKING:
 
 
 def _make_pikvm(**conf: object) -> KVMDriver:
-    from ..client import KVMClient
+    from ..client import PiKVMDriver
 
-    return KVMClient(**conf)  # type: ignore[arg-type]
+    return PiKVMDriver(**conf)  # type: ignore[arg-type]
+
+
+def _make_glkvm(**conf: object) -> KVMDriver:
+    from .pikvm import GLKVMDriver
+
+    return GLKVMDriver(**conf)  # type: ignore[arg-type]
+
+
+def _make_blikvm(**conf: object) -> KVMDriver:
+    from .pikvm import BliKVMDriver
+
+    return BliKVMDriver(**conf)  # type: ignore[arg-type]
 
 
 def _make_fake(**conf: object) -> KVMDriver:
@@ -63,10 +79,11 @@ def _make_redfish(**conf: object) -> KVMDriver:
 
 
 _DRIVER_FACTORIES: dict[str, Callable[..., KVMDriver]] = {
-    # PiKVM, the GL.iNet GLKVM fork, and BliKVM share one API-compatible client.
+    # PiKVM-family: one base (PiKVMDriver) with thin GLKVM/BliKVM subclasses for
+    # the API-compatible forks.
     "pikvm": _make_pikvm,
-    "glkvm": _make_pikvm,
-    "blikvm": _make_pikvm,
+    "glkvm": _make_glkvm,
+    "blikvm": _make_blikvm,
     # One Redfish driver covers Dell iDRAC, HPE iLO, Supermicro, Lenovo XCC, OpenBMC.
     "redfish": _make_redfish,
     "fake": _make_fake,
@@ -99,6 +116,34 @@ def make_driver(kind: str = "pikvm", **conf: object) -> KVMDriver:
     return factory(**conf)
 
 
+def make_driver_from_config(
+    cfg: HostConfig, *, confirm: Callable[[str, str], bool] | None = None, dry_run: bool = False
+) -> KVMClient | FakeDriver:
+    """Build the driver named by ``cfg.driver`` from a resolved ``HostConfig``.
+
+    Shared by the CLI and the MCP server so a profile/env that pins
+    ``driver = "glkvm"`` is honored everywhere — not just via ``--driver``. It is
+    shape-aware (the fake driver takes no credentials; the PiKVM family builds via
+    ``from_config``), unlike a raw ``make_driver(**all_fields)`` call.
+    """
+    kind = cfg.driver
+    if kind == "fake":
+        from .fake import FakeDriver
+
+        return FakeDriver(host=cfg.host, confirm=confirm, dry_run=dry_run)
+    if kind in ("pikvm", "glkvm", "blikvm"):
+        from ..client import PiKVMDriver
+        from .pikvm import BliKVMDriver, GLKVMDriver
+
+        cls = {"pikvm": PiKVMDriver, "glkvm": GLKVMDriver, "blikvm": BliKVMDriver}[kind]
+        return cls.from_config(cfg, confirm=confirm, dry_run=dry_run)
+    raise KVMPilotError(
+        f"Driver {kind!r} does not support from-config construction here "
+        "(supported: pikvm, glkvm, blikvm, fake). Build it directly with "
+        f"make_driver({kind!r}, ...) from the library."
+    )
+
+
 def __getattr__(name: str) -> object:
     # Lazily expose the concrete drivers without importing them at package load
     # (keeps the import graph acyclic). ``from kvm_pilot.drivers import FakeDriver``
@@ -111,6 +156,10 @@ def __getattr__(name: str) -> object:
         from .redfish import RedfishDriver
 
         return RedfishDriver
+    if name in ("GLKVMDriver", "BliKVMDriver"):
+        from . import pikvm
+
+        return getattr(pikvm, name)
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -133,7 +182,10 @@ __all__ = [
     "CAPABILITY_PROTOCOLS",
     "detect_capabilities",
     "make_driver",
+    "make_driver_from_config",
     "register_driver",
     "FakeDriver",
     "RedfishDriver",
+    "GLKVMDriver",
+    "BliKVMDriver",
 ]

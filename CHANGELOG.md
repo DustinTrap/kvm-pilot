@@ -58,6 +58,19 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - New phase token **`os_running`** (`vision.base`) for an OS that has handed off
   but whose specific on-screen state isn't distinguishable — emitted by the
   vision backend and mapped to from a BMC's `BootProgress=OSRunning`.
+- **PiKVM driver family.** `KVMClient` was split into a canonical **`PiKVMDriver`**
+  base with thin **`GLKVMDriver`** / **`BliKVMDriver`** subclasses (the
+  API-compatible forks); `KVMClient` and `PiKVMClient` remain aliases of
+  `PiKVMDriver`. The registry maps `glkvm`/`blikvm` to the subclasses.
+- **GLKVM (GL-RM1PE) first-contact support.** `GLKVMDriver` detects the GL "API
+  disabled by default" condition — a 404 across `/api/*` now raises an actionable
+  `ApiDisabledError` pointing at `/etc/kvmd/nginx-kvmd.conf` instead of a bare
+  HTTP 404 — plus a `check_api_enabled()` preflight, `get_firmware_info()`, and a
+  `known_quirks()` registry (seeded honestly with the one documented quirk; grows
+  as real hardware testing reveals release-specific behavior). New
+  `errors.ApiDisabledError`.
+- **`HostConfig.driver`** field (+ `KVM_PILOT_DRIVER` env / config-file key) so a
+  profile can pin its driver; the CLI `--driver` flag overrides it.
 
 ### Changed
 - `ScreenAnalyzer.classify()` now resolves from cheap signals before calling the

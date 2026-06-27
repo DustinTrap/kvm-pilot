@@ -21,7 +21,8 @@ import os
 
 from mcp.server.fastmcp import FastMCP
 
-from kvm_pilot import KVMClient, resolve_host
+from kvm_pilot import resolve_host
+from kvm_pilot.drivers import make_driver_from_config
 from kvm_pilot.safety import allow_all, deny_all
 from kvm_pilot.vision import ScreenAnalyzer, make_backend
 
@@ -37,7 +38,8 @@ _POWER_ACTIONS = {
 
 def _make_client(profile: str | None, *, confirm):
     cfg = resolve_host(profile or os.environ.get("KVM_PILOT_PROFILE"))
-    return KVMClient.from_config(cfg, confirm=confirm)
+    # Honor cfg.driver (e.g. a profile pinned to 'glkvm') the same way the CLI does.
+    return make_driver_from_config(cfg, confirm=confirm)
 
 
 @mcp.tool()
