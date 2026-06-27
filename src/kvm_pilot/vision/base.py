@@ -33,6 +33,11 @@ PHASE_GRUB_MENU = "grub_menu"
 PHASE_BOOTING = "booting"
 PHASE_LOGIN_PROMPT = "login_prompt"
 PHASE_DESKTOP = "desktop"
+# The OS has handed off and is running, but the specific on-screen state
+# (a login prompt vs. a desktop vs. a headless console) is not distinguishable
+# from the signal at hand. Emitted by the vision backend and mapped to from a
+# BMC's structured BootProgress=OSRunning.
+PHASE_OS_RUNNING = "os_running"
 PHASE_INSTALLER_WELCOME = "installer_welcome"
 PHASE_INSTALLER_PARTITIONING = "installer_partitioning"
 PHASE_INSTALLER_PROGRESS = "installer_progress"
@@ -50,6 +55,7 @@ ALL_PHASES: list[str] = [
     PHASE_BOOTING,
     PHASE_LOGIN_PROMPT,
     PHASE_DESKTOP,
+    PHASE_OS_RUNNING,
     PHASE_INSTALLER_WELCOME,
     PHASE_INSTALLER_PARTITIONING,
     PHASE_INSTALLER_PROGRESS,
@@ -215,6 +221,7 @@ __all__ = [
     "PHASE_BOOTING",
     "PHASE_LOGIN_PROMPT",
     "PHASE_DESKTOP",
+    "PHASE_OS_RUNNING",
     "PHASE_INSTALLER_WELCOME",
     "PHASE_INSTALLER_PARTITIONING",
     "PHASE_INSTALLER_PROGRESS",

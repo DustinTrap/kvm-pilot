@@ -41,6 +41,23 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   is the first real implementer of a sensing protocol (`BootProgress`), so the
   capability seam and the safety layer can be exercised end-to-end with no
   hardware. `kvm-pilot capabilities --driver fake` runs fully offline.
+- **`RedfishDriver`** (`kvm_pilot.drivers.RedfishDriver`, `make_driver("redfish")`)
+  — a stdlib-only DMTF Redfish client for server BMCs (Dell iDRAC, HPE iLO,
+  Supermicro, Lenovo XCC, OpenBMC). It advertises a BMC's *complementary*
+  capability set — `SystemInfo`, `Power`, `BootProgress`, `Sensors`, `Logs`,
+  `VirtualMedia` (no `HID`/`Video`/`GPIO`) — and is **portable by navigating
+  hypermedia**: it follows `@odata.id` and reads `@Redfish.ActionInfo` /
+  `AllowableValues` rather than hard-coding vendor ids, mapping power intents to a
+  target's actual `ResetType` set. Session-auth-first (`X-Auth-Token`, `DELETE`
+  on logout) with HTTP Basic optional; handles async `202`/Task responses,
+  `PasswordChangeRequired`, the legacy `Thermal`/`Power` vs unified `Sensors`
+  models, and structured `BootProgress` → the phase vocabulary. Reset and
+  virtual-media insert/eject route through `SafetyPolicy` (new `redfish.*` ops).
+  Library/registry only for now — a curated `--driver redfish` CLI entry awaits
+  capability-aware command dispatch.
+- New phase token **`os_running`** (`vision.base`) for an OS that has handed off
+  but whose specific on-screen state isn't distinguishable — emitted by the
+  vision backend and mapped to from a BMC's `BootProgress=OSRunning`.
 
 ### Changed
 - `ScreenAnalyzer.classify()` now resolves from cheap signals before calling the

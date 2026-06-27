@@ -82,8 +82,13 @@ lets a third party add a kind at runtime. The plan is for drivers to also regist
 via a `kvm_pilot.drivers` **entry-point group**, so a driver can ship as a separate
 pip package without forking the core. A dedicated `PiKVMDriver` will hold the shared
 kvmd logic; `GLKVMDriver` / `BliKVMDriver` subclass it and override only the deltas.
-The highest-leverage second device driver is **Redfish** — a DMTF standard that
-covers iDRAC, iLO, Supermicro, and OpenBMC in one implementation.
+The second device driver — **Redfish** (`make_driver("redfish")`,
+[`drivers/redfish/`](../src/kvm_pilot/drivers/redfish/)) — **has landed**: one DMTF-standard
+stdlib client covering iDRAC, iLO, Supermicro, Lenovo XCC, and OpenBMC. It is portable
+by *navigating hypermedia* — it follows `@odata.id` links and reads
+`@Redfish.ActionInfo`/`AllowableValues` rather than hard-coding vendor ids or version
+strings — and is session-auth-first (`X-Auth-Token`, `DELETE` on logout) with HTTP
+Basic optional, reflecting the vendor shift away from Basic auth.
 
 ## Safety
 
@@ -105,10 +110,18 @@ second device family lands.)
       CLI flag have landed; `KVMClient` doubles as the PiKVM driver for now (kinds
       `pikvm`/`glkvm`/`blikvm`). Still to come: a dedicated `PiKVMDriver` split and
       `HostConfig.driver`.
-- [~] **Step 4 — drivers.** `FakeDriver` ([`drivers/fake.py`](../src/kvm_pilot/drivers/fake.py)) —
-      in-process, no hardware (#2) — has landed and is the first `BootProgress`
-      implementer, so the sensing protocols are no longer all speculative.
-      `RedfishDriver` (server BMCs) is next.
+- [x] **Step 4 — drivers.** Two concrete non-PiKVM drivers have landed:
+      `FakeDriver` ([`drivers/fake.py`](../src/kvm_pilot/drivers/fake.py)) — in-process,
+      no hardware (#2) — and `RedfishDriver`
+      ([`drivers/redfish/`](../src/kvm_pilot/drivers/redfish/)), one stdlib client for
+      Dell iDRAC / HPE iLO / Supermicro / Lenovo XCC / OpenBMC. Redfish proves the
+      capability seam: it advertises a *complementary* set
+      (`SystemInfo`, `Power`, `BootProgress`, `Sensors`, `Logs`, `VirtualMedia`) and
+      none of `HID`/`Video`/`GPIO`, so structured-state sensing (`BootProgress`,
+      `Sensors`) finally has real implementers alongside the PiKVM pixels.
+      `RedfishDriver` is currently a library/`make_driver("redfish")` driver; wiring
+      it into the CLI awaits **capability-aware `--driver` dispatch** (so commands
+      that need a capability a device lacks fail cleanly instead of `AttributeError`).
 - [ ] **Step 5** — entry-point plugins + a "writing a driver" guide; per-driver deps as extras.
 
 The zero-dependency stdlib core is preserved: the HTTP transport stays on

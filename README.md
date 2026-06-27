@@ -207,6 +207,22 @@ registry (mirroring `make_backend`) builds drivers by name, and a hardware-free
 analyzer — with no device (`kvm-pilot capabilities --driver fake`). See
 [docs/architecture.md](docs/architecture.md) for the design and diagram.
 
+A **`RedfishDriver`** (`make_driver("redfish")`) speaks the DMTF Redfish API to
+server BMCs — Dell iDRAC, HPE iLO, Supermicro, Lenovo XCC, OpenBMC — in one
+stdlib-only client. It shows why capabilities are segmented: a BMC's set is
+*complementary* to a PiKVM's (strong on structured state — power, boot phase,
+sensors, logs, virtual media — with no keyboard/mouse/screenshot), and the driver
+stays portable by following Redfish hypermedia rather than hard-coding vendor ids:
+
+```python
+from kvm_pilot.drivers import make_driver
+
+bmc = make_driver("redfish", host="idrac.lan", user="root", passwd="…")
+bmc.get_boot_progress()        # 'os_running'  — structured, no screenshot
+bmc.read_sensors()["temperatures"]
+bmc.power_off(wait=True)       # mapped to the target's actual ResetType, gated
+```
+
 ## License
 
 Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE). `kvm-pilot` is

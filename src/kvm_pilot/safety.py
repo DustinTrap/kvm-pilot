@@ -42,6 +42,15 @@ DESTRUCTIVE_OPS: set[str] = {
     "gpio.switch",
     "gpio.pulse",
     "redfish.power_action",
+    # Redfish (BMC) driver — per-action granularity, mirroring the atx.*/msd.*
+    # style. ``redfish.power_action`` (above) stays for the legacy KVMClient
+    # Redfish helper; the RedfishDriver uses the specific ids below.
+    "redfish.power_on",
+    "redfish.power_off",
+    "redfish.power_off_hard",
+    "redfish.reset_hard",
+    "redfish.virtual_media_insert",
+    "redfish.virtual_media_eject",
     "hid.ctrl_alt_delete",
 }
 

@@ -34,6 +34,7 @@ from .base import (
 
 if TYPE_CHECKING:
     from .fake import FakeDriver
+    from .redfish import RedfishDriver
 
 
 # -- driver registry -------------------------------------------------------
@@ -55,11 +56,19 @@ def _make_fake(**conf: object) -> KVMDriver:
     return FakeDriver(**conf)  # type: ignore[arg-type]
 
 
+def _make_redfish(**conf: object) -> KVMDriver:
+    from .redfish import RedfishDriver
+
+    return RedfishDriver(**conf)  # type: ignore[arg-type]
+
+
 _DRIVER_FACTORIES: dict[str, Callable[..., KVMDriver]] = {
     # PiKVM, the GL.iNet GLKVM fork, and BliKVM share one API-compatible client.
     "pikvm": _make_pikvm,
     "glkvm": _make_pikvm,
     "blikvm": _make_pikvm,
+    # One Redfish driver covers Dell iDRAC, HPE iLO, Supermicro, Lenovo XCC, OpenBMC.
+    "redfish": _make_redfish,
     "fake": _make_fake,
 }
 
@@ -79,6 +88,8 @@ def make_driver(kind: str = "pikvm", **conf: object) -> KVMDriver:
     Built-in kinds:
       ``"pikvm"`` / ``"glkvm"`` / ``"blikvm"`` -> ``KVMClient`` (PiKVM-family
       REST client; pass ``host=`` and credentials).
+      ``"redfish"`` -> :class:`~kvm_pilot.drivers.redfish.RedfishDriver` (DMTF
+      Redfish BMCs: Dell iDRAC, HPE iLO, Supermicro, Lenovo XCC, OpenBMC).
       ``"fake"`` -> :class:`FakeDriver` (in-process, no hardware).
     """
     factory = _DRIVER_FACTORIES.get(kind.lower())
@@ -89,12 +100,17 @@ def make_driver(kind: str = "pikvm", **conf: object) -> KVMDriver:
 
 
 def __getattr__(name: str) -> object:
-    # Lazily expose FakeDriver without importing it at package load (keeps the
-    # import graph acyclic). ``from kvm_pilot.drivers import FakeDriver`` works.
+    # Lazily expose the concrete drivers without importing them at package load
+    # (keeps the import graph acyclic). ``from kvm_pilot.drivers import FakeDriver``
+    # and ``... import RedfishDriver`` both work.
     if name == "FakeDriver":
         from .fake import FakeDriver
 
         return FakeDriver
+    if name == "RedfishDriver":
+        from .redfish import RedfishDriver
+
+        return RedfishDriver
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
@@ -119,4 +135,5 @@ __all__ = [
     "make_driver",
     "register_driver",
     "FakeDriver",
+    "RedfishDriver",
 ]
