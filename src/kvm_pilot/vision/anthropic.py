@@ -44,11 +44,10 @@ class AnthropicBackend(VisionBackend):
         timeout: float = 60.0,
         api_base: str = _API_BASE,
     ):
+        # The key is validated lazily at first network use (see _headers), not at
+        # construction, so a backend can be built for a path that never calls the
+        # model — e.g. ScreenAnalyzer resolving power_off from a cheap gate.
         self._api_key = api_key or os.environ.get("ANTHROPIC_API_KEY", "")
-        if not self._api_key:
-            raise VisionError(
-                "No Anthropic API key. Pass api_key= or set ANTHROPIC_API_KEY."
-            )
         self._max_tokens = max_tokens
         self._timeout = timeout
         self._api_base = api_base.rstrip("/")
@@ -128,6 +127,10 @@ class AnthropicBackend(VisionBackend):
     # -- stdlib HTTP -----------------------------------------------------
 
     def _headers(self) -> dict:
+        if not self._api_key:
+            raise VisionError(
+                "No Anthropic API key. Pass api_key= or set ANTHROPIC_API_KEY."
+            )
         return {
             "Content-Type": "application/json",
             "x-api-key": self._api_key,

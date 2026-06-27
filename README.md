@@ -201,7 +201,10 @@ what this alpha needs — please open an issue.
 `kvm-pilot` is moving to a modular, **driver-plugin** architecture so support can
 expand to many KVM/BMC devices (PiKVM family, Redfish BMCs, JetKVM, …). Each
 device implements only the capability protocols its hardware supports; the CLI,
-safety layer, and vision subsystem stay device-agnostic. See
+safety layer, and vision subsystem stay device-agnostic. A `make_driver(kind)`
+registry (mirroring `make_backend`) builds drivers by name, and a hardware-free
+`FakeDriver` lets you exercise the whole loop — capabilities, safety gating, the
+analyzer — with no device (`kvm-pilot capabilities --driver fake`). See
 [docs/architecture.md](docs/architecture.md) for the design and diagram.
 
 ## License

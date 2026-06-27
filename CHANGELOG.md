@@ -31,6 +31,16 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   args > env > file precedence with a `--scheme` flag / `KVM_PILOT_SCHEME`.
 - `KVMClient.from_config(cfg)` — one constructor for the field-by-field build
   the CLI, MCP server, and examples each previously repeated.
+- **Driver registry.** `make_driver(kind, **conf)` (mirroring `make_backend`)
+  plus `register_driver()` for third-party kinds; built-in kinds `pikvm` /
+  `glkvm` / `blikvm` (the `KVMClient`) and `fake`. A `--driver` CLI flag selects
+  among them.
+- **`FakeDriver`** (`kvm_pilot.drivers.FakeDriver`) — an in-process,
+  hardware-free driver implementing the capability protocols over scriptable
+  in-memory state, with destructive ops still routed through `SafetyPolicy`. It
+  is the first real implementer of a sensing protocol (`BootProgress`), so the
+  capability seam and the safety layer can be exercised end-to-end with no
+  hardware. `kvm-pilot capabilities --driver fake` runs fully offline.
 
 ### Changed
 - `ScreenAnalyzer.classify()` now resolves from cheap signals before calling the
@@ -42,6 +52,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `vision.base.request_json()` helper backs both vision backends; the classifier
   system prompt interpolates `ALL_PHASES` so its token list can no longer drift
   from the parser's; `scheme`/`timeout` no longer bypass config precedence.
+- `AnthropicBackend` validates its API key **lazily** (at first network use)
+  rather than at construction, so analyzer paths resolved by a cheap gate (e.g.
+  `power_off`) run with no key — `kvm-pilot classify --driver fake` works fully
+  offline. A `make_backend` misconfiguration now raises `VisionError` (a clean
+  CLI error) instead of an uncaught `ValueError` traceback.
 
 ### Removed
 - Unused surface: `HTTP.delete()`, the no-op `KVMClient`/`ScreenAnalyzer`

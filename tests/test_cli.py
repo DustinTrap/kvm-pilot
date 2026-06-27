@@ -86,3 +86,34 @@ def test_events_reports_missing_ws_extra(monkeypatch, capsys):
     rc = main(["events", "--host", "fake"])
     assert rc == 1
     assert "websocket-client" in capsys.readouterr().err
+
+
+def test_driver_fake_needs_no_host_and_lists_boot_progress(capsys):
+    # The fake driver runs fully offline: no --host, no network, no API key.
+    rc = main(["capabilities", "--driver", "fake"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "boot_progress" in out  # only the fake reports this today
+
+
+def test_driver_fake_power_action_is_dispatched():
+    rc = main(["power", "on", "--driver", "fake", "--yes"])
+    assert rc == 0
+
+
+def test_classify_driver_fake_is_offline_without_api_key(monkeypatch, capsys):
+    # With the lazy API-key check, the analyzer resolves power_off from the fake's
+    # cheap power gate with no model call — so no ANTHROPIC_API_KEY is required.
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    rc = main(["classify", "--driver", "fake"])
+    assert rc == 0
+    assert "power_off" in capsys.readouterr().out
+
+
+def test_classify_local_backend_missing_url_is_a_clean_error(monkeypatch, capsys):
+    # A missing --vision-url must surface as a clean error + exit 1, not an
+    # uncaught ValueError traceback.
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    rc = main(["classify", "--driver", "fake", "--backend", "local"])
+    assert rc == 1
+    assert "base_url" in capsys.readouterr().err

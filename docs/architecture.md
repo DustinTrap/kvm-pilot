@@ -75,28 +75,40 @@ for JetKVM, optional IPMI) slot in without touching driver code.
 
 ## Driver registry & families
 
-`make_driver(kind, **conf)` mirrors the vision layer's `make_backend`. Drivers
-register via a `kvm_pilot.drivers` **entry-point group**, so third parties can
-ship a driver as a separate pip package without forking the core. `PiKVMDriver`
-holds the shared kvmd logic; `GLKVMDriver` / `BliKVMDriver` subclass it and
-override only the deltas (they are API-compatible forks). The highest-leverage
-second driver is **Redfish** — a DMTF standard that covers iDRAC, iLO,
-Supermicro, and OpenBMC in one implementation.
+`make_driver(kind, **conf)` mirrors the vision layer's `make_backend` and is
+**already in place** — it resolves `pikvm`/`glkvm`/`blikvm` (the API-compatible
+`KVMClient` today) and `fake` (the in-process `FakeDriver`), and `register_driver()`
+lets a third party add a kind at runtime. The plan is for drivers to also register
+via a `kvm_pilot.drivers` **entry-point group**, so a driver can ship as a separate
+pip package without forking the core. A dedicated `PiKVMDriver` will hold the shared
+kvmd logic; `GLKVMDriver` / `BliKVMDriver` subclass it and override only the deltas.
+The highest-leverage second device driver is **Redfish** — a DMTF standard that
+covers iDRAC, iLO, Supermicro, and OpenBMC in one implementation.
 
 ## Safety
 
 There is one `SafetyPolicy` / `DESTRUCTIVE_OPS` for the whole project. Op
-identifiers are driver-agnostic and capability-namespaced (`power.off_hard`,
-`media.connect`, `gpio.switch`); every driver funnels destructive calls through
-the same `guard()`, so safety semantics can't drift between devices.
+identifiers today are device-namespaced after the kvmd API (`atx.power_off_hard`,
+`msd.connect`, `gpio.switch`), and `FakeDriver` reuses those same ids verbatim;
+every driver funnels destructive calls through the same `guard()`, so safety
+semantics can't drift between devices. (A later step may rename them to
+driver-agnostic, capability-namespaced ids — e.g. `power.off_hard` — once a
+second device family lands.)
 
 ## Migration
 
 - [x] **Step 1 — capability protocols** ([`drivers/base.py`](../src/kvm_pilot/drivers/base.py)).
       `KVMClient` implements them via `CapabilityMixin`; no behaviour change.
 - [ ] **Step 2** — split `http.py` into `HttpTransport` + `AuthStrategy`.
-- [ ] **Step 3** — `PiKVMDriver` + `make_driver()` registry + `HostConfig.driver` + `--driver`.
-- [ ] **Step 4** — `RedfishDriver` (server BMCs) + `FakeDriver` (local smoke tests, #2).
+- [~] **Step 3 — driver registry.** `make_driver(kind, **conf)` + `register_driver()`
+      ([`drivers/__init__.py`](../src/kvm_pilot/drivers/__init__.py)) and a `--driver`
+      CLI flag have landed; `KVMClient` doubles as the PiKVM driver for now (kinds
+      `pikvm`/`glkvm`/`blikvm`). Still to come: a dedicated `PiKVMDriver` split and
+      `HostConfig.driver`.
+- [~] **Step 4 — drivers.** `FakeDriver` ([`drivers/fake.py`](../src/kvm_pilot/drivers/fake.py)) —
+      in-process, no hardware (#2) — has landed and is the first `BootProgress`
+      implementer, so the sensing protocols are no longer all speculative.
+      `RedfishDriver` (server BMCs) is next.
 - [ ] **Step 5** — entry-point plugins + a "writing a driver" guide; per-driver deps as extras.
 
 The zero-dependency stdlib core is preserved: the HTTP transport stays on
