@@ -19,11 +19,12 @@ Quickstart:
 from __future__ import annotations
 
 from .__about__ import __version__
-from .client import KVMClient, PiKVMClient
+from .client import KVMClient, PiKVMClient, PiKVMDriver
 from .config import HostConfig, resolve_host
-from .drivers import make_driver
+from .drivers import BliKVMDriver, GLKVMDriver, make_driver
 from .drivers.base import Capability, KVMDriver
 from .errors import (
+    ApiDisabledError,
     AuthError,
     BusyError,
     CapabilityError,
@@ -38,8 +39,11 @@ from .safety import SafetyPolicy, deny_all, interactive_confirm
 
 __all__ = [
     "__version__",
+    "PiKVMDriver",
     "KVMClient",
     "PiKVMClient",
+    "GLKVMDriver",
+    "BliKVMDriver",
     "HostConfig",
     "resolve_host",
     "SafetyPolicy",
@@ -54,6 +58,7 @@ __all__ = [
     "SafetyError",
     "VisionError",
     "CapabilityError",
+    "ApiDisabledError",
     "Capability",
     "KVMDriver",
     "make_driver",

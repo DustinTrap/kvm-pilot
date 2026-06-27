@@ -43,6 +43,15 @@ class CapabilityError(KVMPilotError):
     """The driver does not support the requested capability."""
 
 
+class ApiDisabledError(KVMPilotError):
+    """The device's REST API appears disabled.
+
+    The hallmark case is GL.iNet (GLKVM) firmware, which ships the PiKVM REST API
+    off by default — every ``/api/*`` returns 404 until it is enabled in
+    ``/etc/kvmd/nginx-kvmd.conf`` (and it can revert on a firmware upgrade).
+    """
+
+
 __all__ = [
     "KVMPilotError",
     "AuthError",
@@ -53,4 +62,5 @@ __all__ = [
     "SafetyError",
     "VisionError",
     "CapabilityError",
+    "ApiDisabledError",
 ]

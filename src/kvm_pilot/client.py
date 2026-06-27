@@ -27,7 +27,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .drivers.base import CapabilityMixin
-from .errors import AuthError, TimeoutError
+from .errors import ApiDisabledError, AuthError, KVMPilotError, TimeoutError
 from .http import HTTP
 from .safety import SafetyPolicy
 
@@ -37,8 +37,13 @@ if TYPE_CHECKING:
 logger = logging.getLogger("kvm_pilot.client")
 
 
-class KVMClient(CapabilityMixin):
-    """Full PiKVM / GLKVM API client.
+class PiKVMDriver(CapabilityMixin):
+    """Full PiKVM-family REST driver (canonical base of the PiKVM/GLKVM/BliKVM family).
+
+    This is the concrete client for stock PiKVM and any API-compatible device.
+    ``GLKVMDriver`` / ``BliKVMDriver`` (in ``kvm_pilot.drivers.pikvm``) subclass it
+    and override only the deltas. ``KVMClient`` and ``PiKVMClient`` are kept as
+    back-compatible aliases of this class.
 
     Args:
         host: IP or hostname of the KVM device.
@@ -54,6 +59,10 @@ class KVMClient(CapabilityMixin):
         confirm: Optional callback (op, description) -> bool gating destructive ops.
         max_retries: Bounded retries on transient errors (busy/unavailable/network).
     """
+
+    # Subclasses (GLKVMDriver) set this to make a 404 across /api/* surface as a
+    # clear ApiDisabledError with device-specific guidance. None for stock PiKVM.
+    _NOT_FOUND_HINT: str | None = None
 
     def __init__(
         self,
@@ -81,6 +90,7 @@ class KVMClient(CapabilityMixin):
             scheme=scheme,
             totp_secret=totp_secret,
             max_retries=max_retries,
+            not_found_hint=self._NOT_FOUND_HINT,
         )
         self.safety = SafetyPolicy(dry_run=dry_run, confirm=confirm)
 
@@ -92,12 +102,13 @@ class KVMClient(CapabilityMixin):
         confirm=None,
         dry_run: bool = False,
         max_retries: int = 3,
-    ) -> KVMClient:
-        """Build a client from a resolved :class:`~kvm_pilot.config.HostConfig`.
+    ) -> PiKVMDriver:
+        """Build a driver from a resolved :class:`~kvm_pilot.config.HostConfig`.
 
         Centralizes the field-by-field construction the CLI, MCP server, and
         examples would otherwise each repeat (and keeps ``scheme``/``timeout``
-        from silently drifting between call sites).
+        from silently drifting between call sites). Subclasses build their own
+        type (``cls``), so ``GLKVMDriver.from_config(cfg)`` returns a GLKVMDriver.
         """
         return cls(
             cfg.host,
@@ -112,6 +123,54 @@ class KVMClient(CapabilityMixin):
             confirm=confirm,
             max_retries=max_retries,
         )
+
+    # -- firmware / preflight -------------------------------------------
+
+    def get_firmware_info(self) -> dict:
+        """Best-effort firmware/version snapshot from ``/api/info``.
+
+        Normalizes the kvmd version, platform, and model so callers (and the
+        per-firmware quirk registry) can reason about the running release. Shapes
+        vary across PiKVM/GLKVM firmware, so every field is read defensively.
+        """
+        info = self.get_info()
+
+        def _sub(d: object, key: str) -> dict:
+            val = d.get(key) if isinstance(d, dict) else None
+            return val if isinstance(val, dict) else {}
+
+        system = _sub(info, "system")
+        kvmd = _sub(system, "kvmd")
+        platform = _sub(_sub(info, "hw"), "platform")
+        version = kvmd.get("version")
+        return {
+            "version": version,
+            "kvmd_version": version,
+            "platform": platform.get("base") or platform.get("type"),
+            "model": platform.get("model"),
+        }
+
+    def check_api_enabled(self) -> dict:
+        """Preflight: confirm the PiKVM REST API is reachable, else raise clearly.
+
+        On GL.iNet (GLKVM) firmware the API is disabled by default and every
+        ``/api/*`` returns 404; this turns that bare 404 into an actionable
+        :class:`~kvm_pilot.errors.ApiDisabledError`. Returns ``/api/info`` on success.
+        """
+        try:
+            return self.get_info()
+        except ApiDisabledError:
+            raise
+        except KVMPilotError as exc:
+            if exc.status_code == 404:
+                raise ApiDisabledError(
+                    "The PiKVM REST API returned 404. On GL.iNet (GLKVM) firmware "
+                    "the API is disabled by default — enable it in "
+                    "/etc/kvmd/nginx-kvmd.conf and restart kvmd (it can revert on "
+                    "a firmware upgrade).",
+                    404,
+                ) from exc
+            raise
 
     # -- auth ------------------------------------------------------------
 
@@ -503,7 +562,10 @@ class KVMClient(CapabilityMixin):
             time.sleep(0.2)
 
 
-# Backwards-compatible alias for anyone porting from the old skill module.
-PiKVMClient = KVMClient
+# ``KVMClient`` is the long-standing public name and stays as the canonical alias
+# of ``PiKVMDriver``; ``PiKVMClient`` is the older skill-module alias. All three
+# are the same class.
+KVMClient = PiKVMDriver
+PiKVMClient = PiKVMDriver
 
-__all__ = ["KVMClient", "PiKVMClient"]
+__all__ = ["PiKVMDriver", "KVMClient", "PiKVMClient"]

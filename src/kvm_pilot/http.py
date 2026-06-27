@@ -23,6 +23,7 @@ import urllib.request
 from typing import Any
 
 from .errors import (
+    ApiDisabledError,
     AuthError,
     BusyError,
     ConnectionError,
@@ -64,6 +65,7 @@ class HTTP:
         totp_secret: str | None = None,
         max_retries: int = 3,
         backoff_base: float = 0.5,
+        not_found_hint: str | None = None,
     ):
         self._base = f"{scheme}://{host}:{port}"
         self._user = user
@@ -72,6 +74,9 @@ class HTTP:
         self._totp_secret = totp_secret
         self._max_retries = max(0, max_retries)
         self._backoff_base = backoff_base
+        # Appended to a 404's error (and promotes it to ApiDisabledError) — set by
+        # the GLKVM driver, whose firmware 404s every /api/* until the API is enabled.
+        self._not_found_hint = not_found_hint
         self._verify_ssl = verify_ssl
         self._ssl_ctx = ssl.create_default_context()
         if not verify_ssl:
@@ -130,6 +135,8 @@ class HTTP:
             raise BusyError(f"Device busy (HTTP {status}): {text}", status)
         if status == 503:
             raise UnavailableError(f"Subsystem unavailable (HTTP {status}): {text}", status)
+        if status == 404 and self._not_found_hint:
+            raise ApiDisabledError(f"HTTP 404: {text}\n{self._not_found_hint}", status)
         raise KVMPilotError(f"HTTP {status}: {text}", status)
 
     @staticmethod

@@ -10,6 +10,7 @@ port = 443
 scheme = "https"
 verify_ssl = false          # GL/PiKVM ship self-signed certs
 timeout = 30.0
+driver = "glkvm"            # pikvm (default) | glkvm | blikvm | fake | redfish
 # totp_secret = "BASE32SECRET"   # only if 2FA is enabled (needs the 'totp' extra)
 
 [hosts.rack2]
