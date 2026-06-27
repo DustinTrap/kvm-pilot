@@ -134,9 +134,7 @@ class HTTP:
 
     @staticmethod
     def _is_retryable(exc: Exception) -> bool:
-        if isinstance(exc, (BusyError, UnavailableError, ConnectionError)):
-            return True
-        return False
+        return isinstance(exc, (BusyError, UnavailableError, ConnectionError))
 
     # -- core request with retry ----------------------------------------
 
@@ -229,9 +227,6 @@ class HTTP:
         return self.request(
             "POST", path, params=params, data=body, content_type=content_type, **kw
         )
-
-    def delete(self, path: str, **kw) -> Any:
-        return self.request("DELETE", path, **kw)
 
     # -- session login (captures Set-Cookie) ----------------------------
 

@@ -37,17 +37,7 @@ _POWER_ACTIONS = {
 
 def _make_client(profile: str | None, *, confirm):
     cfg = resolve_host(profile or os.environ.get("KVM_PILOT_PROFILE"))
-    return KVMClient(
-        cfg.host,
-        cfg.user,
-        cfg.passwd,
-        port=cfg.port,
-        scheme=cfg.scheme,
-        verify_ssl=cfg.verify_ssl,
-        timeout=cfg.timeout,
-        totp_secret=cfg.totp_secret,
-        confirm=confirm,
-    )
+    return KVMClient.from_config(cfg, confirm=confirm)
 
 
 @mcp.tool()

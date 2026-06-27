@@ -15,10 +15,7 @@ The Messages API call uses only the Python standard library.
 
 from __future__ import annotations
 
-import json
 import os
-import urllib.error
-import urllib.request
 
 from ..errors import VisionError
 from .base import (
@@ -27,6 +24,7 @@ from .base import (
     VisionBackend,
     build_user_text,
     parse_classification,
+    request_json,
 )
 
 _API_BASE = "https://api.anthropic.com"
@@ -137,29 +135,16 @@ class AnthropicBackend(VisionBackend):
         }
 
     def _http_post_json(self, path: str, payload: dict) -> dict:
-        req = urllib.request.Request(
-            self._api_base + path,
-            data=json.dumps(payload).encode(),
-            method="POST",
-            headers=self._headers(),
+        return request_json(
+            "POST", self._api_base + path, headers=self._headers(),
+            timeout=self._timeout, payload=payload, label="Anthropic API",
         )
-        return self._send(req)
 
     def _http_get_json(self, path: str) -> dict:
-        req = urllib.request.Request(
-            self._api_base + path, method="GET", headers=self._headers()
+        return request_json(
+            "GET", self._api_base + path, headers=self._headers(),
+            timeout=self._timeout, label="Anthropic API",
         )
-        return self._send(req)
-
-    def _send(self, req: urllib.request.Request) -> dict:
-        try:
-            with urllib.request.urlopen(req, timeout=self._timeout) as resp:
-                return json.loads(resp.read().decode())
-        except urllib.error.HTTPError as exc:
-            body = exc.read().decode(errors="replace")
-            raise VisionError(f"Anthropic API HTTP {exc.code}: {body[:400]}") from exc
-        except urllib.error.URLError as exc:
-            raise VisionError(f"Anthropic API network error: {exc.reason}") from exc
 
 
 __all__ = ["AnthropicBackend"]

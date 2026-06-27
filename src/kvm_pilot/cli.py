@@ -8,10 +8,15 @@ without sending them. Credentials resolve through kvm_pilot.config (flags > env
 
 Examples:
     kvm-pilot info --host 192.168.8.1 --user admin --passwd secret
+    kvm-pilot capabilities --profile homelab        # what this driver supports
     kvm-pilot snapshot out.jpg --profile homelab
-    kvm-pilot power-cycle --profile homelab --dry-run
+    kvm-pilot --timeout 60 power-cycle --profile homelab --dry-run
+    kvm-pilot events --profile homelab --count 5    # needs the 'ws' extra
     kvm-pilot watch grub_menu --profile homelab --backend local \\
         --vision-url http://127.0.0.1:1234/v1 --vision-model qwen2.5-vl-7b
+
+``--timeout`` (HTTP per-request timeout) is a global flag and must precede the
+subcommand; ``watch`` keeps its own ``--timeout`` for the vision wait deadline.
 """
 
 from __future__ import annotations
@@ -35,21 +40,14 @@ def _build_client(args) -> KVMClient:
         user=getattr(args, "user", None),
         passwd=getattr(args, "passwd", None),
         port=getattr(args, "port", None),
+        scheme=getattr(args, "scheme", None),
+        timeout=getattr(args, "http_timeout", None),
         totp_secret=getattr(args, "totp_secret", None),
         verify_ssl=getattr(args, "verify_ssl", None),
     )
     confirm = allow_all if getattr(args, "yes", False) else interactive_confirm
-    return KVMClient(
-        cfg.host,
-        cfg.user,
-        cfg.passwd,
-        port=cfg.port,
-        scheme=cfg.scheme,
-        verify_ssl=cfg.verify_ssl,
-        timeout=cfg.timeout,
-        totp_secret=cfg.totp_secret,
-        dry_run=getattr(args, "dry_run", False),
-        confirm=confirm,
+    return KVMClient.from_config(
+        cfg, confirm=confirm, dry_run=getattr(args, "dry_run", False)
     )
 
 
@@ -61,9 +59,7 @@ def _make_analyzer(kvm: KVMClient, args):
             "local", base_url=args.vision_url, model=args.vision_model
         )
     else:
-        backend = make_backend(
-            "anthropic", model=getattr(args, "vision_model", None) or None
-        )
+        backend = make_backend("anthropic", model=args.vision_model)
     return ScreenAnalyzer(kvm, backend)
 
 
@@ -148,6 +144,41 @@ def cmd_watch(args) -> int:
     return 0
 
 
+def cmd_capabilities(args) -> int:
+    from .drivers.base import Capability
+
+    kvm = _build_client(args)
+    caps = kvm.capabilities()  # structural; makes no network call
+    # Print in the capability enum's declaration order for stable output.
+    ordered = [c.value for c in Capability if c in caps]
+    if args.json:
+        print(json.dumps(ordered))
+    else:
+        print(", ".join(ordered) if ordered else "(none)")
+    return 0
+
+
+def cmd_events(args) -> int:
+    kvm = _build_client(args)
+    try:
+        seen = 0
+        for evt in kvm.watch_events(stream=not args.no_stream, timeout=args.duration):
+            print(json.dumps(
+                {"event_type": evt.get("event_type"), "event": evt.get("event", {})},
+                default=str,
+            ))
+            seen += 1
+            if args.count and seen >= args.count:
+                break
+    except ImportError as exc:
+        # The 'ws' extra (websocket-client) is not installed.
+        print(f"error: {exc}", file=sys.stderr)
+        return 1
+    except KeyboardInterrupt:
+        pass
+    return 0
+
+
 # -- parser ----------------------------------------------------------------
 
 def _add_common(p: argparse.ArgumentParser) -> None:
@@ -155,6 +186,7 @@ def _add_common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--user")
     p.add_argument("--passwd")
     p.add_argument("--port", type=int)
+    p.add_argument("--scheme", choices=["http", "https"])
     p.add_argument("--profile", help="Named host profile from the config file")
     p.add_argument("--totp-secret", dest="totp_secret")
     p.add_argument("--verify-ssl", dest="verify_ssl", action="store_true", default=None)
@@ -177,11 +209,20 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="kvm-pilot", description=__doc__)
     parser.add_argument("--version", action="version", version=f"kvm-pilot {__version__}")
     parser.add_argument("-v", "--verbose", action="store_true", help="Debug logging")
+    parser.add_argument(
+        "--timeout", dest="http_timeout", type=float, metavar="SECONDS",
+        help="HTTP per-request timeout in seconds (global; must precede the subcommand)",
+    )
     sub = parser.add_subparsers(dest="command", required=True)
 
     p = sub.add_parser("info", help="Print device info as JSON")
     _add_common(p)
     p.set_defaults(func=cmd_info)
+
+    p = sub.add_parser("capabilities", help="List the capabilities this driver supports (offline)")
+    p.add_argument("--json", action="store_true", help="Emit a JSON array instead of a comma list")
+    _add_common(p)
+    p.set_defaults(func=cmd_capabilities)
 
     p = sub.add_parser("snapshot", help="Save a screenshot")
     p.add_argument("output")
@@ -222,10 +263,20 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("watch", help="Wait until the screen reaches a phase")
     p.add_argument("phase")
-    p.add_argument("--timeout", type=float, default=300.0)
+    p.add_argument("--timeout", type=float, default=300.0,
+                   help="Vision wait-loop deadline in seconds (distinct from the global --timeout)")
     _add_common(p)
     _add_vision(p)
     p.set_defaults(func=cmd_watch)
+
+    p = sub.add_parser("events", help="Stream device events (requires the 'ws' extra)")
+    p.add_argument("--duration", type=float,
+                   help="Stop after N seconds (default: until interrupted)")
+    p.add_argument("--count", type=int, help="Stop after N events")
+    p.add_argument("--no-stream", dest="no_stream", action="store_true",
+                   help="Request a single state snapshot instead of a live stream")
+    _add_common(p)
+    p.set_defaults(func=cmd_events)
 
     return parser
 

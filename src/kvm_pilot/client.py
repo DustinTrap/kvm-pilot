@@ -24,12 +24,15 @@ import ssl
 import time
 from collections.abc import Generator
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from .drivers.base import CapabilityMixin
 from .errors import AuthError, TimeoutError
 from .http import HTTP
 from .safety import SafetyPolicy
+
+if TYPE_CHECKING:
+    from .config import HostConfig
 
 logger = logging.getLogger("kvm_pilot.client")
 
@@ -80,6 +83,35 @@ class KVMClient(CapabilityMixin):
             max_retries=max_retries,
         )
         self.safety = SafetyPolicy(dry_run=dry_run, confirm=confirm)
+
+    @classmethod
+    def from_config(
+        cls,
+        cfg: HostConfig,
+        *,
+        confirm=None,
+        dry_run: bool = False,
+        max_retries: int = 3,
+    ) -> KVMClient:
+        """Build a client from a resolved :class:`~kvm_pilot.config.HostConfig`.
+
+        Centralizes the field-by-field construction the CLI, MCP server, and
+        examples would otherwise each repeat (and keeps ``scheme``/``timeout``
+        from silently drifting between call sites).
+        """
+        return cls(
+            cfg.host,
+            cfg.user,
+            cfg.passwd,
+            port=cfg.port,
+            scheme=cfg.scheme,
+            verify_ssl=cfg.verify_ssl,
+            timeout=cfg.timeout,
+            totp_secret=cfg.totp_secret,
+            dry_run=dry_run,
+            confirm=confirm,
+            max_retries=max_retries,
+        )
 
     # -- auth ------------------------------------------------------------
 
@@ -201,12 +233,6 @@ class KVMClient(CapabilityMixin):
     def ctrl_alt_delete(self) -> None:
         if self.safety.guard("hid.ctrl_alt_delete", f"Send Ctrl+Alt+Del to {self.host}"):
             self.send_shortcut("ControlLeft,AltLeft,Delete")
-
-    def ctrl_c(self) -> None:
-        self.send_shortcut("ControlLeft,KeyC")
-
-    def ctrl_z(self) -> None:
-        self.send_shortcut("ControlLeft,KeyZ")
 
     def set_hid_params(
         self,
@@ -475,12 +501,6 @@ class KVMClient(CapabilityMixin):
         for _ in range(8):
             self.press_key(key, hold_ms=100)
             time.sleep(0.2)
-
-    def __enter__(self) -> KVMClient:
-        return self
-
-    def __exit__(self, *_) -> None:
-        pass
 
 
 # Backwards-compatible alias for anyone porting from the old skill module.

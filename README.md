@@ -91,15 +91,19 @@ kvm.press_key("Enter")
 
 ```bash
 kvm-pilot info     --host 192.168.8.1 --user admin --passwd secret
+kvm-pilot capabilities --profile homelab                 # what this driver supports
 kvm-pilot snapshot screen.jpg --profile homelab
-kvm-pilot power-cycle --profile homelab --dry-run        # log, don't send
+kvm-pilot --timeout 60 power-cycle --profile homelab --dry-run   # log, don't send
+kvm-pilot events --profile homelab --count 5             # stream events ('ws' extra)
 kvm-pilot watch grub_menu --profile homelab \
     --backend local --vision-url http://127.0.0.1:1234/v1 --vision-model qwen2.5-vl-7b
 ```
 
 The CLI prompts for confirmation before any destructive action. Use `--yes` to
 skip prompts in automation, or `--dry-run` to log intended actions without
-sending them.
+sending them. `--timeout` (HTTP per-request timeout) is a global flag and goes
+*before* the subcommand; `watch` keeps its own `--timeout` for the vision wait
+deadline.
 
 ## Boot-phase detection
 

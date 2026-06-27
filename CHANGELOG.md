@@ -22,6 +22,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `ScreenAnalyzer` gates: `gate_on_power_signal`, `skip_unchanged_frames` (both
   default on) and opt-in `ocr_rules` (with `DEFAULT_OCR_RULES`), plus
   `vlm_calls` / `cheap_resolves` counters.
+- **CLI `capabilities`** — print the capabilities the active driver supports
+  (offline; no network call).
+- **CLI `events`** — stream device events over the WebSocket (`--duration`,
+  `--count`, `--no-stream`); requires the `ws` extra.
+- **Global `--timeout`** flag (HTTP per-request timeout) plus the matching
+  `KVM_PILOT_TIMEOUT` env var; `scheme` now also resolves through the full
+  args > env > file precedence with a `--scheme` flag / `KVM_PILOT_SCHEME`.
+- `KVMClient.from_config(cfg)` — one constructor for the field-by-field build
+  the CLI, MCP server, and examples each previously repeated.
 
 ### Changed
 - `ScreenAnalyzer.classify()` now resolves from cheap signals before calling the
@@ -29,6 +38,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   model), an unchanged-frame skip (reuse the last result), and optional
   OCR-assist for text screens. In a typical boot-watch this avoids most model
   calls; set the flags to `False` to restore unconditional classification.
+- Internal simplifications (no public behaviour change): a single
+  `vision.base.request_json()` helper backs both vision backends; the classifier
+  system prompt interpolates `ALL_PHASES` so its token list can no longer drift
+  from the parser's; `scheme`/`timeout` no longer bypass config precedence.
+
+### Removed
+- Unused surface: `HTTP.delete()`, the no-op `KVMClient`/`ScreenAnalyzer`
+  context managers, the `detect_state` alias, and the `ctrl_c`/`ctrl_z` HID
+  shortcuts (use `send_shortcut(...)`).
 
 ## [0.1.0a1] — 2026-06-26
 

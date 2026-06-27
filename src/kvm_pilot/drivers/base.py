@@ -105,8 +105,11 @@ class Events(Protocol):
 # cheaply than classifying a screenshot. The PiKVM client implements ``Logs``
 # today (``/api/log``); the rest are the seam for the Redfish and IPMI drivers
 # (``BootProgress`` from ComputerSystem, ``Sensors``/``SerialConsole`` from the
-# BMC, ``Watchdog`` from IPMI). A driver implements only what its hardware has;
-# ``ScreenAnalyzer``/``PhaseResolver`` prefers them over the vision backend.
+# BMC, ``Watchdog`` from IPMI). A driver implements only what its hardware has.
+# They are the intended cheaper-than-vision source for boot phase / liveness:
+# today ``ScreenAnalyzer`` gates on the device's own probes (``is_powered_on``,
+# ``has_video_signal``, ``snapshot_ocr``); a driver that implements these will
+# let it answer from structured state in more cases. See docs/sensing-hierarchy.svg.
 
 
 @runtime_checkable

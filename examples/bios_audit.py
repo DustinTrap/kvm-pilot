@@ -31,9 +31,7 @@ def main() -> int:
     args = ap.parse_args()
 
     cfg = resolve_host()
-    kvm = KVMClient(cfg.host, cfg.user, cfg.passwd, port=cfg.port,
-                    verify_ssl=cfg.verify_ssl, totp_secret=cfg.totp_secret,
-                    confirm=allow_all)
+    kvm = KVMClient.from_config(cfg, confirm=allow_all)
 
     backend = (make_backend("local", base_url=args.local[0], model=args.local[1])
                if args.local else make_backend("anthropic"))

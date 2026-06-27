@@ -51,6 +51,8 @@ def resolve_host(
     user: str | None = None,
     passwd: str | None = None,
     port: int | None = None,
+    scheme: str | None = None,
+    timeout: float | None = None,
     totp_secret: str | None = None,
     verify_ssl: bool | None = None,
     config_path: Path | None = None,
@@ -90,9 +92,9 @@ def resolve_host(
         user=pick("user", user, "KVM_PILOT_USER", "admin"),
         passwd=pick("passwd", passwd, "KVM_PILOT_PASSWD", "admin"),
         port=int(port_val),
-        scheme=base.get("scheme", "https"),
+        scheme=pick("scheme", scheme, "KVM_PILOT_SCHEME", "https"),
         verify_ssl=bool(verify_val),
-        timeout=float(base.get("timeout", 30.0)),
+        timeout=float(pick("timeout", timeout, "KVM_PILOT_TIMEOUT", 30.0)),
         totp_secret=pick("totp_secret", totp_secret, "KVM_PILOT_TOTP_SECRET"),
     )
 
