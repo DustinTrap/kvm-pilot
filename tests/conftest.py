@@ -54,3 +54,15 @@ def client(fake_http):
     c = KVMClient("fake", "admin", "secret")
     c._http = fake_http
     return c
+
+
+@pytest.fixture
+def emu():
+    """A running pure-stdlib fake DMTF Redfish service (see redfish_emulator.py).
+
+    Shared by the RedfishDriver tests and the CLI ``--driver redfish`` tests.
+    """
+    from redfish_emulator import RedfishEmulator
+
+    with RedfishEmulator() as e:
+        yield e

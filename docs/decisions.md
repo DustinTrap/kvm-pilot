@@ -5,6 +5,57 @@ are intentional**, so they don't get re-litigated. Newest first.
 
 ## Drivers
 
+### Capability-aware CLI dispatch: gate on `supports()`, then cast to the rich driver union ([#27](https://github.com/DustinTrap/kvm-pilot/issues/27))
+Each subcommand declares the capability it needs; `_client(args, cap)` builds the
+driver and rejects it with a clean message + exit 1 (not an `AttributeError`) when it
+lacks the capability, deriving the command name from `args.command`. `_rich_client`
+wraps it and `cast`s to `KVMClient | FakeDriver` (the `RichDriver` alias) — which looks
+like a type lie. It's sound: `RedfishDriver` is the only capability-partial driver and
+it lacks exactly HID/Video/Events, so gating on one of those excludes it, leaving the
+PiKVM-family/Fake surface that carries the convenience kwargs (`slow=`, `quality=`,
+`stream=`) the minimal capability protocols don't declare. A future rich-but-partial
+driver would need its own Protocol rather than this cast.
+
+### `RedfishDriver.hard_cycle` exists even though `hard_cycle` is not a capability
+`power-cycle` gates on `POWER`, but `hard_cycle` isn't part of the `Power` protocol —
+`KVMClient`/`FakeDriver` carried it as a convenience, `RedfishDriver` didn't, so
+`power-cycle --driver redfish` would `AttributeError` despite a BMC plainly having
+power. Added `hard_cycle` (force-off → on) so the invariant "advertises `POWER` ⇒ the
+CLI `power-cycle` works" holds for every power driver. Its `off_delay`/`on_delay`
+default to `0.0` (unlike `KVMClient`'s ATX settle delays) because the two gated power
+ops already block on the real `PowerState` transition.
+
+It is now the *third* copy of the same `power_off_hard → power_on` composition
+(`KVMClient`, `FakeDriver`, `RedfishDriver`). A shared `PowerMixin.hard_cycle`
+(composed from the protocol methods, with the settle delays as an overridable class
+attribute) is the better home and would make the invariant structural — **deferred on
+purpose**: the clean version changes `KVMClient.hard_cycle`'s public `off_delay`/
+`on_delay` signature and touches the primary (real-hardware) PiKVM path, which is out
+of scope for the CLI-dispatch change. Tracked as follow-up, not churned into #27.
+
+### `--redfish-auth` selector, defaulting to `session`
+Session auth is the BMC norm (and what real iDRAC/iLO recommend), so it stays the
+default. But sushy-tools' `--fake` emulator exposes no `SessionService`, and a BMC can
+administratively disable session or basic auth (cf.
+[#29](https://github.com/DustinTrap/kvm-pilot/issues/29)) — an "unlocked" `--driver
+redfish` that could *only* do session auth couldn't authenticate to either. The
+`basic` opt-in keeps the unlock honest. It's redfish-only and ignored by the PiKVM
+family.
+
+### Two-layer Redfish testing: in-process mock for the CLI path, external sushy-tools for independence
+The pure-stdlib `tests/redfish_emulator.py` validates the full CLI → driver → HTTP
+path in the default hermetic suite (`test_cli_redfish.py`). The opt-in `integration`
+job (`tests/integration/`) runs the same surface against DMTF-conformant **sushy-tools**
+`sushy-emulator --fake` — an *independently authored* implementation, so a spec
+assumption shared by our driver and our own mock can't hide. sushy's fake driver has
+no `SessionService`, hence the basic-auth path; it applies power transitions with a
+short simulated delay that the driver's wait loop absorbs. The `--fake` backend needs
+no libvirt/QEMU and no nested KVM, so it runs on a stock GitHub runner (pip-install +
+self-started subprocess — no Docker, no `services:` container). The fixture also honors
+`KVM_PILOT_REDFISH_URL` so the same tests can run against an already-running emulator —
+the local-Docker fallback (`quay.io/metal3-io/sushy-tools`) when sushy-tools isn't on
+PATH.
+
 ### Kept the 4 unimplemented sensing protocols (`BootProgress`, `Sensors`, `SerialConsole`, `Watchdog`)
 They landed with zero implementers, which reads like dead code. Kept on purpose:
 they are the documented seam for BMC drivers, and they're no longer speculative —
@@ -28,12 +79,6 @@ sets no hint, so its 404s stay generic (see `test_stock_pikvm_404_is_a_plain_err
 `GLKVM_QUIRKS` is seeded with the single documented quirk and grows from real
 testing (`source="observed"`). Never invent firmware-version-specific data — the
 project's honesty rule (alpha, untested on hardware) applies to the quirk DB too.
-
-### `RedfishDriver` is library/registry-only, not on the CLI `--driver` list
-A BMC is capability-partial (no HID/Video; no `hard_cycle`/`watch_events`), so CLI
-subcommands like `type`/`snapshot`/`events` would `AttributeError`. It's exposed via
-`make_driver("redfish")`; the CLI entry waits on capability-aware dispatch
-([#27](https://github.com/DustinTrap/kvm-pilot/issues/27)).
 
 ### Redfish action POSTs keep the default retry (on transient errors)
 Reviewers flagged retrying non-idempotent POSTs (reset/insert). Kept: those ops are

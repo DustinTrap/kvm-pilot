@@ -43,6 +43,25 @@ jobs:
           path: coverage.xml
           if-no-files-found: ignore
 
+  redfish-integration:
+    # Validates `--driver redfish` end-to-end against an external, DMTF-conformant
+    # reference emulator (sushy-tools, --fake driver). The fake backend needs no
+    # libvirt/QEMU and no nested KVM, so it runs on a stock GitHub-hosted runner;
+    # the tests/integration conftest starts `sushy-emulator` itself.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - name: Install project + external Redfish emulator
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+          pip install "sushy-tools==2.2.0"   # pinned so an upstream change can't redden unrelated PRs
+      - name: Integration tests vs sushy-emulator (--fake)
+        run: pytest tests/integration -m integration -v
+
   security:
     runs-on: ubuntu-latest
     steps:

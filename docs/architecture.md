@@ -126,9 +126,11 @@ second device family lands.)
       (`SystemInfo`, `Power`, `BootProgress`, `Sensors`, `Logs`, `VirtualMedia`) and
       none of `HID`/`Video`/`GPIO`, so structured-state sensing (`BootProgress`,
       `Sensors`) finally has real implementers alongside the PiKVM pixels.
-      `RedfishDriver` is currently a library/`make_driver("redfish")` driver; wiring
-      it into the CLI awaits **capability-aware `--driver` dispatch** (so commands
-      that need a capability a device lacks fail cleanly instead of `AttributeError`).
+      `RedfishDriver` is on the CLI (`--driver redfish`) via **capability-aware
+      `--driver` dispatch** ([#27](https://github.com/DustinTrap/kvm-pilot/issues/27)):
+      a subcommand needing a capability the device lacks fails cleanly (exit 1)
+      instead of `AttributeError`, and the `redfish` path is validated end-to-end
+      against an external DMTF-conformant emulator (sushy-tools) in CI.
 - [ ] **Step 5** — entry-point plugins + a "writing a driver" guide; per-driver deps as extras.
 
 The zero-dependency stdlib core is preserved: the HTTP transport stays on

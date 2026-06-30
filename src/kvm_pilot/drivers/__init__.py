@@ -118,13 +118,14 @@ def make_driver(kind: str = "pikvm", **conf: object) -> KVMDriver:
 
 def make_driver_from_config(
     cfg: HostConfig, *, confirm: Callable[[str, str], bool] | None = None, dry_run: bool = False
-) -> KVMClient | FakeDriver:
+) -> KVMClient | FakeDriver | RedfishDriver:
     """Build the driver named by ``cfg.driver`` from a resolved ``HostConfig``.
 
     Shared by the CLI and the MCP server so a profile/env that pins
     ``driver = "glkvm"`` is honored everywhere — not just via ``--driver``. It is
-    shape-aware (the fake driver takes no credentials; the PiKVM family builds via
-    ``from_config``), unlike a raw ``make_driver(**all_fields)`` call.
+    shape-aware (the fake driver takes no credentials; the PiKVM family and the
+    Redfish BMC build via ``from_config``), unlike a raw ``make_driver(**all_fields)``
+    call.
     """
     kind = cfg.driver
     if kind == "fake":
@@ -137,9 +138,13 @@ def make_driver_from_config(
 
         cls = {"pikvm": PiKVMDriver, "glkvm": GLKVMDriver, "blikvm": BliKVMDriver}[kind]
         return cls.from_config(cfg, confirm=confirm, dry_run=dry_run)
+    if kind == "redfish":
+        from .redfish import RedfishDriver
+
+        return RedfishDriver.from_config(cfg, confirm=confirm, dry_run=dry_run)
     raise KVMPilotError(
         f"Driver {kind!r} does not support from-config construction here "
-        "(supported: pikvm, glkvm, blikvm, fake). Build it directly with "
+        "(supported: pikvm, glkvm, blikvm, redfish, fake). Build it directly with "
         f"make_driver({kind!r}, ...) from the library."
     )
 
