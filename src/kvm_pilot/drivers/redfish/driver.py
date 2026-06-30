@@ -28,7 +28,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from ...errors import CapabilityError, KVMPilotError, TimeoutError
 from ...safety import SafetyPolicy
@@ -42,6 +42,9 @@ from ...vision.base import (
 )
 from ..base import CapabilityMixin
 from .transport import RedfishHTTP
+
+if TYPE_CHECKING:
+    from ...config import HostConfig
 
 logger = logging.getLogger("kvm_pilot.redfish")
 
@@ -133,6 +136,36 @@ class RedfishDriver(CapabilityMixin):
         # (insert, eject, slot) keyed by cdrom flag — CD vs removable media differ.
         self._vm: dict[bool, tuple[str, str, str]] = {}
         self._log_entries_uri: str | None = None
+
+    @classmethod
+    def from_config(
+        cls,
+        cfg: HostConfig,
+        *,
+        confirm: Callable[[str, str], bool] | None = None,
+        dry_run: bool = False,
+        max_retries: int = 3,
+    ) -> RedfishDriver:
+        """Build a driver from a resolved :class:`~kvm_pilot.config.HostConfig`.
+
+        Mirrors ``PiKVMDriver.from_config`` so the CLI and MCP server construct a
+        BMC the same way they build a PiKVM. ``totp_secret`` has no Redfish
+        analogue (a BMC authenticates with HTTP Basic or a Redfish session), so it
+        is ignored here.
+        """
+        return cls(
+            cfg.host,
+            cfg.user,
+            cfg.passwd,
+            port=cfg.port,
+            scheme=cfg.scheme,
+            verify_ssl=cfg.verify_ssl,
+            timeout=cfg.timeout,
+            auth=cfg.redfish_auth,
+            dry_run=dry_run,
+            confirm=confirm,
+            max_retries=max_retries,
+        )
 
     # -- discovery -------------------------------------------------------
 
@@ -413,6 +446,24 @@ class RedfishDriver(CapabilityMixin):
             "reset_hard", "redfish.reset_hard",
             f"HARD reset {self.host} (data loss risk)", wait, None,
         )
+
+    def hard_cycle(self, off_delay: float = 0.0, on_delay: float = 0.0) -> None:
+        """Force off then power on — a full off→on cycle.
+
+        A BMC has no ATX double-tap, so this composes the two gated power ops.
+        Both already block on the real PowerState transition (``power_off_hard``
+        waits for Off, ``power_on`` waits for On), so no fixed settle delay is
+        needed; ``off_delay``/``on_delay`` are optional caller-tunable pauses,
+        defaulting to none. Lets every POWER driver answer ``power-cycle``
+        uniformly (signature mirrors ``FakeDriver.hard_cycle``).
+        """
+        logger.info("Hard power cycling %s via Redfish", self.host)
+        self.power_off_hard()
+        if off_delay:
+            time.sleep(off_delay)
+        self.power_on()
+        if on_delay:
+            time.sleep(on_delay)
 
     # -- BootProgress ----------------------------------------------------
 

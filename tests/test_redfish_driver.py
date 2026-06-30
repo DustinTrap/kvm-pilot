@@ -14,13 +14,9 @@ from kvm_pilot.drivers.base import Capability
 from kvm_pilot.drivers.redfish.transport import RedfishHTTP
 from kvm_pilot.errors import AuthError, CapabilityError, KVMPilotError, SafetyError
 from kvm_pilot.safety import deny_all
-from redfish_emulator import RESET, VM_EJECT, VM_INSERT, RedfishEmulator
+from redfish_emulator import RESET, VM_EJECT, VM_INSERT
 
-
-@pytest.fixture
-def emu():
-    with RedfishEmulator() as e:
-        yield e
+# The `emu` fixture (a running RedfishEmulator) is shared from tests/conftest.py.
 
 
 def make(emu, **kw) -> RedfishDriver:

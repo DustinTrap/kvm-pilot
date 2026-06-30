@@ -242,6 +242,11 @@ bmc.read_sensors()["temperatures"]
 bmc.power_off(wait=True)       # mapped to the target's actual ResetType, gated
 ```
 
+It's on the CLI too — `kvm-pilot info --driver redfish --host idrac.lan …`.
+Capability-specific subcommands a BMC can't serve (`type`, `snapshot`, `events`)
+fail cleanly rather than crashing. Add `--redfish-auth basic` for an endpoint
+without a SessionService (emulators, or a BMC with session auth disabled).
+
 ## License
 
 Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE). `kvm-pilot` is

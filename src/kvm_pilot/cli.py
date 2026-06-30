@@ -25,22 +25,30 @@ import argparse
 import json
 import logging
 import sys
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from .__about__ import __version__
 from .client import KVMClient
 from .config import resolve_host
 from .drivers import make_driver_from_config
-from .errors import KVMPilotError, SafetyError
+from .drivers.base import Capability
+from .errors import CapabilityError, KVMPilotError, SafetyError
 from .safety import allow_all, interactive_confirm
 
 if TYPE_CHECKING:
-    # Either built-in driver the CLI can drive — both implement the surface the
-    # subcommands use (power, HID, snapshot, events, capabilities, ...).
+    # Drivers the CLI can construct. KVMClient (PiKVM family) and FakeDriver expose
+    # the full HID/Video/Events surface the subcommands call; RedfishDriver is
+    # capability-partial (a BMC — strong on structured state, but no keyboard or
+    # screen), so capability-specific subcommands gate on supports() before
+    # dispatch instead of AttributeError-ing deep in a handler.
     from .drivers.fake import FakeDriver
+    from .drivers.redfish import RedfishDriver
+
+    AnyDriver = KVMClient | FakeDriver | RedfishDriver
+    RichDriver = KVMClient | FakeDriver
 
 
-def _build_client(args) -> KVMClient | FakeDriver:
+def _build_client(args) -> AnyDriver:
     confirm = allow_all if getattr(args, "yes", False) else interactive_confirm
     dry_run = getattr(args, "dry_run", False)
     cfg = resolve_host(
@@ -54,6 +62,7 @@ def _build_client(args) -> KVMClient | FakeDriver:
         totp_secret=getattr(args, "totp_secret", None),
         verify_ssl=getattr(args, "verify_ssl", None),
         driver=getattr(args, "driver", None),
+        redfish_auth=getattr(args, "redfish_auth", None),
     )
     # Shared with the MCP server so cfg.driver is honored the same way everywhere.
     return make_driver_from_config(cfg, confirm=confirm, dry_run=dry_run)
@@ -71,23 +80,67 @@ def _make_analyzer(kvm: KVMClient | FakeDriver, args):
     return ScreenAnalyzer(kvm, backend)
 
 
+# -- capability dispatch ---------------------------------------------------
+#
+# Drivers advertise capabilities structurally (drivers.base), so each subcommand
+# declares the one it needs and the dispatcher fails cleanly when the active
+# driver lacks it — the seam that lets a capability-partial driver (e.g.
+# --driver redfish, a BMC with no HID/Video) coexist with the full-featured
+# PiKVM family.
+
+
+def _driver_label(kvm) -> str:
+    # "RedfishDriver" -> "redfish": the registry kind, derived from the class so
+    # the kind names aren't copied into a second map to keep in sync.
+    return type(kvm).__name__.removesuffix("Driver").lower()
+
+
+def _client(args, capability: Capability) -> AnyDriver:
+    """Build the driver and fail cleanly if it can't serve this subcommand.
+
+    The required capability is checked up front — a structural, network-free probe
+    (``supports()``) — so a command a device lacks exits 1 with a clear message
+    instead of ``AttributeError``-ing deep in the handler. The subcommand name for
+    the message comes from ``args.command`` (the argparse ``dest``).
+    """
+    kvm = _build_client(args)
+    if not kvm.supports(capability):
+        raise CapabilityError(
+            f"'{args.command}' needs the {capability.value} capability, which the "
+            f"{_driver_label(kvm)} driver does not provide"
+        )
+    return kvm
+
+
+def _rich_client(args, capability: Capability) -> RichDriver:
+    """``_client`` for subcommands that use the full HID/Video/Events surface.
+
+    Gating on HID/Video/Events excludes RedfishDriver — the only capability-partial
+    driver, and the only one lacking those — leaving the PiKVM-family/Fake surface
+    that carries the convenience kwargs (``slow=``, ``quality=``, ``stream=``) the
+    minimal capability protocols don't declare. The cast records that narrowing for
+    the type checker (see docs/decisions.md).
+    """
+    return cast("RichDriver", _client(args, capability))
+
+
 # -- subcommand handlers ---------------------------------------------------
 
 def cmd_info(args) -> int:
-    kvm = _build_client(args)
+    kvm = _client(args, Capability.SYSTEM_INFO)
     print(json.dumps(kvm.get_info(), indent=2, default=str))
     return 0
 
 
 def cmd_snapshot(args) -> int:
-    kvm = _build_client(args)
+    kvm = _rich_client(args, Capability.VIDEO)
     out = kvm.snapshot_save(args.output)
     print(f"Saved {out}")
     return 0
 
 
 def cmd_power(args) -> int:
-    kvm = _build_client(args)
+    kvm = _client(args, Capability.POWER)
     action = {
         "on": kvm.power_on,
         "off": kvm.power_off,
@@ -100,33 +153,33 @@ def cmd_power(args) -> int:
 
 
 def cmd_power_cycle(args) -> int:
-    kvm = _build_client(args)
+    kvm = _client(args, Capability.POWER)
     kvm.hard_cycle()
     print("hard power cycle: requested")
     return 0
 
 
 def cmd_type(args) -> int:
-    kvm = _build_client(args)
+    kvm = _rich_client(args, Capability.HID)
     kvm.type_text(args.text, slow=args.slow)
     return 0
 
 
 def cmd_key(args) -> int:
-    kvm = _build_client(args)
+    kvm = _rich_client(args, Capability.HID)
     kvm.press_key(args.key)
     return 0
 
 
 def cmd_mount(args) -> int:
-    kvm = _build_client(args)
+    kvm = _client(args, Capability.VIRTUAL_MEDIA)
     name = kvm.mount_iso(args.source, image_name=args.name, cdrom=not args.usb)
     print(f"mounted: {name}")
     return 0
 
 
 def cmd_classify(args) -> int:
-    kvm = _build_client(args)
+    kvm = _rich_client(args, Capability.VIDEO)
     analyzer = _make_analyzer(kvm, args)
     state = analyzer.classify(hint=args.hint or "")
     print(json.dumps(state.to_dict(), indent=2, default=str))
@@ -134,7 +187,7 @@ def cmd_classify(args) -> int:
 
 
 def cmd_watch(args) -> int:
-    kvm = _build_client(args)
+    kvm = _rich_client(args, Capability.VIDEO)
     analyzer = _make_analyzer(kvm, args)
 
     def _progress(state, elapsed):
@@ -153,8 +206,6 @@ def cmd_watch(args) -> int:
 
 
 def cmd_capabilities(args) -> int:
-    from .drivers.base import Capability
-
     kvm = _build_client(args)
     caps = kvm.capabilities()  # structural; makes no network call
     # Print in the capability enum's declaration order for stable output.
@@ -167,7 +218,7 @@ def cmd_capabilities(args) -> int:
 
 
 def cmd_events(args) -> int:
-    kvm = _build_client(args)
+    kvm = _rich_client(args, Capability.EVENTS)
     try:
         seen = 0
         for evt in kvm.watch_events(stream=not args.no_stream, timeout=args.duration):
@@ -190,9 +241,10 @@ def cmd_events(args) -> int:
 # -- parser ----------------------------------------------------------------
 
 def _add_common(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--driver", choices=["pikvm", "glkvm", "blikvm", "fake"],
+    p.add_argument("--driver", choices=["pikvm", "glkvm", "blikvm", "redfish", "fake"],
                    help="Device driver (overrides KVM_PILOT_DRIVER / config profile; "
-                        "default pikvm; 'glkvm' = GL.iNet GLKVM fork, 'fake' = no hardware)")
+                        "default pikvm; 'glkvm' = GL.iNet GLKVM fork, 'redfish' = a DMTF "
+                        "Redfish BMC (no HID/Video — capability-partial), 'fake' = no hardware)")
     p.add_argument("--host")
     p.add_argument("--user")
     p.add_argument("--passwd")
@@ -200,6 +252,9 @@ def _add_common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--scheme", choices=["http", "https"])
     p.add_argument("--profile", help="Named host profile from the config file")
     p.add_argument("--totp-secret", dest="totp_secret")
+    p.add_argument("--redfish-auth", dest="redfish_auth", choices=["session", "basic"],
+                   help="Redfish HTTP auth mode (default session; use 'basic' for a BMC or "
+                        "emulator without a SessionService). Ignored by non-redfish drivers.")
     p.add_argument("--verify-ssl", dest="verify_ssl", action="store_true", default=None)
     p.add_argument("--dry-run", dest="dry_run", action="store_true",
                    help="Log destructive actions without sending them")
