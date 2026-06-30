@@ -11,6 +11,10 @@ implements only the capability protocols its hardware supports.
 
 ![kvm-pilot driver-plugin architecture](architecture.svg)
 
+**Further reading:** [`redfish.md`](redfish.md) (Redfish driver reference — spec
+grounding, portability rules, open questions) and [`decisions.md`](decisions.md)
+(records of non-obvious design choices).
+
 ## Layers
 
 - **Consumers** — the CLI, the `KVMClient` facade, and `ScreenAnalyzer`. None of
