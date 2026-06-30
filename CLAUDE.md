@@ -27,15 +27,32 @@ any docs or messaging; do not claim features are "tested" or "beta".
   `HID`, `Video`, `VirtualMedia`, `GPIO`, `Events`, `SystemInfo`). See
   `docs/architecture.md`.
 
+## Engineering principles (how to make changes)
+Optimize for the next person reading this, not for cleverness.
+- Prefer the boring, standard solution; use existing utilities instead of new ones.
+- Smallest change that works. No speculative generality.
+- No new abstraction/layer/dependency unless it's used in ≥2 places.
+- Prefer composition and early returns over inheritance and nesting.
+- Delete more than you add where you can.
+- Add tests that read as documentation of intent.
+- Write the simplest thing that could work; ask for more if needed rather than
+  building it speculatively.
+- After a change, run `/simplify` and report what you cut.
+- Record non-obvious "looks wrong but is intentional" choices in
+  `docs/decisions.md` so they aren't re-litigated.
+
 ## Layout
-- `src/kvm_pilot/client.py` — `KVMClient`, the PiKVM/GLKVM REST client.
+- `src/kvm_pilot/client.py` — `PiKVMDriver`, the PiKVM-family REST client (`KVMClient`/`PiKVMClient` are aliases).
 - `src/kvm_pilot/http.py` — stdlib HTTP transport (retry/backoff, secret redaction).
 - `src/kvm_pilot/safety.py` — `SafetyPolicy`, `DESTRUCTIVE_OPS`.
-- `src/kvm_pilot/drivers/base.py` — capability protocols (driver-plugin model).
+- `src/kvm_pilot/drivers/` — capability protocols (`base.py`), the `make_driver()` registry
+  (`__init__.py`), and drivers: `pikvm.py` (`GLKVMDriver`/`BliKVMDriver`), `fake.py`, `redfish/`.
 - `src/kvm_pilot/vision/` — pluggable vision backends + `ScreenAnalyzer`.
 - `src/kvm_pilot/{config,errors,cli}.py` — config resolution, exceptions, CLI.
-- `tests/` — unit tests; HTTP + vision are mocked (`tests/conftest.py`).
-- `docs/architecture.md` — driver-plugin design + diagram. `skill/SKILL.md` — the bundled Claude skill.
+- `tests/` — unit tests (HTTP + vision mocked, `tests/conftest.py`) plus pure-stdlib
+  fake servers `emulator.py` (kvmd) and `redfish_emulator.py` exercised over the real transport.
+- `docs/` — `architecture.md` (driver-plugin design + diagrams), `redfish.md` (Redfish
+  reference), `decisions.md` (design-decision records). `skill/SKILL.md` — the bundled Claude skill.
 
 ## Dev workflow (Python ≥ 3.11)
 ```bash
