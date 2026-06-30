@@ -36,6 +36,10 @@ class HostConfig:
     timeout: float = 30.0
     totp_secret: str | None = None
     driver: str = "pikvm"
+    # Redfish-only: HTTP auth mode ("session" — the BMC default — or "basic", for
+    # endpoints without a SessionService, e.g. emulators or BMCs with session
+    # auth disabled). Ignored by the PiKVM family.
+    redfish_auth: str = "session"
 
 
 def _load_file(path: Path) -> dict[str, Any]:
@@ -57,6 +61,7 @@ def resolve_host(
     totp_secret: str | None = None,
     verify_ssl: bool | None = None,
     driver: str | None = None,
+    redfish_auth: str | None = None,
     config_path: Path | None = None,
 ) -> HostConfig:
     """Resolve a HostConfig from args > env > file (in that priority)."""
@@ -103,6 +108,7 @@ def resolve_host(
         timeout=float(pick("timeout", timeout, "KVM_PILOT_TIMEOUT", 30.0)),
         totp_secret=pick("totp_secret", totp_secret, "KVM_PILOT_TOTP_SECRET"),
         driver=resolved_driver,
+        redfish_auth=pick("redfish_auth", redfish_auth, "KVM_PILOT_REDFISH_AUTH", "session"),
     )
 
 

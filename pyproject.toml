@@ -57,6 +57,9 @@ packages = ["src/kvm_pilot"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+markers = [
+    "integration: opt-in end-to-end tests against an external Redfish emulator (sushy-tools); skipped unless sushy-emulator is installed or KVM_PILOT_REDFISH_URL is set",
+]
 
 [tool.coverage.run]
 source = ["kvm_pilot"]

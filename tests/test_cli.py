@@ -121,12 +121,60 @@ def test_driver_defaults_to_pikvm_when_unset(monkeypatch):
 
 
 def test_unsupported_driver_via_env_is_a_clean_error(monkeypatch, capsys):
-    # The CLI can't dispatch redfish generically yet; a config/env selection must
-    # produce a clean error (exit 1), not a crash.
-    monkeypatch.setenv("KVM_PILOT_DRIVER", "redfish")
+    # An unknown driver kind (no from-config support) must produce a clean error
+    # (exit 1), not a crash.
+    monkeypatch.setenv("KVM_PILOT_DRIVER", "ipmi")
     rc = main(["info", "--host", "h"])
     assert rc == 1
     assert "does not support" in capsys.readouterr().err
+
+
+def test_driver_redfish_builds_redfish_driver():
+    # --driver redfish is now a CLI choice and constructs a RedfishDriver
+    # (construction only; login is lazy so no network call here).
+    from kvm_pilot.cli import _build_client, build_parser
+    from kvm_pilot.drivers.redfish import RedfishDriver
+
+    args = build_parser().parse_args(["info", "--driver", "redfish", "--host", "h"])
+    kvm = _build_client(args)
+    assert isinstance(kvm, RedfishDriver)
+
+
+def test_redfish_capabilities_are_offline(capsys):
+    # capabilities() is structural — a BMC's set, no network, no key.
+    rc = main(["capabilities", "--driver", "redfish", "--host", "h"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "power" in out and "virtual_media" in out and "system_info" in out
+    assert "hid" not in out and "video" not in out  # a BMC has neither
+
+
+@pytest.mark.parametrize(
+    "argv, capability",
+    [
+        (["type", "hello", "--driver", "redfish", "--host", "h"], "hid"),
+        (["key", "Return", "--driver", "redfish", "--host", "h"], "hid"),
+        (["snapshot", "out.jpg", "--driver", "redfish", "--host", "h"], "video"),
+        (["classify", "--driver", "redfish", "--host", "h"], "video"),
+        (["watch", "grub_menu", "--driver", "redfish", "--host", "h"], "video"),
+        (["events", "--driver", "redfish", "--host", "h"], "events"),
+    ],
+)
+def test_capability_partial_driver_fails_cleanly(argv, capability, capsys, monkeypatch):
+    # The gate fires before any network call (and before the vision backend is
+    # built): a BMC lacks HID/Video/Events, so these subcommands exit 1 with a
+    # clear message instead of an AttributeError.
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    rc = main(argv)
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert capability in err and "redfish" in err
+
+
+def test_capability_gate_leaves_full_drivers_working(capsys):
+    # The fake driver has HID, so `type` still dispatches through the gate.
+    rc = main(["type", "hello world", "--driver", "fake"])
+    assert rc == 0
 
 
 def test_fake_via_env_needs_no_host(monkeypatch):

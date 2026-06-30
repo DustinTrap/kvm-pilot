@@ -52,6 +52,27 @@ def test_driver_from_profile(tmp_path):
     assert resolve_host("gl", config_path=f).driver == "glkvm"
 
 
+def test_redfish_auth_precedence(monkeypatch, tmp_path):
+    monkeypatch.delenv("KVM_PILOT_REDFISH_AUTH", raising=False)
+    none = tmp_path / "none.toml"
+    assert resolve_host(host="h", config_path=none).redfish_auth == "session"  # BMC default
+    monkeypatch.setenv("KVM_PILOT_REDFISH_AUTH", "basic")
+    assert resolve_host(host="h", config_path=none).redfish_auth == "basic"  # env
+    assert resolve_host(  # arg wins
+        host="h", redfish_auth="session", config_path=none
+    ).redfish_auth == "session"
+
+
+def test_redfish_auth_threads_into_driver():
+    # from_config must hand the resolved auth mode to the RedfishHTTP transport,
+    # so `--redfish-auth basic` actually selects HTTP Basic.
+    from kvm_pilot.config import HostConfig
+    from kvm_pilot.drivers.redfish import RedfishDriver
+
+    d = RedfishDriver.from_config(HostConfig(host="h", driver="redfish", redfish_auth="basic"))
+    assert d._http._auth == "basic"
+
+
 def test_profile_from_file(tmp_path):
     f = tmp_path / "config.toml"
     f.write_text(

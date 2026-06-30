@@ -139,11 +139,16 @@ def test_make_driver_from_config_dispatches_on_cfg_driver() -> None:
     import pytest
 
     from kvm_pilot.config import HostConfig
-    from kvm_pilot.drivers import FakeDriver, make_driver_from_config
+    from kvm_pilot.drivers import FakeDriver, RedfishDriver, make_driver_from_config
     from kvm_pilot.drivers.pikvm import GLKVMDriver
     from kvm_pilot.errors import KVMPilotError
 
     assert isinstance(make_driver_from_config(HostConfig(host="h", driver="glkvm")), GLKVMDriver)
     assert isinstance(make_driver_from_config(HostConfig(host="h", driver="fake")), FakeDriver)
+    # redfish now builds via RedfishDriver.from_config (construction only, lazy login).
+    assert isinstance(
+        make_driver_from_config(HostConfig(host="h", driver="redfish")), RedfishDriver
+    )
+    # A genuinely unknown kind still raises a clean, actionable error.
     with pytest.raises(KVMPilotError, match="does not support"):
-        make_driver_from_config(HostConfig(host="h", driver="redfish"))
+        make_driver_from_config(HostConfig(host="h", driver="ipmi"))
