@@ -47,6 +47,31 @@ _REDACTION = "***REDACTED***"
 _unverified_warned = False
 
 
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuse to follow HTTP redirects.
+
+    The stdlib's default redirect handler copies every request header —
+    including our credentials (``X-KVMD-Passwd``, ``X-Auth-Token``,
+    ``Authorization: Basic``, the session ``Cookie``) — to whatever host a 3xx
+    ``Location`` names, with no same-origin check and even across an
+    https->http downgrade. A hostile or misconfigured device could use that to
+    exfiltrate the admin password. Neither the kvmd API nor Redfish needs
+    transparent redirect following (Redfish async/Location is handled
+    explicitly), so we refuse: returning ``None`` here makes urllib surface the
+    3xx as an ``HTTPError`` to the caller instead of chasing it.
+    """
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[override]
+        return None
+
+
+def _build_opener(ssl_ctx: ssl.SSLContext, *extra: urllib.request.BaseHandler) -> urllib.request.OpenerDirector:
+    """An opener that uses our TLS context and never follows redirects."""
+    return urllib.request.build_opener(
+        urllib.request.HTTPSHandler(context=ssl_ctx), _NoRedirect(), *extra
+    )
+
+
 def _build_ssl_context(verify_ssl: bool, ssl_ca_file: str | None) -> ssl.SSLContext:
     """TLS context for a device transport (shared with the Redfish transport).
 
@@ -129,6 +154,9 @@ class HTTP:
         self._verify_ssl = verify_ssl
         self._ssl_ca_file = ssl_ca_file
         self._ssl_ctx = _build_ssl_context(verify_ssl, ssl_ca_file)
+        # A redirect-refusing opener (see _NoRedirect): credentials must never be
+        # forwarded to a host a 3xx Location names.
+        self._opener = _build_opener(self._ssl_ctx)
         self._auth_token: str | None = None
 
     # -- auth helpers ----------------------------------------------------
@@ -258,9 +286,18 @@ class HTTP:
         req = urllib.request.Request(url, data=data, headers=hdrs, method=method)
         timeout = long_timeout if long_timeout else self._timeout
         try:
-            with urllib.request.urlopen(req, context=self._ssl_ctx, timeout=timeout) as resp:
+            with self._opener.open(req, timeout=timeout) as resp:
                 body = resp.read()
         except urllib.error.HTTPError as e:
+            if 300 <= e.code < 400:
+                # Refused by _NoRedirect. Surfacing the Location is safe (it is
+                # where the attacker wanted us to go, not a secret) and helps
+                # debugging; the credentials are what we withheld.
+                raise ConnectionError(
+                    f"Refused to follow HTTP {e.code} redirect to "
+                    f"{e.headers.get('Location')!r} — kvm-pilot never forwards "
+                    "credentials to a redirect target"
+                ) from e
             self._raise(e.code, e.read())
             return None  # unreachable, _raise always raises
         except urllib.error.URLError as e:
@@ -313,10 +350,11 @@ class HTTP:
 
     def login(self) -> str:
         cj = http.cookiejar.CookieJar()
-        opener = urllib.request.build_opener(
-            urllib.request.HTTPCookieProcessor(cj),
-            urllib.request.HTTPSHandler(context=self._ssl_ctx),
-        )
+        # Same no-redirect policy as the main path. Login credentials ride the
+        # POST body (which the stdlib drops on redirect), so the leak risk is
+        # lower here, but a silent redirect otherwise yields a confusing
+        # "no auth_token cookie" error — refuse it outright.
+        opener = _build_opener(self._ssl_ctx, urllib.request.HTTPCookieProcessor(cj))
         data = urllib.parse.urlencode(
             {"user": self._user, "passwd": self._effective_passwd()}
         ).encode()

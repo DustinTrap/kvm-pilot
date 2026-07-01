@@ -22,6 +22,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`TimeoutError`/`ConnectionError`) instead of leaking raw builtins, and
   never auto-retry a non-idempotent request after a failure that may already
   have reached the device (a lost response can't power-cycle a box twice).
+- **Security:** neither HTTP transport follows redirects any more. The stdlib
+  default opener would forward auth headers (`X-KVMD-Passwd`, `X-Auth-Token`,
+  `Authorization: Basic`, session cookie) to whatever host a 3xx `Location`
+  named — defeating the Redfish same-origin guard and exposing the PiKVM
+  transport outright. A 3xx is now surfaced as a `ConnectionError`
+  ([#37](https://github.com/DustinTrap/kvm-pilot/issues/37)).
 - `is_powered_on()` fails open when kvmd reports the ATX subsystem disabled
   (no ATX board): vision classification proceeds instead of reporting
   `power_off` for a running machine.

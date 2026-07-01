@@ -133,6 +133,19 @@ Same fail-open rationale as `has_video_signal`. Caller-visible change:
 `wait_for_power_state(False)` on an ATX-less device now times out (the device
 cannot sense power) instead of returning instantly with a false success.
 
+### Neither transport follows HTTP redirects
+The stdlib's default opener copies every request header — including our
+credentials (`X-KVMD-Passwd`, `X-Auth-Token`, `Authorization: Basic`, the
+session `Cookie`) — to whatever host a 3xx `Location` names, with no
+same-origin check and even across an https->http downgrade. That defeated the
+Redfish `_same_origin` guard (which only covers URLs *we* construct, not
+server-issued redirects) and left the PiKVM transport, which has no such guard,
+fully exposed: a hostile or MITM'd device could exfiltrate the admin password.
+Both transports now build their opener with a `_NoRedirect` handler that
+refuses 3xx and surfaces it as a `ConnectionError`. Neither kvmd nor Redfish
+needs transparent redirect following (Redfish async/`Location` is read
+explicitly), so this costs nothing.
+
 ### Ambiguous transport failures are never auto-retried for POSTs
 A read-phase reset/timeout means the device may have already executed the
 request; re-firing a power/HID/MSD POST could run it twice. Connect-phase
