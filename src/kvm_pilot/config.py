@@ -14,11 +14,14 @@ library never writes secrets back out.
 
 from __future__ import annotations
 
+import logging
 import os
 import tomllib
-from dataclasses import dataclass
+from dataclasses import dataclass, fields
 from pathlib import Path
 from typing import Any
+
+logger = logging.getLogger("kvm_pilot.config")
 
 DEFAULT_CONFIG_PATH = Path(
     os.environ.get("KVM_PILOT_CONFIG", Path.home() / ".config" / "kvm-pilot" / "config.toml")
@@ -65,11 +68,28 @@ def resolve_host(
     config_path: Path | None = None,
 ) -> HostConfig:
     """Resolve a HostConfig from args > env > file (in that priority)."""
+    # KVM_PILOT_PROFILE works everywhere a profile does (CLI, library, MCP), not
+    # just in the MCP server.
+    profile = profile or os.environ.get("KVM_PILOT_PROFILE") or None
     data = _load_file(config_path or DEFAULT_CONFIG_PATH)
     profiles = data.get("hosts", {}) if isinstance(data, dict) else {}
     base: dict[str, Any] = {}
     if profile and profile in profiles:
         base = dict(profiles[profile])
+        # A typo'd key ("password" for "passwd", "username" for "user") would
+        # otherwise be dropped silently and the client would proceed with the
+        # admin/admin defaults — repeated default-credential logins can lock a
+        # BMC account. Warn loudly instead.
+        known = {f.name for f in fields(HostConfig)}
+        unknown = sorted(set(base) - known)
+        if unknown:
+            logger.warning(
+                "Profile %r has unrecognized key(s) %s — they are IGNORED. "
+                "Known keys: %s",
+                profile,
+                ", ".join(repr(k) for k in unknown),
+                ", ".join(sorted(known)),
+            )
     elif profile:
         raise KeyError(f"Host profile {profile!r} not found in config file.")
 
@@ -93,7 +113,10 @@ def resolve_host(
                 "profile defined in the config file."
             )
 
-    port_val = pick("port", port, "KVM_PILOT_PORT", 443)
+    resolved_scheme = pick("scheme", scheme, "KVM_PILOT_SCHEME", "https")
+    # The default port follows the scheme: --scheme http against the TLS port
+    # 443 can only fail, confusingly. An explicit port always wins.
+    port_val = pick("port", port, "KVM_PILOT_PORT", 80 if resolved_scheme == "http" else 443)
     verify_val = pick("verify_ssl", verify_ssl, "KVM_PILOT_VERIFY_SSL", False)
     if isinstance(verify_val, str):
         verify_val = verify_val.lower() in ("1", "true", "yes")
@@ -103,7 +126,7 @@ def resolve_host(
         user=pick("user", user, "KVM_PILOT_USER", "admin"),
         passwd=pick("passwd", passwd, "KVM_PILOT_PASSWD", "admin"),
         port=int(port_val),
-        scheme=pick("scheme", scheme, "KVM_PILOT_SCHEME", "https"),
+        scheme=resolved_scheme,
         verify_ssl=bool(verify_val),
         timeout=float(pick("timeout", timeout, "KVM_PILOT_TIMEOUT", 30.0)),
         totp_secret=pick("totp_secret", totp_secret, "KVM_PILOT_TOTP_SECRET"),

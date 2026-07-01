@@ -82,3 +82,35 @@ def test_profile_from_file(tmp_path):
     assert cfg.host == "10.0.0.5"
     assert cfg.scheme == "http"
     assert cfg.port == 8080
+
+
+def test_profile_env_var_selects_profile(tmp_path, monkeypatch):
+    # KVM_PILOT_PROFILE works for the CLI/library, not just the MCP server.
+    cfg = tmp_path / "config.toml"
+    cfg.write_text('[hosts.lab]\nhost = "10.0.0.9"\nuser = "u"\n')
+    monkeypatch.setenv("KVM_PILOT_PROFILE", "lab")
+    resolved = resolve_host(config_path=cfg)
+    assert resolved.host == "10.0.0.9"
+
+
+def test_unknown_profile_keys_warn_loudly(tmp_path, caplog):
+    # A typo'd key ("password") silently dropping to the admin/admin defaults can
+    # lock a real BMC account — it must at least warn.
+    cfg = tmp_path / "config.toml"
+    cfg.write_text('[hosts.lab]\nhost = "10.0.0.9"\npassword = "oops"\n')
+    import logging
+
+    with caplog.at_level(logging.WARNING, logger="kvm_pilot.config"):
+        resolved = resolve_host("lab", config_path=cfg)
+    assert resolved.passwd == "admin"  # the typo'd key was not applied
+    assert any("password" in r.message and "IGNORED" in r.message for r in caplog.records)
+
+
+def test_scheme_http_defaults_port_80(monkeypatch):
+    monkeypatch.delenv("KVM_PILOT_PORT", raising=False)
+    resolved = resolve_host(host="box", scheme="http")
+    assert resolved.port == 80
+    resolved = resolve_host(host="box", scheme="http", port=8443)
+    assert resolved.port == 8443  # explicit port always wins
+    resolved = resolve_host(host="box")
+    assert resolved.port == 443  # https default unchanged
