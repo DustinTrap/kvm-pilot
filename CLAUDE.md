@@ -51,8 +51,12 @@ Optimize for the next person reading this, not for cleverness.
 - `src/kvm_pilot/{config,errors,cli}.py` — config resolution, exceptions, CLI.
 - `tests/` — unit tests (HTTP + vision mocked, `tests/conftest.py`) plus pure-stdlib
   fake servers `emulator.py` (kvmd) and `redfish_emulator.py` exercised over the real transport.
-- `docs/` — `architecture.md` (driver-plugin design + diagrams), `redfish.md` (Redfish
-  reference), `decisions.md` (design-decision records). `skill/SKILL.md` — the bundled Claude skill.
+- `docs/` — the docs hub (`README.md` index): `architecture.md` (driver-plugin design +
+  diagrams), `redfish.md` (Redfish reference), `decisions.md` (design-decision records),
+  `CONTRIBUTING.md`, `SECURITY.md`. `skill/SKILL.md` (bundled Claude skill) and
+  `mcp_server/README.md` stay next to their code but are mirrored into the docs too.
+- The GitHub wiki is auto-generated from `docs/` by `.github/workflows/wiki-sync.yml`
+  (via `.github/scripts/build_wiki.py`) — edit the docs, never the wiki.
 
 ## Dev workflow (Python ≥ 3.11)
 ```bash

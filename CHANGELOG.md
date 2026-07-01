@@ -73,6 +73,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   profile can pin its driver; the CLI `--driver` flag overrides it.
 
 ### Changed
+- **Docs consolidated under `docs/`.** `CONTRIBUTING.md` and `SECURITY.md` moved
+  into `docs/` (still recognized by GitHub there), joined by a `docs/README.md`
+  index; `skill/SKILL.md` and `mcp_server/README.md` stay next to their code but
+  are linked from the index. The GitHub wiki is now an auto-generated, formatted
+  mirror of `docs/`, published on every push to `main` by a `wiki-sync` workflow
+  (`.github/scripts/build_wiki.py`) — edit the docs, never the wiki.
 - `ScreenAnalyzer.classify()` now resolves from cheap signals before calling the
   vision backend: a `power_off` / `no_signal` short-circuit (no snapshot, no
   model), an unchanged-frame skip (reuse the last result), and optional
