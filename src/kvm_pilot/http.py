@@ -4,7 +4,12 @@ Stdlib-only HTTP transport for the PiKVM / GLKVM REST API.
 Adds, over a naive urllib wrapper:
   * Optional TOTP/2FA: the 6-digit code is appended to the password with no
     separator, per PiKVM's auth scheme.
-  * Bounded retry with backoff on transient failures (409 busy, 503, network).
+  * Bounded retry with backoff on transient failures (409 busy, 503, network) —
+    but a non-idempotent request (POST) is never re-fired after a failure that
+    may have already reached the device (read-phase reset/timeout), so a lost
+    response can't power-cycle a box twice.
+  * Timeouts and mid-request failures map into the kvm-pilot error taxonomy
+    (TimeoutError / ConnectionError), never raw socket exceptions.
   * Password/secret redaction in any raised error text.
 
 No third-party runtime dependencies. ``pyotp`` is imported lazily and only if
@@ -13,6 +18,8 @@ a TOTP secret is supplied; it is an optional extra, not a hard requirement.
 
 from __future__ import annotations
 
+import builtins
+import http.client
 import http.cookiejar
 import json
 import ssl
@@ -28,10 +35,18 @@ from .errors import (
     BusyError,
     ConnectionError,
     KVMPilotError,
+    TimeoutError,
     UnavailableError,
 )
 
 _REDACTION = "***REDACTED***"
+
+
+def _bracket_ipv6(host: str) -> str:
+    """Wrap a bare IPv6 literal in brackets so it survives URL construction."""
+    if ":" in host and not host.startswith("["):
+        return f"[{host}]"
+    return host
 
 
 def _totp_now(secret: str) -> str:
@@ -67,7 +82,7 @@ class HTTP:
         backoff_base: float = 0.5,
         not_found_hint: str | None = None,
     ):
-        self._base = f"{scheme}://{host}:{port}"
+        self._base = f"{scheme}://{_bracket_ipv6(host)}:{port}"
         self._user = user
         self._passwd = passwd
         self._timeout = timeout
@@ -113,6 +128,8 @@ class HTTP:
                 pass
         if self._passwd:
             out = out.replace(self._passwd, _REDACTION)
+        if self._totp_secret:
+            out = out.replace(self._totp_secret, _REDACTION)
         if self._auth_token:
             out = out.replace(self._auth_token, _REDACTION)
         return out
@@ -140,8 +157,17 @@ class HTTP:
         raise KVMPilotError(f"HTTP {status}: {text}", status)
 
     @staticmethod
-    def _is_retryable(exc: Exception) -> bool:
-        return isinstance(exc, (BusyError, UnavailableError, ConnectionError))
+    def _is_retryable(exc: Exception, method: str) -> bool:
+        # 409/503 are definitive device responses (the op was rejected, not
+        # applied) — always safe to retry. A ConnectionError is only safe when
+        # the request never reached the device (connect-phase failure) or the
+        # method is read-only: re-firing a power/HID/MSD POST whose response was
+        # lost mid-read could execute the destructive action twice.
+        if isinstance(exc, (BusyError, UnavailableError)):
+            return True
+        if isinstance(exc, ConnectionError):
+            return method in ("GET", "HEAD") or not getattr(exc, "request_sent", False)
+        return False
 
     # -- core request with retry ----------------------------------------
 
@@ -174,7 +200,7 @@ class HTTP:
                 )
             except Exception as exc:  # noqa: BLE001 - re-raised below
                 last_exc = exc
-                if attempt < attempts - 1 and self._is_retryable(exc):
+                if attempt < attempts - 1 and self._is_retryable(exc, method):
                     time.sleep(self._backoff_base * (2 ** attempt))
                     continue
                 raise
@@ -206,7 +232,23 @@ class HTTP:
             self._raise(e.code, e.read())
             return None  # unreachable, _raise always raises
         except urllib.error.URLError as e:
+            # Connect/send phase: the request did not complete a round trip.
+            if isinstance(e.reason, builtins.TimeoutError):
+                raise TimeoutError(f"Request to {path} timed out after {timeout}s") from e
             raise ConnectionError(f"Connection error: {e.reason}") from e
+        except builtins.TimeoutError as e:
+            # Read phase (urllib does not wrap these): the device got the request
+            # but the response never arrived — deliberately not retryable.
+            raise TimeoutError(
+                f"Reading the response to {path} timed out after {timeout}s"
+            ) from e
+        except (OSError, http.client.HTTPException) as e:
+            # Read phase (reset, remote disconnect, incomplete read): ambiguous —
+            # the request may have been executed. Marked so retry skips it for
+            # non-idempotent methods.
+            err = ConnectionError(f"Connection failed mid-request: {e!r}")
+            err.request_sent = True  # type: ignore[attr-defined]
+            raise err from e
 
         if raw_response:
             return body
@@ -253,7 +295,13 @@ class HTTP:
         except urllib.error.HTTPError as e:
             self._raise(e.code, e.read())
         except urllib.error.URLError as e:
+            if isinstance(e.reason, builtins.TimeoutError):
+                raise TimeoutError(f"Login timed out after {self._timeout}s") from e
             raise ConnectionError(f"Connection error: {e.reason}") from e
+        except builtins.TimeoutError as e:
+            raise TimeoutError(f"Login timed out after {self._timeout}s") from e
+        except (OSError, http.client.HTTPException) as e:
+            raise ConnectionError(f"Connection failed mid-request: {e!r}") from e
         for cookie in cj:
             if cookie.name == "auth_token":
                 self._auth_token = str(cookie.value)

@@ -19,6 +19,8 @@ No third-party runtime dependencies.
 from __future__ import annotations
 
 import base64
+import builtins
+import http.client
 import json
 import logging
 import ssl
@@ -32,6 +34,7 @@ from ...errors import (
     BusyError,
     ConnectionError,
     KVMPilotError,
+    TimeoutError,
     UnavailableError,
 )
 
@@ -75,7 +78,11 @@ class RedfishHTTP:
     ):
         if auth not in ("session", "basic"):
             raise ValueError(f"auth must be 'session' or 'basic', got {auth!r}")
-        self._base = f"{scheme}://{host}:{port}"
+        # Bare IPv6 literals need brackets in URLs; _same_origin compares against
+        # the unbracketed form (urlsplit strips brackets from .hostname).
+        host = host.strip("[]")
+        host_url = f"[{host}]" if ":" in host else host
+        self._base = f"{scheme}://{host_url}:{port}"
         self._scheme = scheme
         self._host = host
         self._port = port
@@ -190,8 +197,17 @@ class RedfishHTTP:
         raise KVMPilotError(f"Redfish HTTP {status}: {detail}", status)
 
     @staticmethod
-    def _is_retryable(exc: Exception) -> bool:
-        return isinstance(exc, (BusyError, UnavailableError, ConnectionError))
+    def _is_retryable(exc: Exception, method: str) -> bool:
+        # 409/503 are definitive BMC responses (the action was rejected, not
+        # applied) — always safe to retry. A ConnectionError is only safe when
+        # the request never reached the BMC or the method is read-only:
+        # re-firing a ComputerSystem.Reset whose response was lost mid-read
+        # could reset the host twice.
+        if isinstance(exc, (BusyError, UnavailableError)):
+            return True
+        if isinstance(exc, ConnectionError):
+            return method in ("GET", "HEAD") or not getattr(exc, "request_sent", False)
+        return False
 
     # -- core request with retry ----------------------------------------
 
@@ -211,7 +227,7 @@ class RedfishHTTP:
                 return self._request_once(method, path, json_body=json_body, authed=authed)
             except Exception as exc:  # noqa: BLE001 - re-raised below
                 last_exc = exc
-                if attempt < attempts - 1 and self._is_retryable(exc):
+                if attempt < attempts - 1 and self._is_retryable(exc, method):
                     time.sleep(self._backoff_base * (2**attempt))
                     continue
                 raise
@@ -244,7 +260,25 @@ class RedfishHTTP:
             self._raise(e.code, body, raw.decode(errors="replace"))
             raise  # pragma: no cover - _raise always raises
         except urllib.error.URLError as e:
+            # Connect/send phase: the request did not complete a round trip.
+            if isinstance(e.reason, builtins.TimeoutError):
+                raise TimeoutError(
+                    f"Redfish request timed out after {self._timeout}s"
+                ) from e
             raise ConnectionError(f"Connection error: {e.reason}") from e
+        except builtins.TimeoutError as e:
+            # Read phase: the BMC got the request but the response never
+            # arrived — deliberately not retryable.
+            raise TimeoutError(
+                f"Reading the Redfish response timed out after {self._timeout}s"
+            ) from e
+        except (OSError, http.client.HTTPException) as e:
+            # Read phase (reset, remote disconnect, incomplete read): ambiguous —
+            # the action may have been executed. Marked so retry skips it for
+            # non-idempotent methods.
+            err = ConnectionError(f"Connection failed mid-request: {e!r}")
+            err.request_sent = True  # type: ignore[attr-defined]
+            raise err from e
         return RedfishResponse(status, headers, self._parse(raw))
 
     @staticmethod
