@@ -38,8 +38,33 @@ def test_destructive_set_includes_power_and_media():
         assert op in DESTRUCTIVE_OPS
 
 
-def test_dry_run_still_requires_confirmation():
-    # Confirmation is evaluated before dry-run, so a denied op raises even in dry-run.
+def test_dry_run_short_circuits_before_confirmation():
+    # Dry-run wins: the op is logged and skipped without consulting confirm, so
+    # --dry-run never prompts and works unattended (even with a denying callback).
     policy = SafetyPolicy(dry_run=True, confirm=deny_all)
-    with pytest.raises(SafetyError):
-        policy.guard("atx.power_off", "off")
+    assert policy.guard("atx.power_off", "off") is False
+
+
+def test_dry_run_never_invokes_confirm():
+    calls: list[str] = []
+
+    def recording_confirm(op: str, desc: str) -> bool:
+        calls.append(op)
+        return True
+
+    policy = SafetyPolicy(dry_run=True, confirm=recording_confirm)
+    assert policy.guard("atx.power_off_hard", "hard off") is False
+    assert calls == []
+
+
+def test_hid_and_msd_write_ops_are_destructive():
+    for op in (
+        "hid.type_text",
+        "hid.press_key",
+        "hid.send_shortcut",
+        "hid.key_event",
+        "hid.mouse_click",
+        "msd.write",
+        "msd.write_remote",
+    ):
+        assert op in DESTRUCTIVE_OPS

@@ -110,9 +110,10 @@ def test_mount_iso_records_when_allowed():
     assert ("mount_iso", "ubuntu-24.04.iso") in d.actions
 
 
-def test_mount_iso_dry_run_fires_both_guards():
-    # Regression: the two MSD guards must BOTH fire under dry-run (matching the
-    # real client's sequential msd_set_params/msd_connect), not short-circuit.
+def test_mount_iso_dry_run_skips_everything_without_prompting():
+    # Dry-run wins before confirmation: all three MSD guards (write, set_params,
+    # connect) log-and-skip and the confirm callback is never consulted, so
+    # --dry-run works unattended.
     seen: list[str] = []
 
     def counting_confirm(op: str, desc: str) -> bool:
@@ -121,8 +122,27 @@ def test_mount_iso_dry_run_fires_both_guards():
 
     d = FakeDriver(dry_run=True, confirm=counting_confirm)
     d.mount_iso("/isos/x.iso")
-    assert seen == ["msd.set_params", "msd.connect"]
+    assert seen == []  # confirm is never consulted under dry-run
     assert d.mounted == []  # dry-run mounts nothing
+
+
+def test_mount_iso_confirm_sees_all_guards_when_live():
+    # Live (no dry-run): the confirm callback sees every MSD guard in order,
+    # including the msd.write gate that fires before any upload would start.
+    seen: list[str] = []
+
+    def counting_confirm(op: str, desc: str) -> bool:
+        seen.append(op)
+        return True
+
+    d = FakeDriver(confirm=counting_confirm)
+    d.mount_iso("/isos/x.iso")
+    assert seen == ["msd.write", "msd.set_params", "msd.connect"]
+    assert d.mounted == ["x.iso"]
+
+    seen.clear()
+    d.mount_iso("https://example.com/y.iso")
+    assert seen[0] == "msd.write_remote"
 
 
 def test_mount_iso_deny_raises_at_first_guard():

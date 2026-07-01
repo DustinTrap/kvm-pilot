@@ -6,11 +6,14 @@ plain library call still works — but the CLI turns confirmation on, and any
 caller can opt into dry-run.
 
   * dry_run:  when True, destructive calls are logged and skipped, never sent
-              to the device. Read-only calls always execute.
-  * confirm:  a callback invoked before each destructive call. If it returns
-              False, the call is blocked with SafetyError. The default callback
-              allows everything (library default); the CLI installs an
-              interactive y/N prompt, and --yes installs an allow-all.
+              to the device. Read-only calls always execute. Dry-run is checked
+              FIRST: a skipped call never invokes the confirm callback, so
+              --dry-run works unattended.
+  * confirm:  a callback invoked before each destructive call that would really
+              be sent. If it returns False, the call is blocked with
+              SafetyError. The default callback allows everything (library
+              default); the CLI installs an interactive y/N prompt, and --yes
+              installs an allow-all.
 
 A "destructive" operation is any one that can power-cycle, reset, wipe boot
 media state, or otherwise change the target's running state in a way that is
@@ -39,6 +42,8 @@ DESTRUCTIVE_OPS: set[str] = {
     "msd.disconnect",
     "msd.remove_image",
     "msd.reset",
+    "msd.write",
+    "msd.write_remote",
     "gpio.switch",
     "gpio.pulse",
     "redfish.power_action",
@@ -51,7 +56,14 @@ DESTRUCTIVE_OPS: set[str] = {
     "redfish.reset_hard",
     "redfish.virtual_media_insert",
     "redfish.virtual_media_eject",
+    # HID input changes target state too: keystrokes and clicks land on a live
+    # console (rm -rf is one type_text away). Mouse *moves* stay ungated.
     "hid.ctrl_alt_delete",
+    "hid.type_text",
+    "hid.press_key",
+    "hid.send_shortcut",
+    "hid.key_event",
+    "hid.mouse_click",
 }
 
 # Callback signature: (op_name, human_description) -> bool
@@ -94,16 +106,20 @@ class SafetyPolicy:
         Returns True if the underlying call should proceed, False if it was
         intercepted by dry-run (caller should no-op). Raises SafetyError if the
         confirmation callback denied the operation.
+
+        Dry-run wins: a dry-run call is logged and skipped without consulting
+        the confirm callback, so ``--dry-run`` never prompts and works in
+        non-interactive automation.
         """
         if op not in DESTRUCTIVE_OPS:
             return True  # non-destructive ops are never gated
 
-        if not self.confirm(op, description):
-            raise SafetyError(f"Operation '{op}' was not confirmed: {description}")
-
         if self.dry_run:
             logger.warning("DRY-RUN: skipping destructive op '%s' (%s)", op, description)
             return False
+
+        if not self.confirm(op, description):
+            raise SafetyError(f"Operation '{op}' was not confirmed: {description}")
 
         logger.info("Executing destructive op '%s' (%s)", op, description)
         return True
