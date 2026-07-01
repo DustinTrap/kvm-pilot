@@ -1,0 +1,63 @@
+name: wiki-sync
+
+# Publishes the canonical docs (docs/ + the two co-located guides) to the GitHub
+# wiki as a flat, nicely formatted mirror. Edit the source files, never the wiki.
+#
+# One-time setup: the wiki's git repo does not exist until the first page is
+# created. Open the repo's Wiki tab once, click "Create the first page", save —
+# after that this workflow keeps the wiki in sync on every push to main.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/**"
+      - "skill/SKILL.md"
+      - "mcp_server/README.md"
+      - ".github/scripts/build_wiki.py"
+      - ".github/workflows/wiki-sync.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wiki-sync
+  cancel-in-progress: true
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+
+      - name: Build wiki pages from docs
+        run: python .github/scripts/build_wiki.py --out _wiki_build
+
+      - name: Publish to wiki
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          repo="${{ github.repository }}"
+          work="$(mktemp -d)"
+          if ! git clone --depth 1 "https://x-access-token:${GH_TOKEN}@github.com/${repo}.wiki.git" "$work" 2>/dev/null; then
+            echo "::error::Wiki repo not found. Open the repo's Wiki tab, click 'Create the first page' once, then re-run this workflow."
+            exit 1
+          fi
+          # Replace the wiki's tracked content wholesale with the freshly built pages.
+          find "$work" -mindepth 1 -maxdepth 1 -not -name '.git' -exec rm -rf {} +
+          cp -R _wiki_build/. "$work"/
+          cd "$work"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          if git diff --cached --quiet; then
+            echo "Wiki already up to date."
+          else
+            git commit -m "docs: sync wiki from ${{ github.sha }}"
+            git push
+          fi

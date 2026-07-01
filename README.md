@@ -172,7 +172,7 @@ trigger a destructive action on its own — you wire that yourself, and the
 safety layer still applies.
 
 This software controls real hardware and can power-cycle or interrupt a running
-machine. Read [SECURITY.md](SECURITY.md) before exposing a KVM to the internet.
+machine. Read [SECURITY.md](docs/SECURITY.md) before exposing a KVM to the internet.
 
 ## No hard-coded model version
 
@@ -246,6 +246,13 @@ It's on the CLI too — `kvm-pilot info --driver redfish --host idrac.lan …`.
 Capability-specific subcommands a BMC can't serve (`type`, `snapshot`, `events`)
 fail cleanly rather than crashing. Add `--redfish-auth basic` for an endpoint
 without a SessionService (emulators, or a BMC with session auth disabled).
+
+## Documentation
+
+Full user and developer docs live in [`docs/`](docs/) (architecture, design
+decisions, the Redfish reference, contributing, and the security policy). The
+[project wiki](https://github.com/DustinTrap/kvm-pilot/wiki) is an
+auto-generated, nicely formatted mirror of that folder.
 
 ## License
 
