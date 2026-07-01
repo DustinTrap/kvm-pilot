@@ -214,3 +214,19 @@ def test_classify_local_backend_missing_url_is_a_clean_error(monkeypatch, capsys
     rc = main(["classify", "--driver", "fake", "--backend", "local"])
     assert rc == 1
     assert "base_url" in capsys.readouterr().err
+
+
+def test_watch_rejects_unknown_phase(capsys):
+    # A typo'd phase would otherwise burn the whole timeout in paid model calls.
+    rc = main(["watch", "grub_menuu", "--driver", "fake"])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "grub_menuu" in err and "grub_menu" in err  # names the valid tokens
+
+
+def test_eject_dispatches_and_honors_dry_run(capsys):
+    rc = main(["eject", "--driver", "fake", "--dry-run"])
+    assert rc == 0
+    rc = main(["eject", "--driver", "fake", "--yes"])
+    assert rc == 0
+    assert "ejected" in capsys.readouterr().out

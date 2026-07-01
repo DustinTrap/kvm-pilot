@@ -178,6 +178,14 @@ def cmd_mount(args) -> int:
     return 0
 
 
+def cmd_eject(args) -> int:
+    # The inverse of mount: without it, detaching an ISO required writing Python.
+    kvm = _client(args, Capability.VIRTUAL_MEDIA)
+    kvm.msd_disconnect()
+    print("ejected: virtual media detached")
+    return 0
+
+
 def cmd_classify(args) -> int:
     kvm = _rich_client(args, Capability.VIDEO)
     analyzer = _make_analyzer(kvm, args)
@@ -187,6 +195,16 @@ def cmd_classify(args) -> int:
 
 
 def cmd_watch(args) -> int:
+    from .vision.base import ALL_PHASES
+
+    if args.phase not in ALL_PHASES:
+        # A typo'd phase can never match — without this it would silently burn
+        # the whole timeout in paid model calls before failing.
+        print(
+            f"error: unknown phase {args.phase!r}. Valid phases: {', '.join(ALL_PHASES)}",
+            file=sys.stderr,
+        )
+        return 1
     kvm = _rich_client(args, Capability.VIDEO)
     analyzer = _make_analyzer(kvm, args)
 
@@ -321,6 +339,10 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--usb", action="store_true")
     _add_common(p)
     p.set_defaults(func=cmd_mount)
+
+    p = sub.add_parser("eject", help="Detach virtual media (the inverse of mount)")
+    _add_common(p)
+    p.set_defaults(func=cmd_eject)
 
     p = sub.add_parser("classify", help="Classify the current screen once")
     _add_common(p)
