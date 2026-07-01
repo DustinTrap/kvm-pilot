@@ -36,7 +36,7 @@ from ...errors import (
     TimeoutError,
     UnavailableError,
 )
-from ...http import _build_ssl_context
+from ...http import _build_opener, _build_ssl_context
 
 logger = logging.getLogger("kvm_pilot.redfish")
 
@@ -95,6 +95,10 @@ class RedfishHTTP:
         self._backoff_base = backoff_base
         self._verify_ssl = verify_ssl
         self._ssl_ctx = _build_ssl_context(verify_ssl, ssl_ca_file)
+        # Refuse redirects: _same_origin guards the URLs we construct, but the
+        # stdlib default opener would forward X-Auth-Token / Basic credentials
+        # to whatever host a 3xx Location names, with no origin check.
+        self._opener = _build_opener(self._ssl_ctx)
         self._token: str | None = None
         self._session_uri: str | None = None
 
@@ -248,11 +252,18 @@ class RedfishHTTP:
             headers=self._headers(authed=authed_eff, json_body=data is not None),
         )
         try:
-            with urllib.request.urlopen(req, context=self._ssl_ctx, timeout=self._timeout) as resp:
+            with self._opener.open(req, timeout=self._timeout) as resp:
                 raw = resp.read()
                 headers = {k.lower(): v for k, v in resp.headers.items()}
                 status = resp.status
         except urllib.error.HTTPError as e:
+            if 300 <= e.code < 400:
+                # Refused by _NoRedirect — the BMC pointed us off-origin.
+                raise ConnectionError(
+                    f"Refused to follow HTTP {e.code} redirect to "
+                    f"{e.headers.get('Location')!r} — kvm-pilot never forwards "
+                    "credentials to a redirect target"
+                ) from e
             raw = e.read()
             body = self._parse(raw)
             self._raise(e.code, body, raw.decode(errors="replace"))

@@ -43,7 +43,7 @@ def test_retries_on_busy_then_succeeds(monkeypatch):
             raise urllib.error.HTTPError(req.full_url, 409, "busy", {}, io.BytesIO(b"busy"))
         return FakeResp(_ok_body({"done": True}))
 
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(h._opener, "open", fake_urlopen)
     result = h.get("/api/thing")
     assert result == {"done": True}
     assert calls["n"] == 2
@@ -55,7 +55,7 @@ def test_busy_exhausts_retries(monkeypatch):
     def fake_urlopen(req, context=None, timeout=None):
         raise urllib.error.HTTPError(req.full_url, 409, "busy", {}, io.BytesIO(b"busy"))
 
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(h._opener, "open", fake_urlopen)
     with pytest.raises(BusyError):
         h.get("/api/thing")
 
@@ -68,7 +68,7 @@ def test_auth_error_not_retried(monkeypatch):
         calls["n"] += 1
         raise urllib.error.HTTPError(req.full_url, 403, "no", {}, io.BytesIO(b"denied"))
 
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(h._opener, "open", fake_urlopen)
     with pytest.raises(AuthError):
         h.get("/api/thing")
     assert calls["n"] == 1  # auth failures are not retryable
@@ -83,7 +83,7 @@ def test_password_redacted_in_error(monkeypatch):
             req.full_url, 400, "bad", {}, io.BytesIO(b"bad supersecret value")
         )
 
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(h._opener, "open", fake_urlopen)
     with pytest.raises(Exception) as ei:
         h.get("/api/thing")
     assert "supersecret" not in str(ei.value)
@@ -96,7 +96,7 @@ def test_network_error_wrapped(monkeypatch):
     def fake_urlopen(req, context=None, timeout=None):
         raise urllib.error.URLError("refused")
 
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(h._opener, "open", fake_urlopen)
     with pytest.raises(ConnectionError):
         h.get("/api/thing")
 
@@ -113,7 +113,7 @@ def test_read_timeout_maps_to_kvm_timeout_error(monkeypatch):
         calls["n"] += 1
         raise TimeoutError("timed out")
 
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(h._opener, "open", fake_urlopen)
     with pytest.raises(KVMTimeoutError):
         h.get("/api/thing")
     assert calls["n"] == 1  # a timed-out request may have been delivered: no retry
@@ -127,7 +127,7 @@ def test_connect_timeout_maps_to_kvm_timeout_error(monkeypatch):
     def fake_urlopen(req, context=None, timeout=None):
         raise urllib.error.URLError(TimeoutError("timed out"))
 
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(h._opener, "open", fake_urlopen)
     with pytest.raises(KVMTimeoutError):
         h.get("/api/thing")
 
@@ -138,7 +138,7 @@ def test_mid_request_reset_maps_to_connection_error(monkeypatch):
     def fake_urlopen(req, context=None, timeout=None):
         raise ConnectionResetError("peer reset")
 
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(h._opener, "open", fake_urlopen)
     with pytest.raises(ConnectionError):
         h.get("/api/thing")
 
@@ -153,7 +153,7 @@ def test_ambiguous_failure_retried_for_get_but_not_post(monkeypatch):
         calls["n"] += 1
         raise ConnectionResetError("peer reset")
 
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(h._opener, "open", fake_urlopen)
     with pytest.raises(ConnectionError):
         h.get("/api/thing")
     assert calls["n"] == 3  # GET: retried to exhaustion
@@ -174,7 +174,7 @@ def test_connect_refused_still_retried_for_post(monkeypatch):
         calls["n"] += 1
         raise urllib.error.URLError("refused")
 
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(h._opener, "open", fake_urlopen)
     with pytest.raises(ConnectionError):
         h.post("/api/atx/power")
     assert calls["n"] == 3
@@ -194,7 +194,7 @@ def test_totp_secret_itself_is_redacted(monkeypatch):
             req.full_url, 400, "bad", {}, io.BytesIO(b"echo JBSWY3DPEHPK3PXP end")
         )
 
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(h._opener, "open", fake_urlopen)
     with pytest.raises(Exception) as ei:
         h.get("/api/thing")
     assert "JBSWY3DPEHPK3PXP" not in str(ei.value)
@@ -210,7 +210,7 @@ def test_effective_password_with_totp_redacted_in_error(monkeypatch):
             req.full_url, 400, "bad", {}, io.BytesIO(b"got supersecret123456 back")
         )
 
-    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+    monkeypatch.setattr(h._opener, "open", fake_urlopen)
     with pytest.raises(Exception) as ei:
         h.get("/api/thing")
     msg = str(ei.value)
@@ -263,3 +263,55 @@ def test_ssl_ca_file_pins_and_wins_over_verify_ssl(monkeypatch):
     h = HTTP("host", "u", "p", verify_ssl=False, ssl_ca_file="/pki/device.pem")
     assert captured["cafile"] == "/pki/device.pem"
     assert h._ssl_ctx.verify_mode == ssl.CERT_REQUIRED  # pinning implies verification
+
+
+def _serve(handler_cls):
+    """Start a throwaway localhost HTTP server; return (server, port)."""
+    import http.server
+    import threading
+
+    srv = http.server.HTTPServer(("127.0.0.1", 0), handler_cls)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, srv.server_address[1]
+
+
+def test_redirect_is_refused_and_credentials_never_forwarded():
+    # A hostile/misconfigured device 302s to another host; the stdlib default
+    # opener would copy our auth headers there verbatim. _NoRedirect must refuse
+    # and the credential sink must never be contacted.
+    import http.server
+
+    seen: list[dict] = []
+
+    class Sink(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            seen.append(dict(self.headers))
+            self.send_response(200)
+            self.end_headers()
+            self.wfile.write(b'{"ok": true}')
+
+        def log_message(self, *a):
+            pass
+
+    sink, sink_port = _serve(Sink)
+
+    class Redirector(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(302)
+            self.send_header("Location", f"http://127.0.0.1:{sink_port}/stolen")
+            self.end_headers()
+
+        def log_message(self, *a):
+            pass
+
+    redir, redir_port = _serve(Redirector)
+    try:
+        h = HTTP("127.0.0.1", "admin", "supersecret", scheme="http", port=redir_port,
+                 max_retries=0)
+        with pytest.raises(ConnectionError) as ei:
+            h.get("/api/info")
+        assert "redirect" in str(ei.value).lower()
+        assert seen == []  # the off-origin sink never received the credentials
+    finally:
+        sink.shutdown()
+        redir.shutdown()

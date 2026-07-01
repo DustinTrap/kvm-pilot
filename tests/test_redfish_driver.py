@@ -12,7 +12,13 @@ import pytest
 from kvm_pilot.drivers import RedfishDriver, make_driver
 from kvm_pilot.drivers.base import Capability
 from kvm_pilot.drivers.redfish.transport import RedfishHTTP
-from kvm_pilot.errors import AuthError, CapabilityError, KVMPilotError, SafetyError
+from kvm_pilot.errors import (
+    AuthError,
+    CapabilityError,
+    ConnectionError,
+    KVMPilotError,
+    SafetyError,
+)
 from kvm_pilot.safety import deny_all
 from redfish_emulator import RESET, VM_EJECT, VM_INSERT
 
@@ -307,3 +313,56 @@ def test_credentials_pinned_to_configured_origin():
     assert http._same_origin("https://bmc.lan:443/redfish/v1/x") is True
     assert http._same_origin("https://evil.example/x") is False       # other host
     assert http._same_origin("http://bmc.lan/x") is False             # scheme differs
+
+
+def _serve_redfish(handler_cls):
+    import http.server
+    import threading
+
+    srv = http.server.HTTPServer(("127.0.0.1", 0), handler_cls)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    return srv, srv.server_address[1]
+
+
+def test_redfish_redirect_is_refused_and_token_never_forwarded():
+    # A BMC that 302s off-origin must not cause the session token to be copied
+    # to the redirect target (the _same_origin guard only covers URLs we build;
+    # this covers server-issued redirects).
+    import http.server
+
+    seen: list[dict] = []
+
+    class Sink(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            seen.append(dict(self.headers))
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b"{}")
+
+        def log_message(self, *a):
+            pass
+
+    sink, sink_port = _serve_redfish(Sink)
+
+    class Redirector(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(302)
+            self.send_header("Location", f"http://127.0.0.1:{sink_port}/stolen")
+            self.end_headers()
+
+        def log_message(self, *a):
+            pass
+
+    redir, redir_port = _serve_redfish(Redirector)
+    try:
+        http = RedfishHTTP("127.0.0.1", "root", "s3cr3t", scheme="http",
+                           port=redir_port, auth="basic", max_retries=0)
+        http._token = "session-token-xyz"  # simulate a live session
+        with pytest.raises(ConnectionError) as ei:
+            http.request("GET", "/redfish/v1/Systems/0")
+        assert "redirect" in str(ei.value).lower()
+        assert seen == []  # the off-origin sink never saw X-Auth-Token / Basic
+    finally:
+        sink.shutdown()
+        redir.shutdown()
