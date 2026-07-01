@@ -65,6 +65,13 @@ class RedfishState:
         self.posts: list[tuple[str, dict]] = []
         self.last_headers: dict[str, str] = {}
         self.session_deleted = False
+        # Session-token state: each Sessions POST issues a fresh token, and a
+        # token-bearing request is validated against it (real BMCs do; the old
+        # emulator never checked). expire_token_once rejects the next
+        # token-bearing request with 401, modelling a DSP0266 idle timeout.
+        self.valid_token: str | None = None
+        self.token_seq = 0
+        self.expire_token_once = False
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -105,6 +112,28 @@ class _Handler(BaseHTTPRequestHandler):
             st.fail_times -= 1
             self._send({"error": {"message": "transient"}}, status=st.fail_status)
             return True
+        # Session-auth enforcement. A protected resource requires either a valid
+        # X-Auth-Token or HTTP Basic; the public login surface (service root +
+        # the Sessions collection) needs neither. Real BMCs enforce this; the old
+        # emulator validated nothing, so session expiry/re-login was untestable.
+        path = self._path()
+        if path not in ("/redfish/v1", SESSIONS):
+            token = self.headers.get("X-Auth-Token")
+            has_basic = any(k.lower() == "authorization" for k in self.headers)
+            if token is not None and st.expire_token_once:
+                st.expire_token_once = False
+                st.valid_token = None  # the BMC forgot this session
+                self._send({"error": {"message": "session expired"}}, status=401)
+                return True
+            if token is not None:
+                if token != st.valid_token:
+                    self._send({"error": {"message": "invalid or expired token"}}, status=401)
+                    return True
+            elif not has_basic:
+                # Session mode, protected resource, no credentials at all
+                # (e.g. a token cleared by close()): unauthenticated.
+                self._send({"error": {"message": "no session token"}}, status=401)
+                return True
         return False
 
     # -- GET -------------------------------------------------------------
@@ -234,12 +263,15 @@ class _Handler(BaseHTTPRequestHandler):
         st = self._state
         st.posts.append((path, body))
         if path == SESSIONS:
+            st.token_seq += 1
+            token = f"tok-redfish-{st.token_seq}"
+            st.valid_token = token
             resp: dict = {"UserName": "admin", "@odata.id": f"{SESSIONS}/1"}
             if st.password_change_required:
                 resp["@Message.ExtendedInfo"] = [
                     {"MessageId": "Base.1.0.PasswordChangeRequired",
                      "Message": "change your password"}]
-            headers = {"X-Auth-Token": "tok-redfish-123"}
+            headers = {"X-Auth-Token": token}
             if st.session_send_location:
                 headers["Location"] = f"{SESSIONS}/1"
             self._send(resp, status=201, headers=headers)
