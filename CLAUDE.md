@@ -65,8 +65,9 @@ python3 -m venv .venv && .venv/bin/pip install -e ".[dev,totp,ws]"
 .venv/bin/mypy src/kvm_pilot
 .venv/bin/pytest
 ```
-CI (`.github/workflows/ci.yml`) runs all three on Python 3.11/3.12/3.13 — keep
-them green.
+CI (`.github/workflows/ci.yml`) runs all three on Python 3.11/3.12/3.13, plus a
+security job (bandit + pip-audit) and an opt-in sushy-tools Redfish integration
+job — keep them green. See docs/CONTRIBUTING.md for the full pre-PR checklist.
 
 ## Safety in tests & dev
 Never point destructive operations at real hardware from tests or examples. The

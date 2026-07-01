@@ -85,6 +85,18 @@ unless you mean it" marker for untested alpha code. A plain
 the exact version as shown above. The core has **no third-party runtime
 dependencies** — it is pure standard library. Extras are opt-in.
 
+> **Heads-up: `0.1.0a1` is much older than this README.** It predates
+> `make_driver` and the driver registry, the GLKVM/BliKVM/Redfish/fake drivers,
+> `ApiDisabledError`, and the newer CLI (`capabilities`, `events`, `eject`,
+> `--driver`, `--timeout`). To try what this page actually describes, install
+> the current tree from git:
+>
+> ```bash
+> pip install "kvm-pilot[totp,ws] @ git+https://github.com/DustinTrap/kvm-pilot"
+> ```
+>
+> A `0.1.0a2` release covering all of the above is planned.
+
 ## Quickstart
 
 ```python
@@ -113,16 +125,24 @@ kvm-pilot info     --host 192.168.8.1 --user admin --passwd secret
 kvm-pilot capabilities --profile homelab                 # what this driver supports
 kvm-pilot snapshot screen.jpg --profile homelab
 kvm-pilot --timeout 60 power-cycle --profile homelab --dry-run   # log, don't send
+kvm-pilot eject --profile homelab                        # detach virtual media
 kvm-pilot events --profile homelab --count 5             # stream events ('ws' extra)
 kvm-pilot watch grub_menu --profile homelab \
     --backend local --vision-url http://127.0.0.1:1234/v1 --vision-model qwen2.5-vl-7b
 ```
 
-The CLI prompts for confirmation before any destructive action. Use `--yes` to
+The CLI prompts for confirmation before any destructive action (power, virtual
+media — including uploads — keyboard/mouse injection, GPIO). Use `--yes` to
 skip prompts in automation, or `--dry-run` to log intended actions without
-sending them. `--timeout` (HTTP per-request timeout) is a global flag and goes
-*before* the subcommand; `watch` keeps its own `--timeout` for the vision wait
-deadline.
+sending them — dry-run short-circuits *before* the prompt, so it never blocks
+waiting for input. `--timeout` (HTTP per-request timeout) is a global flag and
+goes *before* the subcommand; `watch` keeps its own `--timeout` for the vision
+wait deadline.
+
+Profiles like `homelab` live in `~/.config/kvm-pilot/config.toml`. See
+[docs/configuration.md](docs/configuration.md) for the config-file format,
+every `KVM_PILOT_*` environment variable, and the precedence between flags,
+env, and profiles.
 
 ## Boot-phase detection
 
@@ -156,13 +176,17 @@ strong on pixels, BMCs on structured state and serial text.
 
 ## Safety model
 
-Power-offs, hard resets, virtual-media connect/disconnect, GPIO, and Redfish
-resets are classified as **destructive** and pass through a safety layer:
+Power-offs, hard resets, virtual-media connect/disconnect and image uploads,
+keyboard/mouse injection (`type_text`, `press_key`, shortcuts, clicks), GPIO,
+and Redfish resets are classified as **destructive** and pass through a safety
+layer:
 
-- **dry-run** logs the intended call and skips it entirely.
-- **confirmation** — a callback that can veto any destructive call. The library
-  default allows everything (so plain scripts work); the CLI installs an
-  interactive `y/N` prompt unless you pass `--yes`.
+- **dry-run** short-circuits *first*: it logs the intended call and skips it
+  entirely — the confirm callback is never invoked, so dry runs never prompt
+  or block.
+- **confirmation** — a callback that can veto any destructive call that would
+  really be sent. The library default allows everything (so plain scripts
+  work); the CLI installs an interactive `y/N` prompt unless you pass `--yes`.
 
 ![Decision flow for a destructive call: if the op is not in DESTRUCTIVE_OPS it executes directly; if it is, dry-run logs and skips it, otherwise a confirm callback can veto it, and only an allowed call is sent to the device.](docs/safety.svg)
 
@@ -182,7 +206,7 @@ caches it; set `KVM_PILOT_VISION_MODEL` or pass `model=` to pin one. The local
 backend uses whatever model you loaded on your server. Bring your own backend,
 endpoint, and model.
 
-## How this differs from `pikvm-lib`
+## How this differs from other clients
 
 [`pikvm-lib`](https://github.com/guanana/pikvm-lib) is a fine general-purpose
 PiKVM client. `kvm-pilot` is aimed at a different job:
@@ -200,6 +224,15 @@ PiKVM client. `kvm-pilot` is aimed at a different job:
 If you just want to script power and HID against a stock PiKVM and don't need
 the vision layer, `pikvm-lib` may be the simpler choice.
 
+On the BMC side, [sushy](https://opendev.org/openstack/sushy), DMTF's
+[python-redfish-library](https://github.com/DMTF/python-redfish-library), and
+[pyghmi](https://opendev.org/x/pyghmi) (IPMI) are mature, far more complete BMC
+management SDKs — if you need account/firmware/network configuration,
+EventService subscriptions, or hardware-proven maturity, use them. `kvm-pilot`
+trades that completeness for one uniform capability surface across device
+classes (IP-KVMs and BMCs behind the same protocols), the same safety layer
+gating every destructive call, and the vision loop on devices that have pixels.
+
 ## Compatibility
 
 | Device | Status |
@@ -210,10 +243,14 @@ the vision layer, `pikvm-lib` may be the simpler choice.
 | BliKVM | Expected to work (PiKVM-compatible API); untested |
 
 **Nothing in this table has been verified on real hardware yet** — the entire
-matrix is "expected to work" pending validation. The ATX power features also
-require the optional ATX add-on board; without it, ATX calls will return errors
-from the device. Reports of success or failure on *any* hardware are exactly
-what this alpha needs — please open an issue.
+matrix is "expected to work" pending validation. ATX power control needs the
+ATX adapter wired to the target's front-panel header: on the GL Comet family
+(GL-RM1 / GL-RM1PE) that is GL.iNet's separately sold ATX board (GL-ATXPC),
+while PiKVM v3/v4 kits include the ATX adapter in the box and BliKVM bundles
+vary by model — check yours. Without ATX wiring, ATX calls return errors from
+the device. Reports of success or failure on *any* hardware are exactly what
+this alpha needs — please open a
+[hardware report](https://github.com/DustinTrap/kvm-pilot/issues/new?template=hardware-report.yml).
 
 ## Architecture
 

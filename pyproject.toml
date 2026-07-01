@@ -5,13 +5,17 @@ build-backend = "hatchling.build"
 [project]
 name = "kvm-pilot"
 dynamic = ["version"]
-description = "AI-driven bare-metal control for PiKVM and the GL.iNet GLKVM fork (GL-RM1 / GL-RM1PE)"
+description = "AI-driven bare-metal control for IP-KVMs (PiKVM, GL.iNet GLKVM, BliKVM) and Redfish BMCs (iDRAC, iLO, OpenBMC)"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
 license-files = ["LICENSE", "NOTICE"]
 authors = [{ name = "kvm-pilot contributors" }]
-keywords = ["pikvm", "glkvm", "gl-rm1", "kvm", "ipkvm", "bare-metal", "automation", "vision", "llm"]
+keywords = [
+    "pikvm", "glkvm", "blikvm", "gl-rm1", "kvm", "ipkvm",
+    "redfish", "bmc", "idrac", "ilo", "openbmc",
+    "bare-metal", "automation", "vision", "llm", "mcp",
+]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: System Administrators",
@@ -24,6 +28,7 @@ classifiers = [
     "Programming Language :: Python :: 3.13",
     "Topic :: System :: Systems Administration",
     "Topic :: Utilities",
+    "Typing :: Typed",
 ]
 # Core has ZERO runtime dependencies (stdlib only). Extras are opt-in.
 dependencies = []
