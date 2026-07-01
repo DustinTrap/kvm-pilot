@@ -163,6 +163,16 @@ def test_boot_progress_none_while_off_is_power_off(emu):
     assert make(emu).get_boot_progress() == "power_off"
 
 
+@pytest.mark.parametrize("power_state", ["PoweringOn", "PoweringOff", "Paused"])
+def test_boot_progress_transitional_power_is_unknown_not_off(emu, power_state):
+    # DSP0268 PowerState has transitional values; only a literal "Off" may be
+    # reported as power_off (a wait loop must not think a mid-transition host
+    # is down).
+    emu.state.boot_progress = "None"
+    emu.state.power_state = power_state
+    assert make(emu).get_boot_progress() == "unknown"
+
+
 # -- logs ------------------------------------------------------------------
 
 def test_get_logs_pages_and_renders(emu):

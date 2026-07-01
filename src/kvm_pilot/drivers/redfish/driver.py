@@ -472,7 +472,11 @@ class RedfishDriver(CapabilityMixin):
             return None  # device does not report BootProgress at all
         last = bp.get("LastState")
         if last in (None, "None"):
-            return PHASE_POWER_OFF if sysd.get("PowerState") != "On" else PHASE_UNKNOWN
+            # No boot progress reported: infer only what PowerState actually
+            # supports. Transitional states (PoweringOn/PoweringOff/Paused,
+            # DSP0268 Resource.PowerState) are NOT power_off — reporting them
+            # as off would tell a wait loop the host is down mid-transition.
+            return PHASE_POWER_OFF if sysd.get("PowerState") == "Off" else PHASE_UNKNOWN
         return _BOOT_PROGRESS_MAP.get(str(last), PHASE_UNKNOWN)
 
     # -- Logs ------------------------------------------------------------
