@@ -459,11 +459,9 @@ class RedfishDriver(CapabilityMixin):
         """
         logger.info("Hard power cycling %s via Redfish", self.host)
         self.power_off_hard()
-        if off_delay:
-            time.sleep(off_delay)
+        time.sleep(off_delay)
         self.power_on()
-        if on_delay:
-            time.sleep(on_delay)
+        time.sleep(on_delay)
 
     # -- BootProgress ----------------------------------------------------
 
