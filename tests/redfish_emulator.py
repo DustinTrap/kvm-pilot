@@ -32,7 +32,9 @@ LOG_ENTRIES = f"{LOG_LCLOG}/Entries"
 SESSIONS = "/redfish/v1/SessionService/Sessions"
 TASK = "/redfish/v1/TaskService/Tasks/1"
 
-_OFF_TYPES = {"ForceOff", "GracefulShutdown", "PushPowerButton"}
+# PushPowerButton is a state toggle (DSP0268), NOT unconditionally off — a
+# spec-accurate emulator is what catches the intent-inversion regression.
+_OFF_TYPES = {"ForceOff", "GracefulShutdown"}
 _ON_TYPES = {"On", "ForceOn"}
 
 
@@ -55,6 +57,10 @@ class RedfishState:
                                 "GracefulRestart", "ForceRestart"]
         self.fail_status: int | None = None
         self.fail_times = 0
+        # If set, a reset POST applies the state transition (as if a concurrent
+        # actor beat us to it) but returns this status — models a BMC that 400/409s
+        # a reset already in the requested state (iLO InvalidOperationForSystemState).
+        self.reset_reject_status: int | None = None
         self.calls: list[tuple[str, str]] = []
         self.posts: list[tuple[str, dict]] = []
         self.last_headers: dict[str, str] = {}
@@ -244,8 +250,15 @@ class _Handler(BaseHTTPRequestHandler):
                 st.power_state = "On"
             elif rt in _OFF_TYPES:
                 st.power_state = "Off"
+            elif rt == "PushPowerButton":
+                # Pulse the power button: toggle the current state.
+                st.power_state = "Off" if st.power_state == "On" else "On"
             else:  # restarts
                 st.power_state = "On"
+            if st.reset_reject_status:
+                self._send({"error": {"message": "already in requested state"}},
+                           status=st.reset_reject_status)
+                return
             if st.reset_async:
                 self._send(None, status=202, headers={"Location": TASK})
             else:

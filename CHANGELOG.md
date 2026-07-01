@@ -31,6 +31,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - `is_powered_on()` fails open when kvmd reports the ATX subsystem disabled
   (no ATX board): vision classification proceeds instead of reporting
   `power_off` for a running machine.
+- **Redfish:** power methods read `PowerState` before issuing a reset — a host
+  already at the target gets no reset, and `PushPowerButton` (a state toggle)
+  is chosen only when the pulse moves toward the intent, so `power_off` on an
+  already-off iDRAC8 no longer powers it back on
+  ([#42](https://github.com/DustinTrap/kvm-pilot/issues/42)).
 - Redfish: transitional `PowerState` values (`PoweringOn`/`PoweringOff`/
   `Paused`) map to `unknown`, not `power_off`.
 - Vision: `VisionError` is honored on every failure path (non-JSON 200s,
