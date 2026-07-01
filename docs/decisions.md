@@ -152,6 +152,19 @@ request; re-firing a power/HID/MSD POST could run it twice. Connect-phase
 failures (nothing was sent) stay retryable for every method. Retrying 409/503
 stays safe for all methods: those are definitive "rejected" responses.
 
+### Redfish reads PowerState before every reset
+`PushPowerButton` pulses the power button (DSP0268) — a *toggle*, not an
+absolute state — so choosing it from `AllowableValues` alone can invert a
+safety-gated intent: on iDRAC8-class firmware (off set `[ForceOff,
+PushPowerButton]`, no `GracefulShutdown`) `power_off` on an already-off host
+powered it back *on*, then timed out. Both power methods now read the current
+`PowerState` first: a host already at the target gets no reset at all, and
+`PushPowerButton` is selected only when the pulse moves toward the target
+(otherwise the preference falls through to `ForceOff`). A `400`/`409` that
+nonetheless lands while the host is observed at target is treated as success —
+a refinement of, not a change to, the "resetting twice is still reset" retry
+rationale below (which holds only for absolute ResetTypes, not toggles).
+
 ### Redfish transitional `PowerState` maps to `unknown`, not `power_off`
 `PoweringOn`/`PoweringOff`/`Paused` (DSP0268) are mid-transition; only a literal
 `Off` becomes `power_off`. Conservative choice: a wait loop must not conclude a

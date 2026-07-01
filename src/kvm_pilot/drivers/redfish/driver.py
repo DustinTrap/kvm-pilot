@@ -255,11 +255,21 @@ class RedfishDriver(CapabilityMixin):
         assert self._reset_target is not None and self._reset_allowable is not None
         return self._reset_target, self._reset_allowable
 
-    def _choose_reset_type(self, intent: str) -> str:
+    def _choose_reset_type(self, intent: str, powered_on: bool | None = None) -> str:
         _, allowable = self._reset_info()
         for candidate in _RESET_PREFERENCES[intent]:
-            if candidate in allowable:
-                return candidate
+            if candidate not in allowable:
+                continue
+            if candidate == "PushPowerButton" and powered_on is not None:
+                # PushPowerButton pulses the power button — a state-dependent
+                # toggle (DSP0268). Pick it only when the pulse moves toward the
+                # intent's target; otherwise it would invert the intent (e.g.
+                # power_off on an already-off host powers it ON). On iDRAC8,
+                # whose off set is [ForceOff, PushPowerButton], this correctly
+                # falls through to ForceOff when the host is already off.
+                if powered_on == (intent == "power_on"):
+                    continue
+            return candidate
         raise CapabilityError(
             f"No supported ResetType for {intent} on {self.host}; "
             f"target advertises {allowable}"
@@ -392,11 +402,33 @@ class RedfishDriver(CapabilityMixin):
         )
 
     def _reset(self, intent: str, op: str, desc: str, wait: bool, target_on: bool | None) -> None:
-        reset_type = self._choose_reset_type(intent)
+        # Read PowerState first: skip a redundant reset (which on many BMCs is a
+        # no-op toggle that inverts intent, or a 400/409), and so PushPowerButton
+        # is only chosen when the pulse moves toward the target.
+        powered_on = self.is_powered_on() if target_on is not None else None
+        if target_on is not None and powered_on == target_on:
+            logger.info("%s already powered %s — no reset issued", self.host,
+                        "on" if target_on else "off")
+            return
+        reset_type = self._choose_reset_type(intent, powered_on)
         if not self.safety.guard(op, f"{desc} via ComputerSystem.Reset({reset_type})"):
             return  # dry-run: gated and skipped
         target, _ = self._reset_info()
-        resp = self._http.request("POST", target, json_body={"ResetType": reset_type})
+        try:
+            resp = self._http.request("POST", target, json_body={"ResetType": reset_type})
+        except KVMPilotError as exc:
+            # Vendor non-idempotence / TOCTOU: some BMCs reject a reset that is
+            # already in the requested state (iLO InvalidOperationForSystemState
+            # -> 400/409). Re-read; if we reached the target, treat as success.
+            if (
+                exc.status_code in (400, 409)
+                and target_on is not None
+                and self.is_powered_on() == target_on
+            ):
+                logger.info("%s reached power=%s despite %s — treating as success",
+                            self.host, "on" if target_on else "off", exc.status_code)
+                return
+            raise
         self._handle_async(resp)
         if wait and target_on is not None:
             self._wait_power(target_on)

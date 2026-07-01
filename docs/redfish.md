@@ -58,6 +58,17 @@ the first advertised value:
 graceful** (Dell iDRAC9 v3.36 bug; HPE iLO5 advisory). If none match, raise
 `CapabilityError` with the advertised set.
 
+**Current PowerState is read before every reset.** Two reasons: (1) if the host
+is already at the intended state, no reset is issued at all — a redundant reset
+is a no-op at best and a `400`/`409` on many BMCs (HPE iLO
+`InvalidOperationForSystemState`); (2) `PushPowerButton` *pulses* the power
+button (DSP0268) — a state toggle — so it is chosen only when the pulse moves
+toward the target. On iDRAC8-class firmware, whose off set is `[ForceOff,
+PushPowerButton]` with no `GracefulShutdown`, this means `power_off` on an
+already-off host does nothing instead of powering it back **on**. If a reset is
+nonetheless rejected with `400`/`409` but the host is observed at the target
+state (a race), that is treated as success rather than an error.
+
 ## BootProgress → phase vocabulary
 
 `BootProgressTypes` maps to `vision.base` phases: the `*Started`/`*Complete`

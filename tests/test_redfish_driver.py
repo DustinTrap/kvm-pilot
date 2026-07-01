@@ -141,6 +141,61 @@ def test_deny_confirm_blocks_and_sends_nothing(emu):
     assert _reset_posts(emu) == []
 
 
+# iDRAC8-class set: no GracefulShutdown, so power_off's preference falls to
+# PushPowerButton — a state toggle that must not be fired when already off.
+_IDRAC8_RESET = ["On", "ForceOff", "GracefulRestart", "PushPowerButton", "Nmi"]
+
+
+def test_power_off_when_already_off_is_a_noop(emu):
+    # The core #42 regression: on iDRAC8 (PushPowerButton preferred over ForceOff
+    # for off), power_off on an already-off host must NOT pulse the button (which
+    # would power it ON) — it must issue zero resets.
+    emu.state.reset_allowable = _IDRAC8_RESET
+    emu.state.power_state = "Off"
+    make(emu).power_off()
+    assert _reset_posts(emu) == []            # no reset issued
+    assert emu.state.power_state == "Off"     # host stays off, not toggled on
+
+
+def test_power_off_on_idrac8_uses_pushpowerbutton_toward_off(emu):
+    # When the host IS on, PushPowerButton is the correct graceful-ish choice on
+    # iDRAC8, and the toggle moves it to Off.
+    emu.state.reset_allowable = _IDRAC8_RESET
+    emu.state.power_state = "On"
+    make(emu).power_off()
+    assert _reset_posts(emu) == [{"ResetType": "PushPowerButton"}]
+    assert emu.state.power_state == "Off"
+
+
+def test_power_on_when_already_on_is_a_noop(emu):
+    emu.state.power_state = "On"
+    make(emu).power_on()
+    assert _reset_posts(emu) == []
+    assert emu.state.power_state == "On"
+
+
+def test_reset_rejected_but_state_at_target_is_success(emu):
+    # Vendor non-idempotence / race: the BMC 409s the reset but the host is at
+    # the target state anyway — treat as success, don't raise.
+    emu.state.power_state = "On"
+    emu.state.reset_reject_status = 409
+    make(emu, max_retries=0).power_off()  # must not raise
+    assert _reset_posts(emu) == [{"ResetType": "GracefulShutdown"}]
+    assert emu.state.power_state == "Off"
+
+
+def test_reset_rejected_and_not_at_target_still_raises(emu):
+    # A genuine failure (rejected AND not at target) must still surface.
+    emu.state.power_state = "On"
+    emu.state.reset_reject_status = 400
+    emu.state.reset_allowable = ["GracefulRestart"]  # power_off has no candidate...
+    # ...so instead force a reject where the state never reaches target: use a
+    # restart intent that 400s. reset_hard has target_on=None, so the 400 is not
+    # swallowed and must propagate.
+    with pytest.raises(KVMPilotError):
+        make(emu, max_retries=0).reset_hard()
+
+
 def test_async_reset_polls_task(emu):
     emu.state.reset_async = True  # Reset returns 202 + a Task that Completes
     d = make(emu)
