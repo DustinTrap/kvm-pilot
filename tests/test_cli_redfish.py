@@ -67,3 +67,30 @@ def test_cli_mount_is_gated_under_dry_run(emu):
     rc = main(_argv(emu, "mount", "http://srv/x.iso", "--yes", "--dry-run"))
     assert rc == 0
     assert emu.state.inserted is False
+
+
+def test_cli_closes_the_bmc_session_on_exit(emu):
+    # A leaked Redfish session locks operators out (BMCs cap concurrent
+    # sessions), so the CLI must DELETE it when the command finishes. `info`
+    # triggers a session login; main() must tear it down on the way out.
+    rc = main(_argv(emu, "info"))
+    assert rc == 0
+    assert emu.state.session_deleted is True
+
+
+def test_cli_teardown_is_safe_when_the_command_errors(emu):
+    # `snapshot` needs VIDEO, which a BMC lacks -> CapabilityError (exit 1)
+    # before any network call. The driver was still built, so main()'s finally
+    # must close() it without crashing (no session was created -> nothing to
+    # DELETE, close() is a harmless no-op).
+    rc = main(_argv(emu, "snapshot", "out.jpg"))
+    assert rc == 1
+    assert emu.state.session_deleted is False  # never logged in, nothing leaked
+
+
+def test_cli_basic_auth_creates_no_session_to_leak(emu):
+    # --redfish-auth basic avoids the SessionService entirely (the documented
+    # interim workaround); there is no session and close() stays a no-op.
+    rc = main([*_argv(emu, "info"), "--redfish-auth", "basic"])
+    assert rc == 0
+    assert emu.state.session_deleted is False
