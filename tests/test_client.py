@@ -37,9 +37,143 @@ def test_power_on_sends_when_allowed(fake_http):
     assert "/api/atx/power" in fake_http.paths()
 
 
-def test_type_text_not_gated(client, fake_http):
+def test_type_text_sends_when_allowed(client, fake_http):
+    # The client fixture has the library-default allow_all, so the gated call
+    # still goes through — plain scripts keep working.
     client.type_text("root\n")
     assert "/api/hid/print" in fake_http.paths()
+
+
+def test_hid_input_is_gated_by_dry_run(fake_http):
+    c = KVMClient("fake", dry_run=True)
+    c._http = fake_http
+    c.type_text("rm -rf /\n")
+    c.press_key("Enter")
+    c.send_shortcut("ControlLeft,AltLeft,Delete")
+    c.key_event("Escape", True)
+    c.mouse_click()
+    assert fake_http.calls == []  # nothing reaches the device under dry-run
+
+
+def test_hid_input_is_gated_by_confirm(fake_http):
+    c = KVMClient("fake", confirm=deny_all)
+    c._http = fake_http
+    for call in (
+        lambda: c.type_text("x"),
+        lambda: c.press_key("Enter"),
+        lambda: c.send_shortcut("MetaLeft"),
+        lambda: c.key_event("F2", True),
+        lambda: c.mouse_click(),
+    ):
+        with pytest.raises(SafetyError):
+            call()
+    assert fake_http.calls == []
+
+
+def test_type_text_guard_description_hides_the_text():
+    # send_password routes through type_text: the confirm prompt/logs must never
+    # contain the typed text itself, only its length.
+    seen: list[str] = []
+
+    def recording_confirm(op: str, desc: str) -> bool:
+        seen.append(desc)
+        return False
+
+    c = KVMClient("fake", confirm=recording_confirm)
+    with pytest.raises(SafetyError):
+        c.type_text("hunter2")
+    assert "hunter2" not in seen[0]
+    assert "7 characters" in seen[0]
+
+
+def test_ctrl_alt_delete_prompts_once_not_twice(fake_http):
+    # ctrl_alt_delete has its own op id; it must not ALSO fire the
+    # hid.send_shortcut guard (which would double-prompt an interactive user).
+    seen: list[str] = []
+
+    def recording_confirm(op: str, desc: str) -> bool:
+        seen.append(op)
+        return True
+
+    c = KVMClient("fake", confirm=recording_confirm)
+    c._http = fake_http
+    c.ctrl_alt_delete()
+    assert seen == ["hid.ctrl_alt_delete"]
+    assert "/api/hid/events/send_shortcut" in fake_http.paths()
+
+
+def test_press_key_releases_even_if_release_fails(fake_http):
+    # If the up-event POST fails the key would stay held down on the target;
+    # the client must attempt a HID reset and re-raise.
+    class FlakyHTTP(type(fake_http)):
+        def post(self, path, params=None, **kw):
+            if params and params.get("state") == "false":
+                super().post(path, params=params, **kw)  # record the attempt
+                raise RuntimeError("boom")
+            return super().post(path, params=params, **kw)
+
+    flaky = FlakyHTTP()
+    c = KVMClient("fake")
+    c._http = flaky
+    with pytest.raises(RuntimeError):
+        c.press_key("Enter", hold_ms=0)
+    states = [c["params"].get("state") for c in flaky.calls if c["path"].endswith("send_key")]
+    assert states == ["true", "false"]  # release was attempted
+    assert "/api/hid/reset" in flaky.paths()  # and the reset fallback fired
+
+
+def test_msd_upload_file_dry_run_does_no_io(fake_http):
+    # The guard fires before ANY I/O: under dry-run the (nonexistent) file is
+    # never read and nothing is POSTed, so `mount --dry-run` really is a no-op.
+    c = KVMClient("fake", dry_run=True)
+    c._http = fake_http
+    c.msd_upload_file("/does/not/exist.iso")
+    assert fake_http.calls == []
+
+
+def test_msd_upload_url_gated_by_confirm(fake_http):
+    c = KVMClient("fake", confirm=deny_all)
+    c._http = fake_http
+    with pytest.raises(SafetyError):
+        c.msd_upload_url("https://example.com/x.iso")
+    assert fake_http.calls == []
+
+
+def test_is_powered_on_fails_open_without_atx(client, fake_http):
+    # No ATX board wired: kvmd reports enabled=false and the LEDs mean nothing —
+    # power state is unknowable, so we must NOT report "off" (the vision layer
+    # would short-circuit every classification to power_off).
+    fake_http.results["/api/atx"] = {"enabled": False, "leds": {"power": False}}
+    assert client.is_powered_on() is True
+    fake_http.results["/api/atx"] = {"enabled": True, "leds": {"power": False}}
+    assert client.is_powered_on() is False
+    fake_http.results["/api/atx"] = {"leds": {"power": True}}  # no enabled key
+    assert client.is_powered_on() is True
+
+
+def test_snapshot_sends_no_quality_params(client, fake_http):
+    # kvmd ignores preview_quality without preview=1 (and the preview would be
+    # downscaled anyway) — the snapshot request must carry no params at all.
+    fake_http.results["/api/streamer/snapshot"] = b"\xff\xd8jpeg"
+    client.snapshot()
+    call = [c for c in fake_http.calls if c["path"] == "/api/streamer/snapshot"][0]
+    assert not call.get("params")
+
+
+def test_pixel_to_kvmd_maps_edges_exactly():
+    from kvm_pilot.client import _pixel_to_kvmd
+
+    assert _pixel_to_kvmd(0, 1920) == -32768
+    assert _pixel_to_kvmd(1919, 1920) == 32767
+    assert _pixel_to_kvmd(0, 1) == 0  # degenerate extent
+    assert -40 < _pixel_to_kvmd(960, 1920) < 40  # ~screen center
+
+
+def test_mouse_move_pixels_reads_resolution_and_maps(client, fake_http):
+    fake_http.results["/api/streamer"] = {"source": {"resolution": {"width": 1920, "height": 1080}}}
+    client.mouse_move_pixels(0, 1079)
+    move = [c for c in fake_http.calls if c["path"] == "/api/hid/events/send_mouse_move"][0]
+    assert move["params"] == {"to_x": -32768, "to_y": 32767}
 
 
 def test_mount_iso_sequence(fake_http, tmp_path):

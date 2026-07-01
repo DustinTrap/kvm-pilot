@@ -5,9 +5,9 @@ Covers auth (incl. TOTP/2FA), keyboard + mouse HID, snapshots/OCR, ATX power,
 Mass Storage Device (virtual media), GPIO, Redfish, WebSocket event streaming,
 and system info/logs/metrics.
 
-Destructive operations (power, reset, virtual-media connect/disconnect, GPIO,
-Redfish resets) pass through a SafetyPolicy: dry-run skips them, and an
-optional confirmation callback can veto them. See kvm_pilot.safety.
+Destructive operations (power, reset, virtual-media writes/attach, GPIO, HID
+keystrokes/clicks, Redfish resets) pass through a SafetyPolicy: dry-run skips
+them, and an optional confirmation callback can veto them. See kvm_pilot.safety.
 
 Compatibility note for GLKVM (GL.iNet fork): the PiKVM REST API is disabled by
 default in GL firmware. Enable it by uncommenting the relevant block in
@@ -35,6 +35,13 @@ if TYPE_CHECKING:
     from .config import HostConfig
 
 logger = logging.getLogger("kvm_pilot.client")
+
+
+def _pixel_to_kvmd(v: int, extent: int) -> int:
+    """Map pixel 0..extent-1 edge-exactly onto kvmd's -32768..32767 axis."""
+    if extent <= 1:
+        return 0
+    return max(-32768, min(32767, round(-32768 + v * 65535 / (extent - 1))))
 
 
 class PiKVMDriver(CapabilityMixin):
@@ -210,18 +217,22 @@ class PiKVMDriver(CapabilityMixin):
 
     # -- streamer / snapshots -------------------------------------------
 
-    def snapshot(self, quality: int = 85) -> bytes:
-        return self._http.get(
-            "/api/streamer/snapshot", params={"preview_quality": quality}, raw_response=True
-        )
+    def snapshot(self) -> bytes:
+        """Return the current screen as a full-resolution JPEG.
 
-    def snapshot_save(self, path: str, quality: int = 85) -> Path:
+        No quality knob: kvmd's ``preview_quality`` applies only to its
+        downscaled preview (which would break OCR/vision), and the full-size
+        snapshot has no re-encode-at-quality path.
+        """
+        return self._http.get("/api/streamer/snapshot", raw_response=True)
+
+    def snapshot_save(self, path: str) -> Path:
         out = Path(path)
-        out.write_bytes(self.snapshot(quality=quality))
+        out.write_bytes(self.snapshot())
         return out
 
-    def snapshot_base64(self, quality: int = 85) -> str:
-        return base64.b64encode(self.snapshot(quality=quality)).decode()
+    def snapshot_base64(self) -> str:
+        return base64.b64encode(self.snapshot()).decode()
 
     def snapshot_ocr(
         self, lang: str = "eng", region: tuple[int, int, int, int] | None = None
@@ -266,6 +277,12 @@ class PiKVMDriver(CapabilityMixin):
     def type_text(
         self, text: str, keymap: str = "en-us", slow: bool = False, delay: float = 0.0
     ) -> None:
+        # The description gives only the length: the text may be a password
+        # (send_password routes through here) and guard descriptions get logged.
+        if not self.safety.guard(
+            "hid.type_text", f"Type {len(text)} characters into {self.host}"
+        ):
+            return
         params: dict[str, Any] = {"keymap": keymap, "limit": 0}
         if slow:
             params["slow"] = "true"
@@ -276,14 +293,40 @@ class PiKVMDriver(CapabilityMixin):
         )
 
     def send_shortcut(self, keys: str) -> None:
+        if self.safety.guard("hid.send_shortcut", f"Send shortcut {keys!r} to {self.host}"):
+            self._send_shortcut(keys)
+
+    def _send_shortcut(self, keys: str) -> None:
         self._http.post("/api/hid/events/send_shortcut", params={"keys": keys})
 
     def press_key(self, key: str, hold_ms: int = 50) -> None:
+        if not self.safety.guard("hid.press_key", f"Press {key!r} on {self.host}"):
+            return
         self._http.post("/api/hid/events/send_key", params={"key": key, "state": "true"})
-        time.sleep(hold_ms / 1000)
-        self._http.post("/api/hid/events/send_key", params={"key": key, "state": "false"})
+        try:
+            time.sleep(hold_ms / 1000)
+        finally:
+            self._release_or_reset(
+                "/api/hid/events/send_key", {"key": key, "state": "false"}, f"key {key!r}"
+            )
+
+    def _release_or_reset(self, path: str, params: dict[str, Any], what: str) -> None:
+        """Send an up-event; if that fails, reset HID so ``what`` can't stay held down."""
+        try:
+            self._http.post(path, params=params)
+        except Exception as exc:  # noqa: BLE001 - always attempt the reset fallback
+            logger.warning("Releasing %s on %s failed (%s); resetting HID", what, self.host, exc)
+            try:
+                self.reset_hid()
+            except Exception:  # noqa: BLE001 - surface the original failure below
+                logger.error("HID reset failed too — %s may be stuck down on %s", what, self.host)
+            raise
 
     def key_event(self, key: str, state: bool) -> None:
+        if not self.safety.guard(
+            "hid.key_event", f"Key event {key!r} {'down' if state else 'up'} on {self.host}"
+        ):
+            return
         self._http.post(
             "/api/hid/events/send_key",
             params={"key": key, "state": "true" if state else "false"},
@@ -291,7 +334,7 @@ class PiKVMDriver(CapabilityMixin):
 
     def ctrl_alt_delete(self) -> None:
         if self.safety.guard("hid.ctrl_alt_delete", f"Send Ctrl+Alt+Del to {self.host}"):
-            self.send_shortcut("ControlLeft,AltLeft,Delete")
+            self._send_shortcut("ControlLeft,AltLeft,Delete")
 
     def set_hid_params(
         self,
@@ -311,7 +354,37 @@ class PiKVMDriver(CapabilityMixin):
     # -- HID: mouse ------------------------------------------------------
 
     def mouse_move(self, x: int, y: int) -> None:
+        """Absolute mouse move in kvmd's fixed coordinate space — NOT pixels.
+
+        kvmd expects -32768..32767 on each axis with (0, 0) at the screen
+        CENTER, and only honors this in absolute mouse mode (use
+        :meth:`mouse_move_rel` for relative mode). For pixel coordinates use
+        :meth:`mouse_move_pixels`. See https://docs.pikvm.org/mouse/.
+        """
         self._http.post("/api/hid/events/send_mouse_move", params={"to_x": x, "to_y": y})
+
+    def mouse_move_pixels(
+        self, x: int, y: int, width: int | None = None, height: int | None = None
+    ) -> None:
+        """Move to pixel ``(x, y)``, mapped into kvmd's centered -32768..32767 space.
+
+        ``width``/``height`` default to the streamer's current source resolution.
+        """
+        if width is None or height is None:
+            state = self.get_streamer_state()
+            source = state.get("source") or {}
+            if not source and isinstance(state.get("streamer"), dict):
+                source = state["streamer"].get("source") or {}
+            res = source.get("resolution") if isinstance(source, dict) else None
+            res = res if isinstance(res, dict) else {}
+            width = width or res.get("width")
+            height = height or res.get("height")
+            if not width or not height:
+                raise KVMPilotError(
+                    "Could not read the screen resolution from /api/streamer; "
+                    "pass width= and height= explicitly"
+                )
+        self.mouse_move(_pixel_to_kvmd(x, width), _pixel_to_kvmd(y, height))
 
     def mouse_move_rel(self, dx: int, dy: int) -> None:
         self._http.post(
@@ -319,14 +392,23 @@ class PiKVMDriver(CapabilityMixin):
         )
 
     def mouse_click(self, button: str = "left", hold_ms: int = 50, double: bool = False) -> None:
+        if not self.safety.guard(
+            "hid.mouse_click",
+            f"Mouse {button} {'double-click' if double else 'click'} on {self.host}",
+        ):
+            return
         for _ in range(2 if double else 1):
             self._http.post(
                 "/api/hid/events/send_mouse_button", params={"button": button, "state": "true"}
             )
-            time.sleep(hold_ms / 1000)
-            self._http.post(
-                "/api/hid/events/send_mouse_button", params={"button": button, "state": "false"}
-            )
+            try:
+                time.sleep(hold_ms / 1000)
+            finally:
+                self._release_or_reset(
+                    "/api/hid/events/send_mouse_button",
+                    {"button": button, "state": "false"},
+                    f"mouse button {button!r}",
+                )
             if double:
                 time.sleep(0.1)
 
@@ -369,7 +451,17 @@ class PiKVMDriver(CapabilityMixin):
             )
 
     def is_powered_on(self) -> bool:
-        return self.get_atx_state().get("leds", {}).get("power", False)
+        """True unless the device *positively* reports host power off.
+
+        Fail-open like ``has_video_signal``: with no ATX board wired the kvmd
+        ATX plugin reports ``enabled: false`` and its LEDs are meaningless, so
+        returning False there would make the vision layer report ``power_off``
+        for a machine that is actually running. See docs/decisions.md.
+        """
+        atx = self.get_atx_state()
+        if not atx.get("enabled", True):
+            return True
+        return atx.get("leds", {}).get("power", False)
 
     # -- MSD / virtual media --------------------------------------------
 
@@ -381,6 +473,10 @@ class PiKVMDriver(CapabilityMixin):
     ) -> None:
         path = Path(local_path)
         name = image_name or path.name
+        # Guarded before any device (or even local file) I/O so --dry-run and a
+        # confirm veto really mean "nothing was uploaded".
+        if not self.safety.guard("msd.write", f"Upload image '{name}' to {self.host}"):
+            return
         size = path.stat().st_size
         logger.info("Uploading %s (%.1f MB) to %s", name, size / 1024 / 1024, self.host)
         self._http.post(
@@ -396,6 +492,10 @@ class PiKVMDriver(CapabilityMixin):
     def msd_upload_url(
         self, url: str, image_name: str | None = None, timeout: int = 3600
     ) -> None:
+        if not self.safety.guard(
+            "msd.write_remote", f"Pull image from {url} onto {self.host}"
+        ):
+            return
         params: dict[str, Any] = {"url": url, "timeout": timeout}
         if image_name:
             params["image"] = image_name

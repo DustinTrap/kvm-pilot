@@ -121,32 +121,38 @@ class FakeDriver(CapabilityMixin):
     # -- HID -------------------------------------------------------------
 
     def type_text(self, text: str, **kw: Any) -> None:
-        self.typed.append(text)
-        self._record("type_text", text)
+        if self.safety.guard("hid.type_text", f"Type {len(text)} characters into {self.host}"):
+            self.typed.append(text)
+            self._record("type_text", text)
 
     def press_key(self, key: str, **kw: Any) -> None:
-        self.keys.append(key)
-        self._record("press_key", key)
+        if self.safety.guard("hid.press_key", f"Press {key!r} on {self.host}"):
+            self.keys.append(key)
+            self._record("press_key", key)
 
     def send_shortcut(self, keys: str) -> None:
-        self.shortcuts.append(keys)
-        self._record("send_shortcut", keys)
+        if self.safety.guard("hid.send_shortcut", f"Send shortcut {keys!r} to {self.host}"):
+            self.shortcuts.append(keys)
+            self._record("send_shortcut", keys)
 
     def mouse_move(self, x: int, y: int) -> None:
+        # kvmd coordinate contract: -32768..32767 per axis, (0, 0) at screen
+        # center — mirrored from PiKVMDriver.mouse_move. Moves stay ungated.
         self._record("mouse_move", (x, y))
 
     def mouse_click(self, button: str = "left", **kw: Any) -> None:
-        self._record("mouse_click", button)
+        if self.safety.guard("hid.mouse_click", f"Mouse {button} click on {self.host}"):
+            self._record("mouse_click", button)
 
     # -- Video -----------------------------------------------------------
 
-    def snapshot(self, quality: int = 85) -> bytes:
+    def snapshot(self) -> bytes:
         return self._image
 
-    def snapshot_base64(self, quality: int = 85) -> str:
+    def snapshot_base64(self) -> str:
         return base64.b64encode(self._image).decode()
 
-    def snapshot_save(self, path: str, quality: int = 85) -> Path:
+    def snapshot_save(self, path: str) -> Path:
         out = Path(path)
         out.write_bytes(self._image)
         return out
@@ -163,14 +169,16 @@ class FakeDriver(CapabilityMixin):
         self, source: str, image_name: str | None = None, cdrom: bool = True
     ) -> str:
         name = image_name or source.split("/")[-1].split("?")[0]
-        # Evaluate both guards as separate statements (NOT `a and b`, which would
-        # short-circuit and skip the second guard under dry-run). This mirrors the
-        # real client's sequential msd_set_params()/msd_connect() so dry-run fires
-        # both gates and deny raises at the first — keeping the fake a faithful
-        # safety-layer stand-in.
+        # Evaluate every guard as a separate statement (NOT `a and b`, which would
+        # short-circuit and skip later guards under dry-run). This mirrors the
+        # real client's sequential upload/msd_set_params()/msd_connect() so
+        # dry-run fires all gates and deny raises at the first — keeping the fake
+        # a faithful safety-layer stand-in.
+        write_op = "msd.write_remote" if source.startswith(("http://", "https://")) else "msd.write"
+        write_ok = self.safety.guard(write_op, f"Upload image '{name}' to {self.host}")
         set_ok = self.safety.guard("msd.set_params", f"Select MSD image {name!r} on {self.host}")
         connect_ok = self.safety.guard("msd.connect", f"Attach virtual media to {self.host}")
-        if set_ok and connect_ok:
+        if write_ok and set_ok and connect_ok:
             self.mounted.append(name)
             self._record("mount_iso", name)
         return name

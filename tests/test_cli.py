@@ -173,7 +173,14 @@ def test_capability_partial_driver_fails_cleanly(argv, capability, capsys, monke
 
 def test_capability_gate_leaves_full_drivers_working(capsys):
     # The fake driver has HID, so `type` still dispatches through the gate.
-    rc = main(["type", "hello world", "--driver", "fake"])
+    # HID input is a gated destructive op now, so --yes stands in for the prompt.
+    rc = main(["type", "hello world", "--driver", "fake", "--yes"])
+    assert rc == 0
+
+
+def test_type_dry_run_sends_nothing_and_exits_zero():
+    # HID is gated: --dry-run must log-and-skip without prompting (exit 0, not 3).
+    rc = main(["type", "hello world", "--driver", "fake", "--dry-run"])
     assert rc == 0
 
 
