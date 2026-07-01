@@ -66,7 +66,12 @@ def _build_client(args) -> AnyDriver:
         redfish_auth=getattr(args, "redfish_auth", None),
     )
     # Shared with the MCP server so cfg.driver is honored the same way everywhere.
-    return make_driver_from_config(cfg, confirm=confirm, dry_run=dry_run)
+    kvm = make_driver_from_config(cfg, confirm=confirm, dry_run=dry_run)
+    # Stash it so main() can close() it on the way out — a RedfishDriver holds a
+    # BMC session that must be DELETEd (BMCs cap sessions; a leak locks the
+    # operator out). Every command routes through here exactly once.
+    args._driver = kvm
+    return kvm
 
 
 def _make_analyzer(kvm: KVMClient | FakeDriver, args):
@@ -393,6 +398,15 @@ def main(argv: list | None = None) -> int:
         # cleanly instead of a traceback.
         print(f"error: {exc}", file=sys.stderr)
         return 1
+    finally:
+        # Release device-side resources (notably a RedfishDriver's BMC session)
+        # however the command exits — success, handled error, or capability gate.
+        kvm = getattr(args, "_driver", None)
+        if kvm is not None:
+            try:
+                kvm.close()
+            except Exception:  # noqa: BLE001 - teardown must never mask the result
+                logging.getLogger("kvm_pilot.cli").debug("driver close failed", exc_info=True)
 
 
 if __name__ == "__main__":

@@ -197,6 +197,21 @@ class CapabilityMixin:
     def supports(self, capability: Capability | str) -> bool:
         return Capability(capability) in self.capabilities()
 
+    def close(self) -> None:
+        """Release any device-side resources. No-op for stateless drivers.
+
+        Overridden by drivers that hold server-side state — notably
+        ``RedfishDriver``, whose BMC session must be DELETEd (BMCs cap
+        concurrent sessions, so a leak locks operators out). Callers should
+        ``close()`` every driver they build; the CLI and MCP server do.
+        """
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc: object) -> None:
+        self.close()
+
 
 @runtime_checkable
 class KVMDriver(Protocol):

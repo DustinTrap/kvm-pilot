@@ -46,6 +46,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Config: unknown profile keys warn loudly instead of silently falling back to
   `admin`/`admin`; `KVM_PILOT_PROFILE` is honored everywhere; `--scheme http`
   defaults the port to 80; IPv6 literal hosts work.
+- **Redfish:** the CLI now closes its driver on exit (success, handled error, or
+  capability gate), so a BMC session is DELETEd instead of leaked — repeated
+  invocations no longer exhaust the device's session pool and lock operators
+  out. All drivers gained a uniform no-op `close()` + context-manager protocol
+  on the base ([#40](https://github.com/DustinTrap/kvm-pilot/issues/40)).
 - MCP server: capability-aware per-call drivers (closed after every call — no
   leaked BMC sessions), real image snapshots, tool annotations, an
   operator-side `KVM_PILOT_MCP_ALLOW_POWER` gate on the power tool,
