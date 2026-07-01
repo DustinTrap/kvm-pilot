@@ -34,6 +34,7 @@ from .base import (
     PHASE_NO_SIGNAL,
     PHASE_POWER_OFF,
     PHASE_UEFI_SHELL,
+    PHASE_UNKNOWN,
     ScreenState,
     VisionBackend,
 )
@@ -81,10 +82,21 @@ class ScreenAnalyzer:
 
     # -- single shot -----------------------------------------------------
 
-    def classify(self, hint: str = "", image_b64: str | None = None) -> ScreenState:
+    def classify(
+        self,
+        hint: str = "",
+        image_b64: str | None = None,
+        *,
+        min_reuse_confidence: float | None = None,
+    ) -> ScreenState:
         # The cheap gates apply only to the auto-snapshot path; when the caller
         # hands us a specific image they want that image classified verbatim.
+        # ``min_reuse_confidence`` lets wait loops with a stricter per-call
+        # threshold refuse a cached result that would never satisfy them.
         gates_on = image_b64 is None
+        reuse_floor = (
+            min_reuse_confidence if min_reuse_confidence is not None else self._min_confidence
+        )
 
         if gates_on and self._gate_on_power_signal:
             cheap = self._probe_power_signal()
@@ -104,13 +116,18 @@ class ScreenAnalyzer:
             except Exception as exc:  # noqa: BLE001
                 raise VisionError(f"KVM snapshot failed: {exc}") from exc
 
-        # Identical frame ⇒ identical phase: reuse the last result, no model call.
+        # Identical frame ⇒ identical phase: reuse the last result, no model call —
+        # but only when that result is actionable. Reusing an unknown/low-confidence
+        # classification would pin a wait loop to a bad answer forever on a static
+        # screen, since the frame never changes to evict it.
         if (
             gates_on
             and self._skip_unchanged_frames
             and self._last_state is not None
             and self._last_state.image_b64
             and image_b64 == self._last_state.image_b64
+            and self._last_state.phase != PHASE_UNKNOWN
+            and self._last_state.confidence >= reuse_floor
         ):
             self.cheap_resolves += 1
             return self._last_state
@@ -182,7 +199,7 @@ class ScreenAnalyzer:
         while True:
             elapsed = timeout - (deadline - time.monotonic())
             try:
-                state = self.classify(hint=hint)
+                state = self.classify(hint=hint, min_reuse_confidence=threshold)
             except VisionError as exc:
                 if time.monotonic() >= deadline:
                     raise TimeoutError(f"Repeated classify failures; last: {exc}") from exc
