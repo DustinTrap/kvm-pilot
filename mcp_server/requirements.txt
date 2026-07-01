@@ -1,5 +1,7 @@
 # MCP server dependencies (separate from the stdlib-only core library).
-mcp>=1.2
+# >=1.10 is required for tool annotations (readOnlyHint/destructiveHint, spec
+# rev 2025-03-26) and the FastMCP Image return type used by the snapshot tool.
+mcp>=1.10
 
 # The core package. It is an early alpha and yanked on PyPI, so either install
 # the repo checkout with `pip install -e ".[totp,ws]"` from the repo root, or
