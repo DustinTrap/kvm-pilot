@@ -39,6 +39,10 @@ PAGES: list[tuple[str, str, str | None]] = [
     ("mcp_server/README.md", "mcp-server.md", "MCP server"),
     ("docs/CONTRIBUTING.md", "CONTRIBUTING.md", "Contributing"),
     ("docs/SECURITY.md", "SECURITY.md", "Security policy"),
+    # Analysis output: session-level review narratives (docs/analysis/).
+    # NB: the wiki filename must keep the source stem (link rewriting maps by stem).
+    ("docs/analysis/2026-07-01-deep-review.md", "2026-07-01-deep-review.md",
+     "Analysis: 2026-07-01 deep review"),
 ]
 
 # Link/image markdown: capture the ``[label]`` and the ``(target)`` separately.

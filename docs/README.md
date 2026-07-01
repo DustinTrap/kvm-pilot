@@ -24,3 +24,13 @@ on every push to `main` — edit the files here, never the wiki directly).
 
 - [Contributing](CONTRIBUTING.md) — dev setup, the pre-PR checklist, and engineering principles.
 - [Security policy](SECURITY.md) — reporting a vulnerability and operational guidance.
+
+## Analysis
+
+Session-level review narratives — what was reviewed, how, what was found, and
+what changed. Individual judgment calls live in [decisions.md](decisions.md);
+these are the stories around them.
+
+- [2026-07-01 deep review](analysis/2026-07-01-deep-review.md) — the top-to-bottom
+  multi-agent review: 86 verified findings, 10 same-day fix commits, issues #37–#65,
+  and the milestones that came out of it.
