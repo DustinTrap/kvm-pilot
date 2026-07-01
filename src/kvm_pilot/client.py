@@ -58,7 +58,10 @@ class PiKVMDriver(CapabilityMixin):
         passwd: Password (default "admin").
         port: HTTPS port (default 443).
         scheme: "https" or "http" (default "https").
-        verify_ssl: Verify TLS cert (default False — GL/PiKVM ship self-signed).
+        verify_ssl: Verify TLS cert (default False — GL/PiKVM ship self-signed;
+            the first unverified transport per process logs a warning).
+        ssl_ca_file: Pin verification to a CA bundle or the device's own
+            self-signed cert (PEM). Overrides verify_ssl.
         timeout: Default per-request timeout in seconds.
         totp_secret: Optional TOTP secret for 2FA-enabled devices. Requires the
             'totp' extra (pyotp).
@@ -85,6 +88,7 @@ class PiKVMDriver(CapabilityMixin):
         dry_run: bool = False,
         confirm=None,
         max_retries: int = 3,
+        ssl_ca_file: str | None = None,
     ):
         self.host = host
         self._http = HTTP(
@@ -98,6 +102,7 @@ class PiKVMDriver(CapabilityMixin):
             totp_secret=totp_secret,
             max_retries=max_retries,
             not_found_hint=self._NOT_FOUND_HINT,
+            ssl_ca_file=ssl_ca_file,
         )
         self.safety = SafetyPolicy(dry_run=dry_run, confirm=confirm)
 
@@ -129,6 +134,7 @@ class PiKVMDriver(CapabilityMixin):
             dry_run=dry_run,
             confirm=confirm,
             max_retries=max_retries,
+            ssl_ca_file=cfg.ssl_ca_file,
         )
 
     # -- firmware / preflight -------------------------------------------
@@ -603,12 +609,13 @@ class PiKVMDriver(CapabilityMixin):
             "X-KVMD-User": self._http._user,
             "X-KVMD-Passwd": self._http._effective_passwd(),
         }
-        # Honor the client's verify_ssl choice on this credential-bearing
-        # channel instead of always disabling verification.
-        sslopt: dict = {
-            "cert_reqs": ssl.CERT_REQUIRED if self._http._verify_ssl else ssl.CERT_NONE
-        }
-        if not self._http._verify_ssl:
+        # Honor the client's TLS choice on this credential-bearing channel
+        # instead of always disabling verification; a pinned CA file wins.
+        verify_ws = self._http._verify_ssl or bool(self._http._ssl_ca_file)
+        sslopt: dict = {"cert_reqs": ssl.CERT_REQUIRED if verify_ws else ssl.CERT_NONE}
+        if self._http._ssl_ca_file:
+            sslopt["ca_certs"] = self._http._ssl_ca_file
+        if not verify_ws:
             sslopt["check_hostname"] = False
         ws = websocket.WebSocket(sslopt=sslopt)
         ws.connect(uri, header=headers)

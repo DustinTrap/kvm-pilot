@@ -41,6 +41,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `KVM_PILOT_MCP_DRY_RUN`, and local-VLM support via `KVM_PILOT_VISION_*`.
 
 ### Added (deep-review batch)
+- **TLS pinning** (`#38` decision): `ssl_ca_file=` / `--ssl-ca-file` /
+  `KVM_PILOT_SSL_CA_FILE` pins verification to a CA bundle or the device's own
+  self-signed cert on every transport (HTTP, Redfish, WebSocket), overriding
+  `verify_ssl`. Unverified TLS remains the default (devices ship self-signed
+  certs) but now logs a one-time warning naming the alternatives.
 - **CLI `eject`** — the inverse of `mount` (gated `msd_disconnect`).
 - `mouse_move_pixels(x, y)` — pixel coordinates mapped edge-exactly into
   kvmd's centered −32768…32767 space; `mouse_move` documents that contract.

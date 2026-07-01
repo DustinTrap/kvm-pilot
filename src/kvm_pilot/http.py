@@ -22,6 +22,7 @@ import builtins
 import http.client
 import http.cookiejar
 import json
+import logging
 import ssl
 import time
 import urllib.error
@@ -39,7 +40,39 @@ from .errors import (
     UnavailableError,
 )
 
+logger = logging.getLogger("kvm_pilot.http")
+
 _REDACTION = "***REDACTED***"
+
+_unverified_warned = False
+
+
+def _build_ssl_context(verify_ssl: bool, ssl_ca_file: str | None) -> ssl.SSLContext:
+    """TLS context for a device transport (shared with the Redfish transport).
+
+    ``ssl_ca_file`` pins verification to a specific CA — or the device's own
+    self-signed certificate — and always wins. Otherwise ``verify_ssl`` selects
+    the system trust store, or (the default, because PiKVM/GLKVM/BMC devices
+    ship self-signed certs) no verification at all — a deliberate, *visible*
+    choice: the first unverified context per process logs a warning, since the
+    admin credentials ride this channel on every request.
+    """
+    if ssl_ca_file:
+        return ssl.create_default_context(cafile=ssl_ca_file)
+    ctx = ssl.create_default_context()
+    if not verify_ssl:
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        global _unverified_warned
+        if not _unverified_warned:
+            _unverified_warned = True
+            logger.warning(
+                "TLS verification is DISABLED (the default — PiKVM/BMC devices ship "
+                "self-signed certs), so credentials travel over an unauthenticated "
+                "channel. Pass verify_ssl=True, or pin the device cert with "
+                "ssl_ca_file= / --ssl-ca-file / KVM_PILOT_SSL_CA_FILE."
+            )
+    return ctx
 
 
 def _bracket_ipv6(host: str) -> str:
@@ -81,6 +114,7 @@ class HTTP:
         max_retries: int = 3,
         backoff_base: float = 0.5,
         not_found_hint: str | None = None,
+        ssl_ca_file: str | None = None,
     ):
         self._base = f"{scheme}://{_bracket_ipv6(host)}:{port}"
         self._user = user
@@ -93,10 +127,8 @@ class HTTP:
         # the GLKVM driver, whose firmware 404s every /api/* until the API is enabled.
         self._not_found_hint = not_found_hint
         self._verify_ssl = verify_ssl
-        self._ssl_ctx = ssl.create_default_context()
-        if not verify_ssl:
-            self._ssl_ctx.check_hostname = False
-            self._ssl_ctx.verify_mode = ssl.CERT_NONE
+        self._ssl_ca_file = ssl_ca_file
+        self._ssl_ctx = _build_ssl_context(verify_ssl, ssl_ca_file)
         self._auth_token: str | None = None
 
     # -- auth helpers ----------------------------------------------------

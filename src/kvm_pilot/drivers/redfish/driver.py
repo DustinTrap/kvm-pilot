@@ -113,11 +113,12 @@ class RedfishDriver(CapabilityMixin):
         dry_run: bool = False,
         confirm: Callable[[str, str], bool] | None = None,
         max_retries: int = 3,
+        ssl_ca_file: str | None = None,
     ):
         self.host = host
         self._http = RedfishHTTP(
             host, user, passwd, port=port, scheme=scheme, verify_ssl=verify_ssl,
-            timeout=timeout, auth=auth, max_retries=max_retries,
+            timeout=timeout, auth=auth, max_retries=max_retries, ssl_ca_file=ssl_ca_file,
         )
         self.safety = SafetyPolicy(dry_run=dry_run, confirm=confirm)
         self._system_index = system_index
@@ -165,6 +166,7 @@ class RedfishDriver(CapabilityMixin):
             dry_run=dry_run,
             confirm=confirm,
             max_retries=max_retries,
+            ssl_ca_file=cfg.ssl_ca_file,
         )
 
     # -- discovery -------------------------------------------------------

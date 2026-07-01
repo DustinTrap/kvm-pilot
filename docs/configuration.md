@@ -56,7 +56,8 @@ Every key `resolve_host()` reads, with its default:
 | `passwd` | `KVM_PILOT_PASSWD` | `admin` | |
 | `port` | `KVM_PILOT_PORT` | `443` | |
 | `scheme` | `KVM_PILOT_SCHEME` | `https` | `http` or `https`. |
-| `verify_ssl` | `KVM_PILOT_VERIFY_SSL` | `false` | Env value is truthy only for `1`/`true`/`yes` (case-insensitive); anything else is `false`. |
+| `verify_ssl` | `KVM_PILOT_VERIFY_SSL` | `false` | Env value is truthy only for `1`/`true`/`yes` (case-insensitive); anything else is `false`. Unverified TLS logs a one-time warning. |
+| `ssl_ca_file` | `KVM_PILOT_SSL_CA_FILE` | unset | PEM path: pin TLS verification to a CA bundle or the device's own self-signed cert. Overrides `verify_ssl`; the cert's SAN must cover the host/IP you connect to. |
 | `timeout` | `KVM_PILOT_TIMEOUT` | `30.0` | HTTP per-request timeout (seconds); the CLI's global `--timeout` maps here. |
 | `totp_secret` | `KVM_PILOT_TOTP_SECRET` | unset | Base32 secret for 2FA; needs the `totp` extra. |
 | `driver` | `KVM_PILOT_DRIVER` | `pikvm` | `pikvm` \| `glkvm` \| `blikvm` \| `fake` \| `redfish`; the CLI `--driver` flag overrides. |
@@ -71,6 +72,7 @@ All of the per-field vars in the table above, plus:
 
 | Variable | Honored by | Purpose |
 |---|---|---|
+| `KVM_PILOT_SSL_CA_FILE` | CLI, library, MCP server | Pin TLS verification to a CA bundle or the device's own self-signed cert (PEM path). Overrides `verify_ssl`. The cert must include the host/IP you connect to in its SAN. |
 | `KVM_PILOT_CONFIG` | CLI, library, MCP server | Path of the config file (default `~/.config/kvm-pilot/config.toml`). Read once at import time. |
 | `KVM_PILOT_PROFILE` | CLI, library, MCP server | Names the `[hosts.NAME]` profile to use when none is given explicitly. An explicit `--profile` / `resolve_host("NAME")` argument wins. |
 | `KVM_PILOT_VISION_MODEL` | Anthropic vision backend | Pin a vision model id; unset = auto-resolve the newest vision-capable model at runtime. |
