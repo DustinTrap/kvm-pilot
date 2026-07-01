@@ -61,6 +61,7 @@ def _build_client(args) -> AnyDriver:
         timeout=getattr(args, "http_timeout", None),
         totp_secret=getattr(args, "totp_secret", None),
         verify_ssl=getattr(args, "verify_ssl", None),
+        ssl_ca_file=getattr(args, "ssl_ca_file", None),
         driver=getattr(args, "driver", None),
         redfish_auth=getattr(args, "redfish_auth", None),
     )
@@ -274,6 +275,9 @@ def _add_common(p: argparse.ArgumentParser) -> None:
                    help="Redfish HTTP auth mode (default session; use 'basic' for a BMC or "
                         "emulator without a SessionService). Ignored by non-redfish drivers.")
     p.add_argument("--verify-ssl", dest="verify_ssl", action="store_true", default=None)
+    p.add_argument("--ssl-ca-file", dest="ssl_ca_file",
+                   help="Pin TLS verification to a CA bundle or the device's own "
+                        "self-signed cert (PEM). Overrides --verify-ssl")
     p.add_argument("--dry-run", dest="dry_run", action="store_true",
                    help="Log destructive actions without sending them")
     p.add_argument("--yes", "-y", action="store_true",

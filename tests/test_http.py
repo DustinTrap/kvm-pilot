@@ -217,3 +217,49 @@ def test_effective_password_with_totp_redacted_in_error(monkeypatch):
     assert "supersecret123456" not in msg
     assert "123456" not in msg  # the live TOTP code must be redacted too
     assert "REDACTED" in msg
+
+
+def test_default_tls_is_unverified_with_one_time_warning(caplog):
+    import logging
+    import ssl
+
+    import kvm_pilot.http as http_mod
+
+    http_mod._unverified_warned = False  # reset the once-per-process latch
+    with caplog.at_level(logging.WARNING, logger="kvm_pilot.http"):
+        h1 = HTTP("host", "u", "p")
+        h2 = HTTP("host2", "u", "p")
+    assert h1._ssl_ctx.verify_mode == ssl.CERT_NONE
+    assert h2._ssl_ctx.verify_mode == ssl.CERT_NONE
+    warnings = [r for r in caplog.records if "TLS verification is DISABLED" in r.message]
+    assert len(warnings) == 1  # loud, but once per process
+
+
+def test_verify_ssl_true_verifies_and_does_not_warn(caplog):
+    import logging
+    import ssl
+
+    import kvm_pilot.http as http_mod
+
+    http_mod._unverified_warned = False
+    with caplog.at_level(logging.WARNING, logger="kvm_pilot.http"):
+        h = HTTP("host", "u", "p", verify_ssl=True)
+    assert h._ssl_ctx.verify_mode == ssl.CERT_REQUIRED
+    assert h._ssl_ctx.check_hostname is True
+    assert not [r for r in caplog.records if "TLS" in r.message]
+
+
+def test_ssl_ca_file_pins_and_wins_over_verify_ssl(monkeypatch):
+    import ssl
+
+    captured = {}
+    real = ssl.create_default_context
+
+    def fake_create(cafile=None, **kw):
+        captured["cafile"] = cafile
+        return real()  # a verifying context; loading the fake path is bypassed
+
+    monkeypatch.setattr("kvm_pilot.http.ssl.create_default_context", fake_create)
+    h = HTTP("host", "u", "p", verify_ssl=False, ssl_ca_file="/pki/device.pem")
+    assert captured["cafile"] == "/pki/device.pem"
+    assert h._ssl_ctx.verify_mode == ssl.CERT_REQUIRED  # pinning implies verification

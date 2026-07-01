@@ -36,6 +36,9 @@ class HostConfig:
     port: int = 443
     scheme: str = "https"
     verify_ssl: bool = False
+    # Pin TLS verification to a CA bundle / the device's own self-signed cert
+    # (PEM path). Overrides verify_ssl when set.
+    ssl_ca_file: str | None = None
     timeout: float = 30.0
     totp_secret: str | None = None
     driver: str = "pikvm"
@@ -63,6 +66,7 @@ def resolve_host(
     timeout: float | None = None,
     totp_secret: str | None = None,
     verify_ssl: bool | None = None,
+    ssl_ca_file: str | None = None,
     driver: str | None = None,
     redfish_auth: str | None = None,
     config_path: Path | None = None,
@@ -128,6 +132,7 @@ def resolve_host(
         port=int(port_val),
         scheme=resolved_scheme,
         verify_ssl=bool(verify_val),
+        ssl_ca_file=pick("ssl_ca_file", ssl_ca_file, "KVM_PILOT_SSL_CA_FILE"),
         timeout=float(pick("timeout", timeout, "KVM_PILOT_TIMEOUT", 30.0)),
         totp_secret=pick("totp_secret", totp_secret, "KVM_PILOT_TOTP_SECRET"),
         driver=resolved_driver,

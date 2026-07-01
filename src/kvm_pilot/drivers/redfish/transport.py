@@ -23,7 +23,6 @@ import builtins
 import http.client
 import json
 import logging
-import ssl
 import time
 import urllib.error
 import urllib.parse
@@ -37,6 +36,7 @@ from ...errors import (
     TimeoutError,
     UnavailableError,
 )
+from ...http import _build_ssl_context
 
 logger = logging.getLogger("kvm_pilot.redfish")
 
@@ -75,6 +75,7 @@ class RedfishHTTP:
         auth: str = "session",
         max_retries: int = 3,
         backoff_base: float = 0.5,
+        ssl_ca_file: str | None = None,
     ):
         if auth not in ("session", "basic"):
             raise ValueError(f"auth must be 'session' or 'basic', got {auth!r}")
@@ -93,10 +94,7 @@ class RedfishHTTP:
         self._max_retries = max(0, max_retries)
         self._backoff_base = backoff_base
         self._verify_ssl = verify_ssl
-        self._ssl_ctx = ssl.create_default_context()
-        if not verify_ssl:
-            self._ssl_ctx.check_hostname = False
-            self._ssl_ctx.verify_mode = ssl.CERT_NONE
+        self._ssl_ctx = _build_ssl_context(verify_ssl, ssl_ca_file)
         self._token: str | None = None
         self._session_uri: str | None = None
 

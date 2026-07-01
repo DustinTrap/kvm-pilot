@@ -114,3 +114,15 @@ def test_scheme_http_defaults_port_80(monkeypatch):
     assert resolved.port == 8443  # explicit port always wins
     resolved = resolve_host(host="box")
     assert resolved.port == 443  # https default unchanged
+
+
+def test_ssl_ca_file_resolves_through_precedence(tmp_path, monkeypatch):
+    cfg = tmp_path / "config.toml"
+    cfg.write_text('[hosts.lab]\nhost = "10.0.0.9"\nssl_ca_file = "/from/file.pem"\n')
+    assert resolve_host("lab", config_path=cfg).ssl_ca_file == "/from/file.pem"
+    monkeypatch.setenv("KVM_PILOT_SSL_CA_FILE", "/from/env.pem")
+    assert resolve_host("lab", config_path=cfg).ssl_ca_file == "/from/env.pem"
+    assert (
+        resolve_host("lab", config_path=cfg, ssl_ca_file="/from/arg.pem").ssl_ca_file
+        == "/from/arg.pem"
+    )
