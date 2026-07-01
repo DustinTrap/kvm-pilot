@@ -152,6 +152,20 @@ request; re-firing a power/HID/MSD POST could run it twice. Connect-phase
 failures (nothing was sent) stay retryable for every method. Retrying 409/503
 stays safe for all methods: those are definitive "rejected" responses.
 
+### Redfish re-authenticates once on a mid-flight 401
+Real BMCs terminate idle sessions (DSP0266 SessionService inactivity timeout,
+~30 min default) and drop every token on reboot, and a token cleared by
+`close()` leaves the (cached) discovery URIs valid but credential-less. The
+transport now catches a session-mode `401`, clears the token, calls `login()`
+once, and retries the request a single time (a per-call guard, not a loop).
+Safe even for destructive POSTs — a `401` is rejected before the action runs —
+and non-recursive, because `login()` issues its own requests unauthenticated.
+Skipped for `403` (a privilege failure re-login can't fix), PasswordChangeRequired
+(re-login would leak a session slot), basic auth, and the Sessions collection
+itself. This lives in the transport, not the driver, because the driver's
+`_root_doc`/`_system_doc` caches mean `close()` + `_ensure_login` cannot recover
+a live object on their own.
+
 ### Redfish reads PowerState before every reset
 `PushPowerButton` pulses the power button (DSP0268) — a *toggle*, not an
 absolute state — so choosing it from `AllowableValues` alone can invert a

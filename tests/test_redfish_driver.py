@@ -20,7 +20,7 @@ from kvm_pilot.errors import (
     SafetyError,
 )
 from kvm_pilot.safety import deny_all
-from redfish_emulator import RESET, VM_EJECT, VM_INSERT
+from redfish_emulator import RESET, SESSIONS, VM_EJECT, VM_INSERT
 
 # The `emu` fixture (a running RedfishEmulator) is shared from tests/conftest.py.
 
@@ -74,7 +74,10 @@ def test_get_info_fields_subset(emu):
 def test_session_token_is_sent_and_deleted_on_close(emu):
     d = make(emu)
     d.get_info()
-    assert emu.state.last_headers.get("x-auth-token") == "tok-redfish-123"
+    # The emulator now rotates tokens per session; the driver must send the one
+    # it was issued (first session -> tok-redfish-1).
+    assert emu.state.last_headers.get("x-auth-token") == emu.state.valid_token
+    assert emu.state.valid_token == "tok-redfish-1"
     assert any(path == "/redfish/v1/SessionService/Sessions" for _, path in emu.state.calls)
     d.close()
     assert emu.state.session_deleted is True
@@ -359,6 +362,48 @@ def test_mount_iso_usb_threads_cdrom_flag(emu):
     name = make(emu).mount_iso("http://srv/disk.img", cdrom=False)
     assert name == "disk.img"
     assert emu.state.inserted is True
+
+
+def _session_posts(emu) -> int:
+    return sum(1 for path, _ in emu.state.posts if path == SESSIONS)
+
+
+def test_reauthenticates_once_when_session_expires_midflight(emu):
+    # A real BMC idle-times-out the session (DSP0266 SessionService timeout).
+    # The next request 401s with a token attached; the driver must re-login once
+    # and retry transparently, not fail permanently.
+    d = make(emu)
+    d.get_info()                       # establishes session #1
+    assert _session_posts(emu) == 1
+    emu.state.expire_token_once = True  # session #1's token is now stale
+    info = d.get_info()                 # must transparently recover
+    assert info["power_state"] == "Off"
+    assert _session_posts(emu) == 2     # exactly one re-login
+    # and the driver is healthy afterwards (no further re-logins needed)
+    d.is_powered_on()
+    assert _session_posts(emu) == 2
+
+
+def test_recovers_after_close_then_reuse(emu):
+    # After close() the token is gone but the discovery caches survive, so the
+    # next call goes out unauthenticated and 401s. The transport must re-login.
+    d = make(emu)
+    d.get_info()
+    d.close()
+    assert emu.state.session_deleted is True
+    assert d.get_info()["power_state"] == "Off"   # reuse must not fail
+    assert _session_posts(emu) == 2               # a fresh session was created
+
+
+def test_reauth_does_not_loop_on_bad_credentials(emu):
+    # If re-login also fails (e.g. credentials revoked), the AuthError must
+    # surface after exactly one retry, not spin.
+    d = make(emu)
+    d.get_info()
+    emu.state.expire_token_once = True
+    emu.state.password_change_required = True  # the re-login POST will now fail
+    with pytest.raises(AuthError):
+        d.get_info()
 
 
 def test_credentials_pinned_to_configured_origin():

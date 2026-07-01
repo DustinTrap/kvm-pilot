@@ -46,6 +46,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Config: unknown profile keys warn loudly instead of silently falling back to
   `admin`/`admin`; `KVM_PILOT_PROFILE` is honored everywhere; `--scheme http`
   defaults the port to 80; IPv6 literal hosts work.
+- **Redfish:** a session-mode `401` now triggers a one-shot re-login and retry,
+  so an expired/evicted session (idle timeout, BMC reboot) or a token cleared by
+  `close()` recovers transparently instead of failing every subsequent request
+  ([#41](https://github.com/DustinTrap/kvm-pilot/issues/41)).
 - **Redfish:** the CLI now closes its driver on exit (success, handled error, or
   capability gate), so a BMC session is DELETEd instead of leaked — repeated
   invocations no longer exhaust the device's session pool and lock operators

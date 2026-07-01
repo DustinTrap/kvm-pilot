@@ -186,11 +186,14 @@ class RedfishHTTP:
         detail = self._redact(self._extract_message(body) or raw[:400])
         if status in (401, 403):
             if self._password_change_required(body):
-                raise AuthError(
+                err = AuthError(
                     "Account requires a password change before API use "
                     f"(Redfish PasswordChangeRequired): {detail}",
                     status,
                 )
+                # Re-login cannot fix this and would leak a session slot.
+                err.password_change_required = True  # type: ignore[attr-defined]
+                raise err
             raise AuthError(f"Authentication failed (HTTP {status}): {detail}", status)
         if status == 409:
             raise BusyError(f"Resource busy (HTTP {status}): {detail}", status)
@@ -213,6 +216,11 @@ class RedfishHTTP:
 
     # -- core request with retry ----------------------------------------
 
+    def _is_session_path(self, path: str) -> bool:
+        return "SessionService/Sessions" in path or (
+            self._session_uri is not None and path == self._session_uri
+        )
+
     def request(
         self,
         method: str,
@@ -221,6 +229,37 @@ class RedfishHTTP:
         json_body: dict | None = None,
         authed: bool = True,
         retry: bool = True,
+    ) -> RedfishResponse:
+        try:
+            return self._request_with_retries(method, path, json_body=json_body,
+                                              authed=authed, retry=retry)
+        except AuthError as exc:
+            # One-shot session re-auth. Real BMCs terminate idle sessions
+            # (DSP0266 SessionService inactivity timeout, ~30 min default) and
+            # drop all tokens on reboot; the token can also be absent after a
+            # driver close() whose discovery caches survived. Re-login once and
+            # retry — safe even for POST actions, since a 401 is rejected before
+            # the action runs, and login() issues its own requests unauthed so
+            # this cannot recurse. Skipped for 403 (a privilege failure re-login
+            # can't fix), PasswordChangeRequired, basic auth, and the Sessions
+            # collection itself.
+            if (
+                authed
+                and self._auth == "session"
+                and exc.status_code == 401
+                and not getattr(exc, "password_change_required", False)
+                and not self._is_session_path(path)
+            ):
+                logger.info("Redfish session rejected (401); re-authenticating once")
+                self._token = None
+                self._session_uri = None
+                self.login()
+                return self._request_with_retries(method, path, json_body=json_body,
+                                                  authed=authed, retry=retry)
+            raise
+
+    def _request_with_retries(
+        self, method: str, path: str, *, json_body: dict | None, authed: bool, retry: bool
     ) -> RedfishResponse:
         attempts = self._max_retries + 1 if retry else 1
         last_exc: Exception | None = None
