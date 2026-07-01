@@ -108,6 +108,48 @@ So analyzer paths resolved by a cheap gate (e.g. `power_off`) run offline with n
 key — `classify --driver fake` needs no credentials. Mirrors the lazy model
 resolution.
 
+## Safety
+
+### Dry-run short-circuits BEFORE the confirm callback
+`SafetyPolicy.guard` checks `dry_run` first and never invokes `confirm` for a
+skipped call. The old order (confirm first) made `--dry-run` prompt — and in
+non-interactive automation *block with exit 3* — for calls that were never going
+to be sent. Consequence: a denying confirm callback is not exercised in dry-run;
+tests that want to see the callback fire must run live (`dry_run=False`).
+
+### HID input is destructive
+`type_text`/`press_key`/`send_shortcut`/`key_event`/`mouse_click` guard through
+`hid.*` ops: keystrokes land on a live console (`rm -rf` is one `type_text`
+away), so "changes target state" clearly applies. Mouse *moves* stay ungated
+(cursor position alone changes nothing). Known cost: under the CLI's interactive
+confirm, key-spam helpers like `enter_bios` prompt per keystroke — `--yes` or a
+session-scoped confirm is the escape hatch; refining that UX is follow-up work.
+
+### `is_powered_on()` fails open when ATX sensing is absent
+With no ATX board, kvmd reports `enabled: false` and the power LED is
+meaningless. Reporting "off" there made the vision layer short-circuit every
+classification to `power_off` on ATX-less devices, suppressing all snapshots.
+Same fail-open rationale as `has_video_signal`. Caller-visible change:
+`wait_for_power_state(False)` on an ATX-less device now times out (the device
+cannot sense power) instead of returning instantly with a false success.
+
+### Ambiguous transport failures are never auto-retried for POSTs
+A read-phase reset/timeout means the device may have already executed the
+request; re-firing a power/HID/MSD POST could run it twice. Connect-phase
+failures (nothing was sent) stay retryable for every method. Retrying 409/503
+stays safe for all methods: those are definitive "rejected" responses.
+
+### Redfish transitional `PowerState` maps to `unknown`, not `power_off`
+`PoweringOn`/`PoweringOff`/`Paused` (DSP0268) are mid-transition; only a literal
+`Off` becomes `power_off`. Conservative choice: a wait loop must not conclude a
+host is down while it is coming up.
+
+### `snapshot()` lost its `quality` parameter
+kvmd silently ignores `preview_quality` without `preview=1`, and the preview
+path downscales to ~1/5 resolution (which would break OCR/vision) — there is no
+full-resolution re-encode-at-quality endpoint. The parameter was a no-op lie;
+deleted rather than deprecated while the API is alpha.
+
 ## Process
 
 Most structural choices came from adversarial review passes (find → verify →

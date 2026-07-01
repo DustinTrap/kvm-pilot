@@ -14,12 +14,23 @@ pip install -e ".[dev,totp,ws]"
 ## Before opening a PR
 
 ```bash
-ruff check .          # lint (and `ruff format .` if you like)
-mypy src/kvm_pilot    # types
-pytest                # tests
+ruff check .                                # lint (and `ruff format .` if you like)
+mypy src/kvm_pilot                          # types
+pytest                                      # tests
+bandit -c pyproject.toml -r src/kvm_pilot   # SAST — CI gates on this
+pip-audit                                   # dependency CVEs — CI gates on this
 ```
 
-CI runs all three on Python 3.11, 3.12, and 3.13. PRs should keep them green.
+All of these are installed by the `[dev]` extra above; run `pip-audit` inside
+the project venv so it scans the same environment CI does.
+
+CI runs the lint/type/test trio on Python 3.11, 3.12, and 3.13, **plus** a
+`security` job (`bandit` + `pip-audit`) and a `redfish-integration` job that
+drives the Redfish CLI path end-to-end against the DMTF-conformant sushy-tools
+emulator. PRs should keep them all green. If your change touches the Redfish
+driver or CLI dispatch, run what CI runs:
+`pip install "sushy-tools==2.2.0" && pytest tests/integration -m integration`
+(without `sushy-emulator` on PATH those tests silently skip).
 
 ## Principles
 
@@ -51,7 +62,7 @@ macOS and Linux.
 ## Recommended Claude skills
 
 If you use Claude Code, these skills help keep contributions consistent with the
-project's standards (optional aids — `ruff`, `mypy`, and `pytest` remain the gates):
+project's standards (optional aids — the CI checks above remain the gates):
 
 - **`/security-review`** — run before opening a PR. This project drives real
   hardware and handles credentials + secret redaction, so security review matters.

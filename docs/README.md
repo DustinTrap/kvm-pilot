@@ -14,6 +14,7 @@ on every push to `main` — edit the files here, never the wiki directly).
 ## Guides
 
 - [Architecture](architecture.md) — the driver-plugin design, capability protocols, and diagrams.
+- [Configuration](configuration.md) — the config file, every `KVM_PILOT_*` env var, and precedence.
 - [Design decisions](decisions.md) — the "looks wrong but is intentional" record, newest first.
 - [Redfish reference](redfish.md) — the BMC driver: hypermedia navigation, auth, and firmware quirks.
 - [Claude skill](../skill/SKILL.md) — the bundled skill for driving `kvm-pilot` from Claude.

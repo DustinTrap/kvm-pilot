@@ -1,0 +1,91 @@
+name: Hardware report
+description: >-
+  Ran kvm-pilot against real hardware? Tell us what happened — success or
+  failure, both are exactly what this alpha needs.
+title: "[hw] <device>: <short result>"
+labels: ["hardware-report"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks! **Nothing in kvm-pilot has been validated on real hardware yet**, so
+        every report here directly improves the compatibility table.
+
+        ⚠️ Please only exercise destructive operations (power, reset, virtual media,
+        keystrokes) on machines you own and can safely interrupt — a hard power-off
+        can lose data on a running host.
+  - type: dropdown
+    id: device
+    attributes:
+      label: Device
+      options:
+        - GL-RM1PE (Comet PoE)
+        - GL-RM1 (Comet)
+        - PiKVM v3
+        - PiKVM v4
+        - BliKVM
+        - Redfish BMC (vendor + model below)
+        - Other (describe below)
+    validations:
+      required: true
+  - type: input
+    id: device-detail
+    attributes:
+      label: Vendor / model detail
+      description: "For BMCs (e.g. Dell iDRAC9 on an R740, HPE iLO 6) or an \"Other\" device."
+      placeholder: e.g. Dell iDRAC9, firmware 7.00.00.00, on a PowerEdge R740
+  - type: input
+    id: firmware
+    attributes:
+      label: Firmware version
+      description: The device/BMC firmware version (GL firmware, kvmd version, BMC firmware).
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: kvm-pilot version / commit
+      description: "`kvm-pilot --version` or `pip show kvm-pilot`; the git commit if installed from git."
+    validations:
+      required: true
+  - type: dropdown
+    id: api-enabled
+    attributes:
+      label: GLKVM only — did you enable the PiKVM REST API first?
+      description: >-
+        GL firmware disables the REST API by default (uncomment the block in
+        /etc/kvmd/nginx-kvmd.conf — see the README); a firmware upgrade can revert it.
+      options:
+        - Not applicable (not a GLKVM device)
+        - "Yes — enabled in /etc/kvmd/nginx-kvmd.conf"
+        - No / not sure
+    validations:
+      required: true
+  - type: textarea
+    id: worked
+    attributes:
+      label: What worked
+      description: >-
+        Which features behaved as documented — e.g. info, snapshot, HID (type/key),
+        power/ATX, mass storage (mount/eject), GPIO, Redfish, WebSocket events,
+        vision classify/watch.
+      placeholder: |
+        - info: OK
+        - snapshot: OK
+        - power-cycle: OK (with ATX board wired)
+  - type: textarea
+    id: failed
+    attributes:
+      label: What failed
+      description: >-
+        Include the command or snippet and the full traceback/output. Passwords and
+        session tokens are redacted from error text automatically, but double-check
+        before posting.
+      placeholder: |
+        `kvm-pilot mount ubuntu.iso --profile lab` failed with:
+        ...traceback...
+  - type: textarea
+    id: notes
+    attributes:
+      label: Anything else
+      description: Quirks, timing oddities, setup notes future users should know.

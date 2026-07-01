@@ -53,8 +53,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `PasswordChangeRequired`, the legacy `Thermal`/`Power` vs unified `Sensors`
   models, and structured `BootProgress` → the phase vocabulary. Reset and
   virtual-media insert/eject route through `SafetyPolicy` (new `redfish.*` ops).
-  Library/registry only for now — a curated `--driver redfish` CLI entry awaits
-  capability-aware command dispatch.
+  Wired into the CLI via **capability-aware `--driver` dispatch** (#27, PR #34):
+  `--driver redfish` works on every applicable subcommand, and a subcommand
+  needing a capability the BMC lacks (e.g. `type`, `snapshot`, `events`) exits 1
+  with a clean `CapabilityError` message instead of crashing. A new
+  `--redfish-auth session|basic` flag (+ `KVM_PILOT_REDFISH_AUTH` env /
+  `redfish_auth` profile key) selects the auth mode for endpoints without a
+  SessionService (emulators, or BMCs with session auth disabled). Wired and
+  unit/emulator-tested only — still not validated against a real BMC.
 - New phase token **`os_running`** (`vision.base`) for an OS that has handed off
   but whose specific on-screen state isn't distinguishable — emitted by the
   vision backend and mapped to from a BMC's `BootProgress=OSRunning`.

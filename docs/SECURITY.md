@@ -6,13 +6,18 @@ the target. Treat it accordingly.
 
 ## Reporting a vulnerability
 
-Please report suspected vulnerabilities privately via GitHub's **"Report a
-vulnerability"** flow under the Security tab, rather than opening a public
-issue. Include reproduction steps and the affected version. We aim to
-acknowledge reports within a few days.
+Please do not disclose vulnerability details in a public issue.
 
-Do not include working exploits against third-party devices or live hosts in a
-public report.
+- **Preferred:** GitHub's private ["Report a vulnerability"](https://github.com/DustinTrap/kvm-pilot/security/advisories/new)
+  flow under the repository's Security tab. Include reproduction steps and the
+  affected version.
+- **Fallback** (if that button is missing — private vulnerability reporting can
+  be toggled off): open a regular issue saying only *"security report — please
+  provide a private contact"*, **without any vulnerability details**, and a
+  maintainer will arrange a private channel.
+
+We aim to acknowledge reports within a few days. Do not include working
+exploits against third-party devices or live hosts in a public report.
 
 ## Operational guidance
 

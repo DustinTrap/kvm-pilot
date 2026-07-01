@@ -1,6 +1,6 @@
 <svg viewBox="0 0 860 470" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="ttl dsc">
   <title id="ttl">Safety gate for destructive operations</title>
-  <desc id="dsc">A decision flow. A caller — CLI, script, or MCP server — issues an operation. If the op is not in DESTRUCTIVE_OPS it executes directly. If it is destructive, dry-run short-circuits to log-only; otherwise a confirm callback can veto it; only an allowed call is sent to the device. A side panel lists the explicit DESTRUCTIVE_OPS set and the default confirm behavior per consumer. A vision classification never enters this path on its own.</desc>
+  <desc id="dsc">A decision flow. A caller — CLI, script, or MCP server — issues an operation. If the op is not in DESTRUCTIVE_OPS it executes directly. If it is destructive, dry-run short-circuits first to log-only (the confirm callback is not invoked); otherwise a confirm callback can veto it; only an allowed call is sent to the device. A side panel shows a sample of the explicit DESTRUCTIVE_OPS set and the default confirm behavior per consumer. A vision classification never enters this path on its own.</desc>
   <style>
     text{font-family:var(--font-sans,ui-sans-serif,system-ui,sans-serif);}
     .band{fill:#f1efe8;stroke:#d3d1c7;stroke-width:1;}
@@ -37,7 +37,7 @@
   </style>
 
   <text x="30" y="34" class="h">kvm-pilot — safety gate</text>
-  <text x="30" y="54" class="sub">Power, reset, virtual-media, GPIO and Redfish resets are gated. A vision result never enters this path on its own.</text>
+  <text x="30" y="54" class="sub">Power, reset, virtual media (incl. uploads), keyboard/mouse injection, GPIO and Redfish resets are gated. A vision result never enters this path on its own.</text>
 
   <defs>
     <marker id="a" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path class="mkn" d="M0,0 L6,3 L0,6 Z"/></marker>
@@ -89,10 +89,11 @@
   <!-- side panel -->
   <rect class="band" x="582" y="120" width="248" height="300" rx="8"/>
   <text x="600" y="144" class="lab">DESTRUCTIVE_OPS · safety.py</text>
-  <text x="600" y="167" class="mono">power.on · power.off</text>
-  <text x="600" y="186" class="mono">power.off_hard · power.reset</text>
-  <text x="600" y="205" class="mono">media.connect · media.disconnect</text>
-  <text x="600" y="224" class="mono">gpio.switch · redfish.reset</text>
+  <text x="600" y="163" class="mono">atx.power_on · atx.power_off</text>
+  <text x="600" y="179" class="mono">atx.power_off_hard · atx.click</text>
+  <text x="600" y="195" class="mono">msd.connect · msd.write</text>
+  <text x="600" y="211" class="mono">hid.type_text · hid.press_key</text>
+  <text x="600" y="227" class="mono">gpio.switch · redfish.power_off</text>
   <line x1="600" y1="242" x2="812" y2="242" class="div" stroke-width="1"/>
   <text x="600" y="265" class="lab">Default confirm behavior</text>
   <text x="600" y="288" class="ts">dry_run=True → always log-only</text>
@@ -101,5 +102,5 @@
   <text x="600" y="354" class="ts">MCP power tool → needs confirm=true</text>
   <line x1="600" y1="372" x2="812" y2="372" class="div" stroke-width="1"/>
   <text x="600" y="394" class="lab">green = runs · red = blocked</text>
-  <text x="600" y="410" class="ts">The set is explicit and auditable.</text>
+  <text x="600" y="410" class="ts">A sample — the full set is in safety.py.</text>
 </svg>

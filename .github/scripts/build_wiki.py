@@ -18,11 +18,13 @@ output without touching the wiki::
 from __future__ import annotations
 
 import argparse
+import posixpath
 import re
 import shutil
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
+REPO_URL = "https://github.com/DustinTrap/kvm-pilot"
 
 # (repo-relative source, wiki page filename, sidebar title). Order = sidebar order.
 # The wiki filename keeps the source stem so link rewriting is a plain ``.md``
@@ -30,6 +32,7 @@ ROOT = Path(__file__).resolve().parents[2]
 PAGES: list[tuple[str, str, str | None]] = [
     ("docs/README.md", "Home.md", None),
     ("docs/architecture.md", "architecture.md", "Architecture"),
+    ("docs/configuration.md", "configuration.md", "Configuration"),
     ("docs/decisions.md", "decisions.md", "Design decisions"),
     ("docs/redfish.md", "redfish.md", "Redfish reference"),
     ("skill/SKILL.md", "skill.md", "Claude skill"),
@@ -43,8 +46,12 @@ _LINK = re.compile(r"(!?\[[^\]]*\])\(([^)]+)\)")
 _IMAGE_EXTS = (".svg", ".png", ".jpg", ".jpeg", ".gif")
 
 
-def _rewrite_target(target: str) -> str:
-    """Map a link target as written in the repo to its flat-wiki equivalent."""
+def _rewrite_target(target: str, src_dir: str) -> str:
+    """Map a link target as written in the repo to its flat-wiki equivalent.
+
+    ``src_dir`` is the repo-relative directory of the source page (``docs``,
+    ``skill``, ``mcp_server``) so remaining relative targets can be resolved.
+    """
     if re.match(r"^(https?:|#|mailto:|/)", target):
         return target  # external, in-page anchor, or absolute — leave untouched
     path, _, anchor = target.partition("#")
@@ -62,11 +69,16 @@ def _rewrite_target(target: str) -> str:
         return "Home" + anchor
     if lower.endswith(".md"):
         return Path(path).stem + anchor
-    return target
+    # Anything left is a repo file or directory (e.g. ``../src/...``). The wiki
+    # has no source tree, so resolve it against the page's repo directory and
+    # link to the file on GitHub instead of shipping a dead relative link.
+    resolved = posixpath.normpath(posixpath.join(src_dir, path))
+    kind = "tree" if path.endswith("/") else "blob"
+    return f"{REPO_URL}/{kind}/main/{resolved}{anchor}"
 
 
-def _transform(md: str) -> str:
-    return _LINK.sub(lambda m: f"{m.group(1)}({_rewrite_target(m.group(2))})", md)
+def _transform(md: str, src_dir: str) -> str:
+    return _LINK.sub(lambda m: f"{m.group(1)}({_rewrite_target(m.group(2), src_dir)})", md)
 
 
 def build(out: Path) -> None:
@@ -78,7 +90,10 @@ def build(out: Path) -> None:
         src = ROOT / src_rel
         if not src.exists():
             raise SystemExit(f"missing doc source: {src_rel}")
-        (out / wiki_name).write_text(_transform(src.read_text()), encoding="utf-8")
+        page = _transform(src.read_text(), posixpath.dirname(src_rel))
+        if "](../" in page or "](./" in page:
+            raise SystemExit(f"unresolved relative link left in {wiki_name}")
+        (out / wiki_name).write_text(page, encoding="utf-8")
 
     # Diagrams referenced by the pages, copied flat next to them.
     for svg in sorted((ROOT / "docs").glob("*.svg")):
