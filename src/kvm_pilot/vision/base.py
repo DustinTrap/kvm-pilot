@@ -14,7 +14,9 @@ OpenAI-compatible backend uses whatever model name you give it.
 
 from __future__ import annotations
 
+import http.client
 import json
+import math
 import time
 import urllib.error
 import urllib.request
@@ -112,12 +114,23 @@ def request_json(
     req = urllib.request.Request(url, data=data, method=method, headers=headers)
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return json.loads(resp.read().decode())
+            raw = resp.read().decode()
     except urllib.error.HTTPError as exc:
         body = exc.read().decode(errors="replace")
         raise VisionError(f"{label} HTTP {exc.code}: {body[:400]}") from exc
     except urllib.error.URLError as exc:
         raise VisionError(f"{label} network error: {exc.reason}") from exc
+    except (OSError, http.client.HTTPException) as exc:
+        # Read timeouts/resets surface raw from urllib; the VisionError contract
+        # (wait loops catch it and keep polling) must hold for them too.
+        raise VisionError(f"{label} connection failed: {exc!r}") from exc
+    try:
+        parsed = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise VisionError(f"{label} returned non-JSON response: {raw[:200]}") from exc
+    if not isinstance(parsed, dict):
+        raise VisionError(f"{label} returned non-object JSON: {raw[:200]}")
+    return parsed
 
 
 class ScreenState:
@@ -157,6 +170,23 @@ class ScreenState:
         return f"ScreenState(phase={self.phase!r}, confidence={self.confidence:.2f})"
 
 
+def _clamp_confidence(value: object) -> float:
+    """Normalize a model-reported confidence to a finite 0.0–1.0 float.
+
+    Local VLMs sometimes answer on a percent scale ("confidence": 95) — left
+    unclamped that trivially defeats every min_confidence gate.
+    """
+    try:
+        c = float(value)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return 0.0
+    if not math.isfinite(c):
+        return 0.0
+    if 1.0 < c <= 100.0:
+        c /= 100.0
+    return min(max(c, 0.0), 1.0)
+
+
 def parse_classification(text: str, image_b64: str) -> ScreenState:
     """Parse a model's JSON text (tolerating ``` fences) into a ScreenState.
 
@@ -172,15 +202,14 @@ def parse_classification(text: str, image_b64: str) -> ScreenState:
         data = json.loads(cleaned)
     except json.JSONDecodeError as exc:
         raise VisionError(f"Classifier did not return valid JSON: {cleaned[:200]}") from exc
+    if not isinstance(data, dict):
+        raise VisionError(f"Classifier returned non-object JSON: {cleaned[:200]}")
 
     phase = str(data.get("phase", PHASE_UNKNOWN)).lower()
     if phase not in ALL_PHASES:
         phase = PHASE_UNKNOWN
 
-    try:
-        confidence = float(data.get("confidence", 0.0))
-    except (TypeError, ValueError):
-        confidence = 0.0
+    confidence = _clamp_confidence(data.get("confidence"))
 
     return ScreenState(
         phase=phase,

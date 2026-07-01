@@ -188,3 +188,33 @@ def test_gates_default_on_but_inert_without_device_probes():
     analyzer = ScreenAnalyzer(FakeKVM(), backend)
     assert analyzer.classify().phase == "bios_menu"
     assert analyzer.vlm_calls == 1
+
+
+def test_static_screen_does_not_pin_unknown_low_confidence():
+    # A static frame with an unactionable first answer (unknown / low confidence)
+    # must NOT be reused forever — the model gets another look.
+    backend = FakeBackend(["unknown", "login_prompt"], confidence=0.95)
+    analyzer = ScreenAnalyzer(StaticKVM(), backend)
+    first = analyzer.classify()
+    assert first.phase == "unknown"
+    second = analyzer.classify()
+    assert second.phase == "login_prompt"
+    assert backend.calls == 2  # re-invoked despite the identical frame
+
+
+def test_static_screen_still_reuses_confident_result():
+    backend = FakeBackend(["login_prompt"], confidence=0.95)
+    analyzer = ScreenAnalyzer(StaticKVM(), backend)
+    analyzer.classify()
+    analyzer.classify()
+    assert backend.calls == 1  # confident result on an identical frame is cached
+
+
+def test_wait_loop_threshold_reaches_the_reuse_gate():
+    # A cached 0.80-confidence state satisfies the default 0.70 floor but must
+    # not pin a wait loop that asked for min_confidence=0.90.
+    backend = FakeBackend(["login_prompt", "login_prompt"], confidence=0.80)
+    analyzer = ScreenAnalyzer(StaticKVM(), backend, default_poll_interval=0.0)
+    with pytest.raises(TimeoutError):
+        analyzer.wait_for_state("desktop", timeout=0.3, min_confidence=0.90)
+    assert backend.calls >= 2  # the low-confidence cache was not reused
