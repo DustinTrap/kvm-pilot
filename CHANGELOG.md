@@ -6,6 +6,49 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed — safety & transport (2026-07-01 deep-review batch)
+- **Breaking:** `snapshot()` / `snapshot_save()` / `snapshot_base64()` lost the
+  `quality` parameter — kvmd silently ignored `preview_quality` without
+  `preview=1`, so it was a no-op lie (see `docs/decisions.md`).
+- **Breaking (behavior):** HID input (`type_text`, `press_key`,
+  `send_shortcut`, `key_event`, `mouse_click`) and MSD uploads
+  (`msd_upload_file`, `msd_upload_url`) are now gated destructive ops
+  (`hid.*`, `msd.write`, `msd.write_remote`). `--dry-run` really skips them;
+  the CLI prompts for them without `--yes`.
+- **Breaking (behavior):** `SafetyPolicy.guard` evaluates dry-run BEFORE the
+  confirm callback — `--dry-run` never prompts and works unattended.
+- Transports map read-phase socket failures (timeouts, resets,
+  RemoteDisconnected, IncompleteRead) into `kvm_pilot.errors`
+  (`TimeoutError`/`ConnectionError`) instead of leaking raw builtins, and
+  never auto-retry a non-idempotent request after a failure that may already
+  have reached the device (a lost response can't power-cycle a box twice).
+- `is_powered_on()` fails open when kvmd reports the ATX subsystem disabled
+  (no ATX board): vision classification proceeds instead of reporting
+  `power_off` for a running machine.
+- Redfish: transitional `PowerState` values (`PoweringOn`/`PoweringOff`/
+  `Paused`) map to `unknown`, not `power_off`.
+- Vision: `VisionError` is honored on every failure path (non-JSON 200s,
+  non-object JSON, raw socket errors); model confidence is clamped/normalized
+  (percent-scale answers no longer defeat `min_confidence`); the
+  unchanged-frame gate reuses only actionable results, so a static screen
+  can't pin a wait loop to a cached `unknown`.
+- Config: unknown profile keys warn loudly instead of silently falling back to
+  `admin`/`admin`; `KVM_PILOT_PROFILE` is honored everywhere; `--scheme http`
+  defaults the port to 80; IPv6 literal hosts work.
+- MCP server: capability-aware per-call drivers (closed after every call — no
+  leaked BMC sessions), real image snapshots, tool annotations, an
+  operator-side `KVM_PILOT_MCP_ALLOW_POWER` gate on the power tool,
+  `KVM_PILOT_MCP_DRY_RUN`, and local-VLM support via `KVM_PILOT_VISION_*`.
+
+### Added (deep-review batch)
+- **CLI `eject`** — the inverse of `mount` (gated `msd_disconnect`).
+- `mouse_move_pixels(x, y)` — pixel coordinates mapped edge-exactly into
+  kvmd's centered −32768…32767 space; `mouse_move` documents that contract.
+- `docs/configuration.md` — full config-file and `KVM_PILOT_*` env reference.
+- `.github/ISSUE_TEMPLATE/hardware-report.yml` — structured hardware
+  success/failure reports.
+- `py.typed` ships in the wheel; PyPI metadata covers the Redfish/BMC side.
+
 ### Added
 - **Sensing model.** A `docs/sensing-hierarchy.svg` diagram and a "Sensing
   model" section documenting why structured/text signals are preferred over
