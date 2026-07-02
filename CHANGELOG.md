@@ -22,6 +22,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`TimeoutError`/`ConnectionError`) instead of leaking raw builtins, and
   never auto-retry a non-idempotent request after a failure that may already
   have reached the device (a lost response can't power-cycle a box twice).
+- **Supply chain:** every GitHub Action is pinned by full commit SHA (with a
+  version comment) — including the OIDC-privileged `pypa/gh-action-pypi-publish`
+  on the release path — so an upstream tag compromise can't run arbitrary code
+  with PyPI publish rights; added `.github/dependabot.yml` to keep the pins
+  fresh, least-privilege `permissions:` defaults, and `persist-credentials: false`
+  on checkouts ([#58](https://github.com/DustinTrap/kvm-pilot/issues/58)).
 - **Security:** neither HTTP transport follows redirects any more. The stdlib
   default opener would forward auth headers (`X-KVMD-Passwd`, `X-Auth-Token`,
   `Authorization: Basic`, session cookie) to whatever host a 3xx `Location`

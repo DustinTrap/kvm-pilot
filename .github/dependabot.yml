@@ -1,0 +1,19 @@
+version: 2
+updates:
+  # Keep GitHub Actions SHA pins fresh via reviewable PRs (and the version
+  # comments in sync). Actions are pinned by full commit SHA in the workflows.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci
+
+  # The core is stdlib-only; this watches the optional/dev dependencies declared
+  # in pyproject.toml (totp, ws, dev) for security and version updates.
+  - package-ecosystem: pip
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: deps
