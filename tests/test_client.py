@@ -212,6 +212,22 @@ def test_msd_set_params_gated_by_confirm(fake_http):
     assert fake_http.calls == []  # boot-media selection must not fire when denied
 
 
+def test_get_logs_follow_raises_capability_error(client, fake_http):
+    # kvmd streams follow forever; the blocking transport can't serve it, so it
+    # must refuse cleanly (never issue the request) rather than block to timeout.
+    from kvm_pilot.errors import CapabilityError
+
+    with pytest.raises(CapabilityError, match="follow"):
+        client.get_logs(follow=True)
+    assert fake_http.calls == []  # nothing was sent
+
+
+def test_get_logs_without_follow_hits_api_log(client, fake_http):
+    fake_http.results["/api/log"] = b"line1\nline2\n"
+    assert client.get_logs() == "line1\nline2\n"
+    assert "/api/log" in fake_http.paths()
+
+
 def test_has_video_signal_reads_online_flag(client, fake_http):
     fake_http.results["/api/streamer"] = {"source": {"online": True}}
     assert client.has_video_signal() is True

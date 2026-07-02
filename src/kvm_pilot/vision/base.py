@@ -118,7 +118,17 @@ def request_json(
             raw = resp.read().decode()
     except urllib.error.HTTPError as exc:
         body = exc.read().decode(errors="replace")
-        raise VisionError(f"{label} HTTP {exc.code}: {body[:400]}") from exc
+        # Carry the status so wait loops can back off on retryable errors
+        # (429 rate_limit, 529 overloaded, 500/503), and parse Retry-After on a
+        # 429 so we wait at least as long as the API asks.
+        err = VisionError(f"{label} HTTP {exc.code}: {body[:400]}", exc.code)
+        if exc.code == 429:
+            ra = exc.headers.get("Retry-After") if exc.headers else None
+            try:
+                err.retry_after = float(ra) if ra is not None else None
+            except (TypeError, ValueError):
+                err.retry_after = None  # HTTP-date form — treat as unknown
+        raise err from exc
     except urllib.error.URLError as exc:
         raise VisionError(f"{label} network error: {exc.reason}") from exc
     except (OSError, http.client.HTTPException) as exc:

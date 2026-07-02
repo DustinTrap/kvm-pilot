@@ -36,7 +36,14 @@ class SafetyError(KVMPilotError):
 
 
 class VisionError(KVMPilotError):
-    """The vision backend failed or returned an unusable result."""
+    """The vision backend failed or returned an unusable result.
+
+    ``retry_after`` carries a 429's parsed ``Retry-After`` seconds (or ``None``)
+    so a wait loop can honor it; ``status_code`` (from the base class) carries
+    the HTTP status for retryable-error handling.
+    """
+
+    retry_after: float | None = None
 
 
 class CapabilityError(KVMPilotError):

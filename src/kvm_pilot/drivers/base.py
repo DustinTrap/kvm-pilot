@@ -115,7 +115,12 @@ class Events(Protocol):
 @runtime_checkable
 class Logs(Protocol):
     """Read device or host event logs (kvmd journal, Redfish SEL / lifecycle
-    log, IPMI SEL)."""
+    log, IPMI SEL).
+
+    ``follow`` (tail -f) is a streaming mode the current blocking transport
+    cannot serve; drivers raise ``CapabilityError`` for it until a streaming
+    entry point exists (see ``PiKVMDriver`` / ``RedfishDriver``).
+    """
 
     def get_logs(self, seek: int = 0, follow: bool = False) -> str: ...
 

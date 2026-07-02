@@ -38,6 +38,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   ([#42](https://github.com/DustinTrap/kvm-pilot/issues/42)).
 - Redfish: transitional `PowerState` values (`PoweringOn`/`PoweringOff`/
   `Paused`) map to `unknown`, not `power_off`.
+- `KVMClient.get_logs(follow=True)` raises `CapabilityError` instead of blocking
+  to the timeout and crashing — the blocking transport can't serve tail-follow
+  (mirrors the Redfish driver); the kvmd emulator gained an `/api/log` handler so
+  the non-follow path is finally covered
+  ([#48](https://github.com/DustinTrap/kvm-pilot/issues/48)).
+- Vision wait loops back off on repeated errors and honor a 429's `Retry-After`
+  instead of re-uploading the image at a fixed 3 s cadence against a
+  rate-limited API; `VisionError` now carries `status_code` and `retry_after`
+  ([#51](https://github.com/DustinTrap/kvm-pilot/issues/51)).
 - Vision: a truncated model response (Anthropic `stop_reason=max_tokens` /
   OpenAI-compat `finish_reason=length`) now raises a specific "truncated"
   `VisionError` instead of a misleading "did not return valid JSON"; the default

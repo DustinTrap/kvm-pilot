@@ -218,3 +218,57 @@ def test_wait_loop_threshold_reaches_the_reuse_gate():
     with pytest.raises(TimeoutError):
         analyzer.wait_for_state("desktop", timeout=0.3, min_confidence=0.90)
     assert backend.calls >= 2  # the low-confidence cache was not reused
+
+
+class _AlwaysErrors(VisionBackend):
+    def __init__(self, retry_after=None):
+        self._retry_after = retry_after
+
+    @property
+    def model(self) -> str:
+        return "m"
+
+    def classify(self, image_b64: str, hint: str = "") -> ScreenState:
+        from kvm_pilot.errors import VisionError
+        err = VisionError("rate limited", 429)
+        err.retry_after = self._retry_after
+        raise err
+
+
+def test_wait_loop_honors_retry_after(monkeypatch):
+    import itertools
+
+    import kvm_pilot.vision.analyzer as amod
+    slept: list[float] = []
+    monkeypatch.setattr(amod.time, "sleep", lambda s: slept.append(s))
+    # Deterministic clock: ~6 "seconds" per iteration (3 monotonic reads x 2s).
+    clock = itertools.count(0, 2)
+    monkeypatch.setattr(amod.time, "monotonic", lambda: next(clock))
+
+    analyzer = ScreenAnalyzer(StaticKVM(), _AlwaysErrors(retry_after=7.0),
+                              default_poll_interval=1.0)
+    with pytest.raises(TimeoutError):
+        analyzer.wait_for_state("desktop", timeout=60.0)
+    assert slept  # slept between error polls
+    # The first error sleep honors Retry-After (7s), not the 1s base interval.
+    assert slept[0] == pytest.approx(7.0)
+
+
+def test_wait_loop_backoff_grows_on_repeated_errors(monkeypatch):
+    import itertools
+
+    import kvm_pilot.vision.analyzer as amod
+    slept: list[float] = []
+    monkeypatch.setattr(amod.time, "sleep", lambda s: slept.append(s))
+    # Small per-call step so many iterations fit before the deadline.
+    clock = itertools.count(0, 1)
+    monkeypatch.setattr(amod.time, "monotonic", lambda: next(clock))
+
+    analyzer = ScreenAnalyzer(StaticKVM(), _AlwaysErrors(retry_after=None),
+                              default_poll_interval=1.0)
+    with pytest.raises(TimeoutError):
+        analyzer.wait_for_state("desktop", timeout=120.0)
+    positive = [s for s in slept if s > 0]
+    # base interval early, then grows (1.0 -> 1.5 after 10 consecutive errors).
+    assert positive[0] == pytest.approx(1.0)
+    assert max(positive) > positive[0]
