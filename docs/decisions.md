@@ -162,6 +162,18 @@ request; re-firing a power/HID/MSD POST could run it twice. Connect-phase
 failures (nothing was sent) stay retryable for every method. Retrying 409/503
 stays safe for all methods: those are definitive "rejected" responses.
 
+### Redfish read_sensors() uses $expand where advertised
+Real BMCs expose 100-400 Sensor resources; one GET per member (each a fresh
+TCP+TLS handshake) is 10s of seconds to minutes, and the sensing hierarchy
+polls it. `read_sensors()` now probes `ServiceRoot.ProtocolFeaturesSupported.
+ExpandQuery` and, when the service advertises it, fetches the Sensors collection
+with `?$expand=*($levels=1)` (or `.` for a Levels-only service) — one request
+instead of N. It falls back to the per-member loop when $expand isn't advertised,
+and remembers a `501` (the DSP0266 response for an unsupported $-query) so it
+doesn't retry expansion per call. Deferred: HTTP keep-alive in the transport
+(every request currently pays a fresh handshake) — a cross-cutting change to
+both transports, tracked separately.
+
 ### Logs.seek is uniformly "seconds of lookback"
 kvmd's `/api/log?seek=N` interprets N as seconds of history, so the shared
 `Logs` protocol standardizes on that; the Redfish driver was interpreting `seek`

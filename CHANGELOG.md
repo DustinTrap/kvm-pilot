@@ -84,6 +84,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   / `msd_upload_file` on a multi-GB ISO no longer needs the whole image resident
   (urllib streams it in 8 KiB blocks with a pinned Content-Length), so a small
   jump host or container won't OOM ([#47](https://github.com/DustinTrap/kvm-pilot/issues/47)).
+- **Redfish:** `read_sensors()` uses a single `?$expand` request where the
+  service advertises it (`ProtocolFeaturesSupported.ExpandQuery`) instead of one
+  GET per sensor — real BMCs expose 100+ sensors, so the fan-out was 10s of
+  seconds to minutes. Falls back to per-member fetches when unsupported
+  ([#45](https://github.com/DustinTrap/kvm-pilot/issues/45)).
 - **Redfish/cross-driver:** `Logs.seek` is now uniformly "seconds of lookback"
   (kvmd's semantics). The Redfish driver was treating it as an entry-skip index,
   so `get_logs(seek=3600)` returned different data per driver; it now filters

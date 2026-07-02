@@ -20,7 +20,7 @@ from kvm_pilot.errors import (
     SafetyError,
 )
 from kvm_pilot.safety import deny_all
-from redfish_emulator import RESET, SESSIONS, SYS, VM_EJECT, VM_INSERT
+from redfish_emulator import CHAS, RESET, SESSIONS, SYS, VM_EJECT, VM_INSERT
 
 # The `emu` fixture (a running RedfishEmulator) is shared from tests/conftest.py.
 
@@ -291,6 +291,29 @@ def test_sensors_legacy_thermal_power(emu):
     assert s["temperatures"][0]["reading"] == 42
     assert s["fans"][0]["reading"] == 4200
     assert s["power"][0]["reading"] == 210
+
+
+def test_sensors_uses_expand_when_advertised(emu):
+    # #45: when the service advertises $expand, read_sensors() makes a single
+    # collection GET instead of one GET per sensor (which is minutes on real BMCs).
+    emu.state.sensors_mode = "unified"
+    emu.state.sensors_expandable = True
+    s = make(emu).read_sensors()
+    assert any(t["name"] == "CPU Temp" for t in s["temperatures"])
+    assert any(f["name"] == "Fan1" for f in s["fans"])
+    # no per-member fetches happened
+    assert ("GET", f"{CHAS}/Sensors/CPUTemp") not in emu.state.calls
+    assert ("GET", f"{CHAS}/Sensors/Fan1") not in emu.state.calls
+    assert ("GET", f"{CHAS}/Sensors") in emu.state.calls
+
+
+def test_sensors_falls_back_to_per_member_without_expand(emu):
+    # No $expand advertised -> the per-member fallback still works.
+    emu.state.sensors_mode = "unified"
+    emu.state.sensors_expandable = False
+    s = make(emu).read_sensors()
+    assert any(t["name"] == "CPU Temp" for t in s["temperatures"])
+    assert ("GET", f"{CHAS}/Sensors/CPUTemp") in emu.state.calls  # per-member fetch
 
 
 def test_sensors_unified_model(emu):
