@@ -25,13 +25,13 @@ from pathlib import Path
 from typing import Any
 
 from ..safety import SafetyPolicy
-from .base import CapabilityMixin
+from .base import CapabilityMixin, PowerMixin
 
 # A minimal valid JPEG (SOI + APP0), enough for snapshot()/base64 round-trips.
 _FAKE_JPEG = bytes.fromhex("ffd8ffe000104a46494600010100000101000000")
 
 
-class FakeDriver(CapabilityMixin):
+class FakeDriver(PowerMixin, CapabilityMixin):
     """A fully scriptable, in-memory KVM device.
 
     Args:
@@ -113,10 +113,6 @@ class FakeDriver(CapabilityMixin):
     def reset_hard(self, wait: bool = True) -> None:
         if self.safety.guard("atx.reset_hard", f"HARD reset {self.host}"):
             self._record("reset_hard")
-
-    def hard_cycle(self, off_delay: float = 0.0, on_delay: float = 0.0) -> None:
-        self.power_off_hard()
-        self.power_on()
 
     # -- HID -------------------------------------------------------------
 

@@ -25,13 +25,15 @@ CLI `power-cycle` works" holds for every power driver. Its `off_delay`/`on_delay
 default to `0.0` (unlike `KVMClient`'s ATX settle delays) because the two gated power
 ops already block on the real `PowerState` transition.
 
-It is now the *third* copy of the same `power_off_hard → power_on` composition
-(`KVMClient`, `FakeDriver`, `RedfishDriver`). A shared `PowerMixin.hard_cycle`
-(composed from the protocol methods, with the settle delays as an overridable class
-attribute) is the better home and would make the invariant structural — **deferred on
-purpose**: the clean version changes `KVMClient.hard_cycle`'s public `off_delay`/
-`on_delay` signature and touches the primary (real-hardware) PiKVM path, which is out
-of scope for the CLI-dispatch change. Tracked as follow-up, not churned into #27.
+It was, for a while, the *third* copy of the same `power_off_hard → power_on`
+composition (`KVMClient`, `FakeDriver`, `RedfishDriver`). That was consolidated
+in #63 into `PowerMixin.hard_cycle` (in `drivers/base.py`), composed from the
+`Power` protocol methods with the settle delays as overridable class attributes
+(`_hard_cycle_off_delay`/`_hard_cycle_on_delay`): the PiKVM ATX path keeps 5.0/3.0
+because its power ops don't block on the state change, while Redfish (which blocks
+on the `PowerState` transition) and Fake keep 0.0. `hard_cycle(off_delay=, on_delay=)`
+still overrides per call — the public defaults are now `None` (meaning "use the
+driver's class attribute"), a small alpha-era signature refinement.
 
 ### `--redfish-auth` selector, defaulting to `session`
 Session auth is the BMC norm (and what real iDRAC/iLO recommend), so it stays the

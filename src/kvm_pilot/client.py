@@ -26,7 +26,7 @@ from collections.abc import Generator
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .drivers.base import CapabilityMixin
+from .drivers.base import CapabilityMixin, PowerMixin
 from .errors import (
     ApiDisabledError,
     AuthError,
@@ -50,7 +50,7 @@ def _pixel_to_kvmd(v: int, extent: int) -> int:
     return max(-32768, min(32767, round(-32768 + v * 65535 / (extent - 1))))
 
 
-class PiKVMDriver(CapabilityMixin):
+class PiKVMDriver(PowerMixin, CapabilityMixin):
     """Full PiKVM-family REST driver (canonical base of the PiKVM/GLKVM/BliKVM family).
 
     This is the concrete client for stock PiKVM and any API-compatible device.
@@ -79,6 +79,11 @@ class PiKVMDriver(CapabilityMixin):
     # Subclasses (GLKVMDriver) set this to make a 404 across /api/* surface as a
     # clear ApiDisabledError with device-specific guidance. None for stock PiKVM.
     _NOT_FOUND_HINT: str | None = None
+
+    # ATX power ops don't block on the state change, so hard_cycle (from
+    # PowerMixin) settles between the off and on. Overridable per call.
+    _hard_cycle_off_delay: float = 5.0
+    _hard_cycle_on_delay: float = 3.0
 
     def __init__(
         self,
@@ -672,13 +677,6 @@ class PiKVMDriver(CapabilityMixin):
         raise TimeoutError(
             f"Timed out waiting for power={'on' if target else 'off'} after {timeout}s"
         )
-
-    def hard_cycle(self, off_delay: float = 5.0, on_delay: float = 3.0) -> None:
-        logger.info("Hard power cycling %s", self.host)
-        self.power_off_hard()
-        time.sleep(off_delay)
-        self.power_on()
-        time.sleep(on_delay)
 
     def send_password(self, passwd: str, keymap: str = "en-us") -> None:
         """Type a password + Enter slowly. Avoids logging the secret."""
