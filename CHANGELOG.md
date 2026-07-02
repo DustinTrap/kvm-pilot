@@ -68,6 +68,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   / `msd_upload_file` on a multi-GB ISO no longer needs the whole image resident
   (urllib streams it in 8 KiB blocks with a pinned Content-Length), so a small
   jump host or container won't OOM ([#47](https://github.com/DustinTrap/kvm-pilot/issues/47)).
+- **Redfish/cross-driver:** `Logs.seek` is now uniformly "seconds of lookback"
+  (kvmd's semantics). The Redfish driver was treating it as an entry-skip index,
+  so `get_logs(seek=3600)` returned different data per driver; it now filters
+  `LogEntry.Created`, keeping stampless and unset-RTC entries
+  ([#46](https://github.com/DustinTrap/kvm-pilot/issues/46)).
 - **Redfish:** chassis and manager are resolved from the ComputerSystem's
   `Links.Chassis`/`Links.ManagedBy`, not by indexing the global collections, so
   sensors/logs/virtual-media can't come from a different node than power ops on

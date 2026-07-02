@@ -215,6 +215,8 @@ class PiKVMDriver(CapabilityMixin):
         return self._http.get("/api/info", params=params)
 
     def get_logs(self, seek: int = 0, follow: bool = False) -> str:
+        # seek is seconds of lookback (kvmd's /api/log?seek=N) — the cross-driver
+        # Logs contract; the Redfish driver matches it. See drivers.base.Logs.
         if follow:
             # kvmd streams /api/log?follow=1 forever (tail -f). The blocking
             # transport buffers the whole response, so follow would just block to

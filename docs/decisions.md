@@ -152,6 +152,17 @@ request; re-firing a power/HID/MSD POST could run it twice. Connect-phase
 failures (nothing was sent) stay retryable for every method. Retrying 409/503
 stays safe for all methods: those are definitive "rejected" responses.
 
+### Logs.seek is uniformly "seconds of lookback"
+kvmd's `/api/log?seek=N` interprets N as seconds of history, so the shared
+`Logs` protocol standardizes on that; the Redfish driver was interpreting `seek`
+as an entry-skip index, so `get_logs(seek=3600)` returned "the last hour" on
+PiKVM and "everything after entry 3600" (usually empty) on Redfish. Redfish now
+filters `LogEntry.Created` to entries within the lookback, with three field
+caveats: entries with a missing/unparseable timestamp are kept; unset-RTC epoch
+stamps (~1970, common on fresh OpenBMC) are kept; and index skipping is never
+used as a fallback, because LogEntry ordering varies by vendor (iDRAC
+newest-first, OpenBMC oldest-first). `seek=0` returns everything.
+
 ### Redfish resolves chassis/manager from the System's Links, not a global index
 The Chassis and Managers collections have no defined ordering correspondence to
 the Systems collection (DSP0266), so indexing all three with one `system_index`
