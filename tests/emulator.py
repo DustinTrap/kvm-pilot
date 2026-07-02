@@ -29,6 +29,9 @@ class FakeKVMState:
         self.api_disabled = False  # GL firmware: every /api/* returns 404
         self.last_headers: dict[str, str] = {}
         self.calls: list[tuple[str, str]] = []
+        # Last POST body: declared Content-Length vs bytes actually received.
+        self.last_content_length: int | None = None
+        self.last_body_len: int | None = None
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -66,8 +69,8 @@ class _Handler(BaseHTTPRequestHandler):
         st.calls.append((self.command, path))
         if self.command != "GET":
             length = int(self.headers.get("Content-Length") or 0)
-            if length:
-                self.rfile.read(length)
+            st.last_content_length = length
+            st.last_body_len = len(self.rfile.read(length)) if length else 0
         if st.echo_password:
             passwd = self.headers.get("X-KVMD-Passwd", "")
             self._send(f"bad request for {passwd}".encode(), status=400, ctype="text/plain")

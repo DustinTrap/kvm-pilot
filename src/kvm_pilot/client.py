@@ -485,14 +485,21 @@ class PiKVMDriver(CapabilityMixin):
             return
         size = path.stat().st_size
         logger.info("Uploading %s (%.1f MB) to %s", name, size / 1024 / 1024, self.host)
-        self._http.post(
-            "/api/msd/write",
-            params={"image": name},
-            body=path.read_bytes(),
-            content_type="application/octet-stream",
-            long_timeout=600,
-            retry=False,  # never retry a partial multi-MB upload
-        )
+        # Stream the file rather than read it all into RAM — boot ISOs are
+        # multi-GB and would OOM a small jump host/container. urllib streams a
+        # file object in 8 KiB blocks once Content-Length is pinned. retry=False
+        # (and the transport enforces it for file bodies): a consumed stream
+        # can't be resent.
+        with path.open("rb") as fh:
+            self._http.post(
+                "/api/msd/write",
+                params={"image": name},
+                body=fh,
+                content_type="application/octet-stream",
+                extra_headers={"Content-Length": str(size)},
+                long_timeout=600,
+                retry=False,
+            )
         logger.info("Upload complete: %s", name)
 
     def msd_upload_url(

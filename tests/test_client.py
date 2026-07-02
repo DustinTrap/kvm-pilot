@@ -122,6 +122,21 @@ def test_press_key_releases_even_if_release_fails(fake_http):
     assert "/api/hid/reset" in flaky.paths()  # and the reset fallback fired
 
 
+def test_msd_upload_streams_a_file_object_not_bytes(fake_http, tmp_path):
+    # A multi-GB ISO must not be materialized in RAM: the body handed to the
+    # transport must be a file object, with Content-Length pinned and no retry.
+    iso = tmp_path / "x.iso"
+    iso.write_bytes(b"BOOT" * 4096)
+    c = KVMClient("fake", confirm=allow_all)
+    c._http = fake_http
+    c.msd_upload_file(str(iso))
+    call = [c for c in fake_http.calls if c["path"] == "/api/msd/write"][0]
+    assert not isinstance(call["body"], (bytes, bytearray))  # a stream, not bytes
+    assert hasattr(call["body"], "read")
+    assert call["extra_headers"]["Content-Length"] == str(iso.stat().st_size)
+    assert call["retry"] is False
+
+
 def test_msd_upload_file_dry_run_does_no_io(fake_http):
     # The guard fires before ANY I/O: under dry-run the (nonexistent) file is
     # never read and nothing is POSTed, so `mount --dry-run` really is a no-op.
