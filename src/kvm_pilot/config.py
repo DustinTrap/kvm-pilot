@@ -52,7 +52,36 @@ def _load_file(path: Path) -> dict[str, Any]:
     if not path.exists():
         return {}
     with path.open("rb") as fh:
-        return tomllib.load(fh)
+        data = tomllib.load(fh)
+    _warn_if_secrets_world_readable(path, data)
+    return data
+
+
+def _warn_if_secrets_world_readable(path: Path, data: dict[str, Any]) -> None:
+    """Warn if a config holding a password/TOTP secret is group/other-readable.
+
+    Matches the bar set by ssh/pgpass (0600). POSIX-only — Windows ACLs don't map
+    to the Unix mode bits, so the check is skipped there.
+    """
+    if os.name != "posix":
+        return
+    hosts = data.get("hosts", {}) if isinstance(data, dict) else {}
+    has_secret = any(
+        isinstance(h, dict) and (h.get("passwd") or h.get("totp_secret"))
+        for h in hosts.values()
+    )
+    if not has_secret:
+        return
+    try:
+        mode = path.stat().st_mode & 0o777
+    except OSError:
+        return
+    if mode & 0o077:
+        logger.warning(
+            "Config %s holds a password/TOTP secret but is readable by group/other "
+            "(mode %o). Restrict it: chmod 600 %s",
+            path, mode, path,
+        )
 
 
 def resolve_host(

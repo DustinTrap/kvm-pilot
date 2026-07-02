@@ -30,8 +30,12 @@ exploits against third-party devices or live hosts in a public report.
   your environment allows.
 - **Credentials** resolve from arguments, environment variables, or a config
   file. The library never writes secrets back out, and passwords plus session
-  tokens are redacted from error text. Still, prefer environment injection over
-  committing a config file with secrets.
+  tokens are redacted from error text. Prefer environment injection over
+  committing a config file with secrets. Avoid ``--passwd``/``--totp-secret`` on
+  the command line — argv is visible to any local user via ``ps`` and persists in
+  shell history; use ``KVM_PILOT_PASSWD`` / a profile, ``--passwd-file``, or
+  ``--ask-passwd`` instead. If the config file holds a password or TOTP secret,
+  restrict it (``chmod 600``); the CLI/library warn when it is group/other-readable.
 - **The safety layer is advisory, not a sandbox.** `dry_run` and the
   confirmation callback prevent *accidental* destructive calls; they are not a
   privilege boundary. Anyone who can run your script with valid credentials can
