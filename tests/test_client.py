@@ -264,3 +264,105 @@ def test_from_config_applies_all_fields():
     assert c._http._timeout == 5.0
     assert c._http._verify_ssl is True
     assert c.safety.dry_run is True
+
+
+# -- systematic safety-guard coverage (#52) --------------------------------
+#
+# guard() FAILS OPEN for op ids not in DESTRUCTIVE_OPS (safety.py), so a typo'd
+# op id or a dropped guard() silently un-gates a destructive call. The deny-path
+# table below is the regression net: with deny_all, a correctly-gated method
+# raises SafetyError and sends nothing; a fail-open method would post, leaving
+# fake_http.calls non-empty and failing the test.
+
+def _client_with(fake_http, **kw) -> KVMClient:
+    c = KVMClient("fake", **kw)
+    c._http = fake_http
+    return c
+
+
+# (id, call, op_id, endpoint or None). endpoint=None => allow-path needs I/O we
+# don't do here (msd_upload_file opens a file), so only deny/dry-run are checked.
+_GATED_CLIENT = [
+    ("power_on", lambda c: c.power_on(), "atx.power_on", "/api/atx/power"),
+    ("power_off", lambda c: c.power_off(), "atx.power_off", "/api/atx/power"),
+    ("power_off_hard", lambda c: c.power_off_hard(), "atx.power_off_hard", "/api/atx/power"),
+    ("reset_hard", lambda c: c.reset_hard(), "atx.reset_hard", "/api/atx/power"),
+    ("atx_click", lambda c: c.atx_click(), "atx.click", "/api/atx/click"),
+    ("ctrl_alt_delete", lambda c: c.ctrl_alt_delete(), "hid.ctrl_alt_delete",
+     "/api/hid/events/send_shortcut"),
+    ("type_text", lambda c: c.type_text("x"), "hid.type_text", "/api/hid/print"),
+    ("press_key", lambda c: c.press_key("Enter", hold_ms=0), "hid.press_key",
+     "/api/hid/events/send_key"),
+    ("send_shortcut", lambda c: c.send_shortcut("MetaLeft"), "hid.send_shortcut",
+     "/api/hid/events/send_shortcut"),
+    ("key_event", lambda c: c.key_event("F2", True), "hid.key_event",
+     "/api/hid/events/send_key"),
+    ("mouse_click", lambda c: c.mouse_click(hold_ms=0), "hid.mouse_click",
+     "/api/hid/events/send_mouse_button"),
+    ("msd_set_params", lambda c: c.msd_set_params(image="x"), "msd.set_params",
+     "/api/msd/set_params"),
+    ("msd_connect", lambda c: c.msd_connect(), "msd.connect", "/api/msd/set_connected"),
+    ("msd_disconnect", lambda c: c.msd_disconnect(), "msd.disconnect",
+     "/api/msd/set_connected"),
+    ("msd_remove_image", lambda c: c.msd_remove_image("x"), "msd.remove_image",
+     "/api/msd/remove"),
+    ("msd_reset", lambda c: c.msd_reset(), "msd.reset", "/api/msd/reset"),
+    ("msd_upload_url", lambda c: c.msd_upload_url("https://x/y.iso"), "msd.write_remote",
+     "/api/msd/write_remote"),
+    ("msd_upload_file", lambda c: c.msd_upload_file("/nonexistent.iso"), "msd.write", None),
+    ("gpio_switch", lambda c: c.gpio_switch("r", True), "gpio.switch", "/api/gpio/switch"),
+    ("gpio_pulse", lambda c: c.gpio_pulse("r"), "gpio.pulse", "/api/gpio/pulse"),
+    ("redfish_power_action", lambda c: c.redfish_power_action("ForceOff"), "redfish.power_action",
+     "/api/redfish/v1/Systems/0/Actions/ComputerSystem.Reset"),
+]
+
+_GATED_IDS = [e[0] for e in _GATED_CLIENT]
+_GATED_WITH_ENDPOINT = [e for e in _GATED_CLIENT if e[3] is not None]
+
+
+@pytest.mark.parametrize("_id,call,op_id,endpoint", _GATED_CLIENT, ids=_GATED_IDS)
+def test_gated_client_method_blocks_on_deny(fake_http, _id, call, op_id, endpoint):
+    with pytest.raises(SafetyError):
+        call(_client_with(fake_http, confirm=deny_all))
+    assert fake_http.calls == []  # a fail-open op would have posted
+
+
+@pytest.mark.parametrize("_id,call,op_id,endpoint", _GATED_CLIENT, ids=_GATED_IDS)
+def test_gated_client_method_skipped_under_dry_run(fake_http, _id, call, op_id, endpoint):
+    call(_client_with(fake_http, dry_run=True, confirm=allow_all))
+    assert fake_http.calls == []
+
+
+@pytest.mark.parametrize("_id,call,op_id,endpoint", _GATED_WITH_ENDPOINT,
+                         ids=[e[0] for e in _GATED_WITH_ENDPOINT])
+def test_gated_client_method_uses_exact_op_and_endpoint(fake_http, _id, call, op_id, endpoint):
+    seen: list[str] = []
+    call(_client_with(fake_http, confirm=lambda op, desc: seen.append(op) or True))
+    assert op_id in seen                 # pins the method to its exact op id
+    assert endpoint in fake_http.paths()  # and the call actually went out
+
+
+def test_table_op_ids_are_all_destructive():
+    from kvm_pilot.safety import DESTRUCTIVE_OPS
+    for _id, _call, op_id, _endpoint in _GATED_CLIENT:
+        assert op_id in DESTRUCTIVE_OPS, f"{op_id} missing from DESTRUCTIVE_OPS"
+
+
+def test_every_guard_literal_is_a_registered_destructive_op():
+    # Fail-open guard: a guard("typo.op") would silently never gate. Scan the
+    # source for every literal op id passed to .guard() and require it to be
+    # registered. (Covers the PiKVM/Fake drivers' direct calls; the Redfish
+    # driver passes ops via variables and is covered behaviorally above.)
+    import re
+    from pathlib import Path
+
+    import kvm_pilot
+    from kvm_pilot.safety import DESTRUCTIVE_OPS
+
+    root = Path(kvm_pilot.__file__).parent
+    pat = re.compile(r'\.guard\(\s*"([^"]+)"')
+    used: set[str] = set()
+    for py in root.rglob("*.py"):
+        used |= set(pat.findall(py.read_text()))
+    assert used  # sanity: the scan found guard() calls
+    assert used <= DESTRUCTIVE_OPS, f"guard() op ids not registered: {used - DESTRUCTIVE_OPS}"
