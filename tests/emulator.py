@@ -100,6 +100,9 @@ class _Handler(BaseHTTPRequestHandler):
             self._json({"leds": {"power": self._state.powered_on}})
         elif path == "/api/streamer/snapshot":
             self._send(_FAKE_JPEG, ctype="image/jpeg")
+        elif path == "/api/log":
+            # kvmd streams plain-text journal lines (non-follow returns the buffer).
+            self._send(b"[boot] kvmd started\n[atx] power on\n", ctype="text/plain")
         else:
             self._json({}, ok=False, status=404)
 

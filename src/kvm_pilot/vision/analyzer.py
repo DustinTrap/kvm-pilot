@@ -195,6 +195,7 @@ class ScreenAnalyzer:
         threshold = min_confidence if min_confidence is not None else self._min_confidence
         deadline = time.monotonic() + timeout
         attempts = 0
+        error_attempts = 0
 
         while True:
             elapsed = timeout - (deadline - time.monotonic())
@@ -203,7 +204,14 @@ class ScreenAnalyzer:
             except VisionError as exc:
                 if time.monotonic() >= deadline:
                     raise TimeoutError(f"Repeated classify failures; last: {exc}") from exc
-                time.sleep(interval)
+                # Back off on repeated errors instead of hammering a rate-limited
+                # API at the fixed interval, and honor a 429's Retry-After. Each
+                # error re-uploads the full image, so this matters.
+                error_attempts += 1
+                backoff = interval * (1.0 + min(error_attempts // 10, 3) * 0.5)
+                retry_after = getattr(exc, "retry_after", None) or 0.0
+                wait = max(backoff, retry_after)
+                time.sleep(min(wait, max(0.0, deadline - time.monotonic())))
                 continue
 
             attempts += 1

@@ -27,7 +27,13 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from .drivers.base import CapabilityMixin
-from .errors import ApiDisabledError, AuthError, KVMPilotError, TimeoutError
+from .errors import (
+    ApiDisabledError,
+    AuthError,
+    CapabilityError,
+    KVMPilotError,
+    TimeoutError,
+)
 from .http import HTTP
 from .safety import SafetyPolicy
 
@@ -209,11 +215,19 @@ class PiKVMDriver(CapabilityMixin):
         return self._http.get("/api/info", params=params)
 
     def get_logs(self, seek: int = 0, follow: bool = False) -> str:
+        if follow:
+            # kvmd streams /api/log?follow=1 forever (tail -f). The blocking
+            # transport buffers the whole response, so follow would just block to
+            # the timeout and raise — refuse cleanly instead (mirrors
+            # RedfishDriver.get_logs). A streaming generator can land later behind
+            # a dedicated HTTP.stream() entry point.
+            raise CapabilityError(
+                "PiKVM log tail-follow is not supported over the blocking "
+                "transport; call get_logs() without follow"
+            )
         params: dict[str, Any] = {}
         if seek:
             params["seek"] = seek
-        if follow:
-            params["follow"] = "1"
         return self._http.get("/api/log", params=params or None, raw_response=True).decode()
 
     def get_metrics(self) -> str:

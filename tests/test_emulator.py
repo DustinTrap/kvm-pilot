@@ -86,3 +86,10 @@ def test_password_redacted_over_real_transport(emu):
     msg = str(ei.value)
     assert "s3cr3t" not in msg
     assert "REDACTED" in msg
+
+
+def test_get_logs_returns_text(emu):
+    # The non-follow log path was previously untested (emulator had no handler).
+    text = _client(emu).get_logs()
+    assert "kvmd started" in text
+    assert ("GET", "/api/log") in emu.state.calls

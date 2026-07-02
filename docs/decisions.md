@@ -177,6 +177,18 @@ negotiation (as `_reset_info` does for Reset) was deliberately not built: the
 omit-plus-targeted-retry pair covers the field-known cases with far less code
 (CLAUDE.md: smallest change that works, no speculative generality).
 
+### Vision wait loops back off on repeated errors and honor Retry-After
+`request_json` now carries the HTTP status on the `VisionError` (`status_code`)
+and parses a 429's `Retry-After` seconds into `retry_after`. `wait_for_any_state`
+keeps a separate error counter and, on each failed poll, sleeps
+`max(bounded_backoff, retry_after)` (clamped to the remaining deadline) instead
+of hammering a rate-limited API at the fixed interval — each failed poll
+re-uploads the whole image, so this matters. The retryable set is effectively
+{429, 500, 503, 529}: the loop already retries *every* VisionError to the
+deadline, so no explicit gate is needed there; the single-shot classify/CLI path
+keeps its one-attempt behavior (a jittered in-request retry was left as optional
+future work).
+
 ### Redfish re-authenticates once on a mid-flight 401
 Real BMCs terminate idle sessions (DSP0266 SessionService inactivity timeout,
 ~30 min default) and drop every token on reboot, and a token cleared by

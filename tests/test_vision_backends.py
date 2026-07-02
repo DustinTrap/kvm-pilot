@@ -109,3 +109,45 @@ def test_resolution_empty_list_raises(monkeypatch):
     monkeypatch.setattr(b, "_http_get_json", lambda path: {"data": []})
     with pytest.raises(VisionError, match="no models"):
         _ = b.model
+
+
+# -- #51: retryable-status + Retry-After ----------------------------------
+
+def test_request_json_429_carries_status_and_retry_after(monkeypatch):
+    import email.message
+    import io
+    import urllib.error
+
+    from kvm_pilot.vision.base import request_json
+
+    hdrs = email.message.Message()
+    hdrs["Retry-After"] = "7"
+
+    def boom(req, timeout=None):
+        raise urllib.error.HTTPError(req.full_url, 429, "rate", hdrs, io.BytesIO(b'{"e":"x"}'))
+
+    monkeypatch.setattr("urllib.request.urlopen", boom)
+    with pytest.raises(VisionError) as ei:
+        request_json("POST", "http://x", headers={}, timeout=1, payload={})
+    assert ei.value.status_code == 429
+    assert ei.value.retry_after == 7.0
+
+
+def test_request_json_429_http_date_retry_after_is_none(monkeypatch):
+    import email.message
+    import io
+    import urllib.error
+
+    from kvm_pilot.vision.base import request_json
+
+    hdrs = email.message.Message()
+    hdrs["Retry-After"] = "Wed, 21 Oct 2026 07:28:00 GMT"  # HTTP-date form
+
+    def boom(req, timeout=None):
+        raise urllib.error.HTTPError(req.full_url, 429, "rate", hdrs, io.BytesIO(b"{}"))
+
+    monkeypatch.setattr("urllib.request.urlopen", boom)
+    with pytest.raises(VisionError) as ei:
+        request_json("POST", "http://x", headers={}, timeout=1, payload={})
+    assert ei.value.status_code == 429
+    assert ei.value.retry_after is None
