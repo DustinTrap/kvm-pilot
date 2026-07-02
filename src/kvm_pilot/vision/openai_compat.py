@@ -38,7 +38,7 @@ class OpenAICompatBackend(VisionBackend):
         model: str,
         *,
         api_key: str | None = None,
-        max_tokens: int = 512,
+        max_tokens: int = 1024,
         timeout: float = 120.0,
         temperature: float = 0.0,
     ):
@@ -89,9 +89,17 @@ class OpenAICompatBackend(VisionBackend):
             label=f"Local VLM at {self._base}",
         )
 
+        choice = (envelope.get("choices") or [{}])[0]
+        # A length finish cuts the JSON mid-string; surface that specifically.
+        # (Some local servers omit finish_reason — .get keeps them working.)
+        if choice.get("finish_reason") == "length":
+            raise VisionError(
+                f"Local VLM response truncated at max_tokens={self._max_tokens}; "
+                "raise max_tokens= or shorten the on-screen text transcription"
+            )
         try:
             text = envelope["choices"][0]["message"]["content"].strip()
-        except (KeyError, IndexError, AttributeError) as exc:
+        except (KeyError, IndexError, AttributeError, TypeError) as exc:
             raise VisionError(
                 f"Unexpected chat-completions response shape: {str(envelope)[:300]}"
             ) from exc

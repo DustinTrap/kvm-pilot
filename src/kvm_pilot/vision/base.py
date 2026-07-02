@@ -77,7 +77,8 @@ Respond ONLY with a single valid JSON object, no other text, with exactly:
   phase        (string)  one of the known phase tokens below
   description  (string)  one or two sentences describing what is visible
   confidence   (float)   0.0 to 1.0
-  raw_text     (string)  any legible on-screen text, verbatim, or ""
+  raw_text     (string)  legible on-screen text, verbatim, truncated to at
+                          most ~500 characters, or ""
 
 Known phase tokens:
   {", ".join(ALL_PHASES)}
