@@ -552,6 +552,23 @@ def test_reset_prompt_names_the_target_system(emu):
     assert SYS in seen[0]
 
 
+def test_wrong_password_raises_auth_error(emu):
+    # The fake BMC validates the session-create credentials now.
+    d = RedfishDriver("127.0.0.1", "admin", "wrong-pw", port=emu.port, scheme="http",
+                      max_retries=0)
+    with pytest.raises(AuthError):
+        d.get_info()
+
+
+def test_unknown_post_target_404s(emu):
+    # A typo'd action target 404s instead of a lenient 204.
+    http = RedfishHTTP("127.0.0.1", "admin", "secret", port=emu.port, scheme="http",
+                       max_retries=0)
+    http.login()
+    with pytest.raises(KVMPilotError):
+        http.request("POST", "/redfish/v1/Systems/Self.1/Actions/Bogus.Action", json_body={})
+
+
 def test_credentials_pinned_to_configured_origin():
     http = RedfishHTTP("bmc.lan", "u", "pw", port=443, scheme="https")
     assert http._same_origin("/redfish/v1/Systems") is True          # relative

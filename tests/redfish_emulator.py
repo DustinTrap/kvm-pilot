@@ -12,6 +12,7 @@ No Docker, no third-party deps — a ThreadingHTTPServer on 127.0.0.1.
 
 from __future__ import annotations
 
+import base64
 import json
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -76,6 +77,10 @@ class RedfishState:
         self.valid_token: str | None = None
         self.token_seq = 0
         self.expire_token_once = False
+        # A real BMC rejects a session create (or Basic request) with the wrong
+        # credentials — validated so a dropped/garbled-credential regression fails.
+        self.expected_user = "admin"
+        self.expected_passwd = "secret"
         # VirtualMedia strictness knobs (real BMCs vary): reject the optional
         # Inserted/WriteProtected params (Supermicro), or require
         # TransferProtocolType (sushy bug #2072805).
@@ -146,12 +151,27 @@ class _Handler(BaseHTTPRequestHandler):
                 if token != st.valid_token:
                     self._send({"error": {"message": "invalid or expired token"}}, status=401)
                     return True
-            elif not has_basic:
+            elif has_basic:
+                if not self._basic_ok():
+                    self._send({"error": {"message": "invalid credentials"}}, status=401)
+                    return True
+            else:
                 # Session mode, protected resource, no credentials at all
                 # (e.g. a token cleared by close()): unauthenticated.
                 self._send({"error": {"message": "no session token"}}, status=401)
                 return True
         return False
+
+    def _basic_ok(self) -> bool:
+        st = self._state
+        raw = self.headers.get("Authorization", "")
+        if not raw.startswith("Basic "):
+            return False
+        try:
+            user, _, passwd = base64.b64decode(raw[6:]).decode().partition(":")
+        except (ValueError, UnicodeDecodeError):
+            return False
+        return user == st.expected_user and passwd == st.expected_passwd
 
     # -- GET -------------------------------------------------------------
 
@@ -300,6 +320,9 @@ class _Handler(BaseHTTPRequestHandler):
         st = self._state
         st.posts.append((path, body))
         if path == SESSIONS:
+            if body.get("UserName") != st.expected_user or body.get("Password") != st.expected_passwd:
+                self._send({"error": {"message": "invalid credentials"}}, status=401)
+                return
             st.token_seq += 1
             token = f"tok-redfish-{st.token_seq}"
             st.valid_token = token
@@ -355,7 +378,8 @@ class _Handler(BaseHTTPRequestHandler):
             st.last_image = None
             self._send(None, status=204)
             return
-        self._send(None, status=204)
+        # A real BMC 404s an unknown action target (a typo'd @odata.id/target).
+        self._send({"error": {"message": "not found"}}, status=404)
 
     def do_DELETE(self) -> None:
         if self._pre():

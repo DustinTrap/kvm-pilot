@@ -17,6 +17,20 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 # Minimal JPEG: SOI + APP0 header, enough for snapshot()/JPEG-sniffing tests.
 _FAKE_JPEG = bytes.fromhex("ffd8ffe000104a46494600010100000101000000")
 
+# The POST routes KVMClient actually drives. A real kvmd 404s anything else, so
+# a typo'd endpoint in the driver would slip through a lenient fake.
+_VALID_POST_PATHS = frozenset({
+    "/api/auth/login", "/api/auth/logout",
+    "/api/atx/power", "/api/atx/click",
+    "/api/hid/print", "/api/hid/reset", "/api/hid/set_params",
+    "/api/hid/events/send_key", "/api/hid/events/send_shortcut",
+    "/api/hid/events/send_mouse_move", "/api/hid/events/send_mouse_relative",
+    "/api/hid/events/send_mouse_button", "/api/hid/events/send_mouse_wheel",
+    "/api/msd/write", "/api/msd/write_remote", "/api/msd/set_params",
+    "/api/msd/set_connected", "/api/msd/remove", "/api/msd/reset",
+    "/api/gpio/switch", "/api/gpio/pulse",
+})
+
 
 class FakeKVMState:
     """Mutable knobs + captured requests, shared across handler instances."""
@@ -27,6 +41,11 @@ class FakeKVMState:
         self.fail_times = 0
         self.echo_password = False
         self.api_disabled = False  # GL firmware: every /api/* returns 404
+        # Real kvmd 401s /api/* without valid X-KVMD-User/Passwd (or auth_token
+        # cookie). Enforced by default so a dropped-credential regression fails.
+        self.expected_user = "admin"
+        self.expected_passwd = "s3cr3t"
+        self.auth_token = "fake-token-123"
         self.last_headers: dict[str, str] = {}
         self.calls: list[tuple[str, str]] = []
         # Last POST body: declared Content-Length vs bytes actually received.
@@ -83,7 +102,20 @@ class _Handler(BaseHTTPRequestHandler):
             # GL.iNet firmware blocks the API at nginx -> 404 (HTML in reality).
             self._send(b"<html>404</html>", status=404, ctype="text/html")
             return True
+        # Auth: every /api/* needs matching X-KVMD credentials or a valid
+        # auth_token cookie. Login authenticates by body creds, so it's exempt.
+        if path.startswith("/api/") and path != "/api/auth/login" and not self._authed():
+            self._send(b"forbidden", status=403, ctype="text/plain")
+            return True
         return False
+
+    def _authed(self) -> bool:
+        st = self._state
+        if (self.headers.get("X-KVMD-User") == st.expected_user
+                and self.headers.get("X-KVMD-Passwd") == st.expected_passwd):
+            return True
+        cookie = self.headers.get("Cookie", "")
+        return f"auth_token={st.auth_token}" in cookie
 
     def do_GET(self) -> None:
         if self._pre():
@@ -115,8 +147,10 @@ class _Handler(BaseHTTPRequestHandler):
         elif path == "/api/atx/power":
             self._state.powered_on = True
             self._json({})
+        elif path in _VALID_POST_PATHS:
+            self._json({})  # generic OK for a real hid/msd/gpio route
         else:
-            self._json({})  # generic OK for hid / msd / etc.
+            self._json({}, ok=False, status=404)  # a typo'd route 404s, like kvmd
 
 
 class EmulatorServer:

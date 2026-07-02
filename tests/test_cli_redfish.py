@@ -19,8 +19,9 @@ from redfish_emulator import RESET
 
 
 def _argv(emu, *rest: str) -> list[str]:
+    # The fake BMC validates credentials (admin/secret), like a real one.
     return [*rest, "--driver", "redfish", "--host", emu.host,
-            "--port", str(emu.port), "--scheme", "http"]
+            "--port", str(emu.port), "--scheme", "http", "--passwd", "secret"]
 
 
 def _reset_types(emu) -> list[str]:
