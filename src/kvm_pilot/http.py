@@ -28,7 +28,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from typing import Any
+from typing import IO, Any
 
 from .errors import (
     ApiDisabledError,
@@ -237,14 +237,17 @@ class HTTP:
         path: str,
         *,
         params: dict | None = None,
-        data: bytes | None = None,
+        data: bytes | IO[bytes] | None = None,
         content_type: str = "application/x-www-form-urlencoded",
         raw_response: bool = False,
         extra_headers: dict | None = None,
         long_timeout: float | None = None,
         retry: bool = True,
     ) -> Any:
-        attempts = self._max_retries + 1 if retry else 1
+        # A file-like body cannot be re-sent after a partial read, so never retry
+        # a streaming upload (the caller also passes retry=False for it).
+        streaming = data is not None and not isinstance(data, (bytes, bytearray))
+        attempts = self._max_retries + 1 if (retry and not streaming) else 1
         last_exc: Exception | None = None
         for attempt in range(attempts):
             try:
@@ -273,7 +276,7 @@ class HTTP:
         path: str,
         *,
         params: dict | None,
-        data: bytes | None,
+        data: bytes | IO[bytes] | None,
         content_type: str,
         raw_response: bool,
         extra_headers: dict | None,
@@ -338,7 +341,7 @@ class HTTP:
         self,
         path: str,
         params: dict | None = None,
-        body: bytes | None = None,
+        body: bytes | IO[bytes] | None = None,
         content_type: str = "application/x-www-form-urlencoded",
         **kw,
     ) -> Any:

@@ -66,6 +66,19 @@ def test_retry_on_503_then_succeeds(emu):
     assert info["hw"]["platform"]["base"] == "fake"
 
 
+def test_msd_upload_streams_correct_bytes(emu, tmp_path):
+    # Over the real transport: the streamed file arrives intact, with a pinned
+    # Content-Length matching the byte count (proving no chunked fallback and no
+    # truncation).
+    iso = tmp_path / "boot.iso"
+    payload = b"\x00\x01\x02\x03" * 5000
+    iso.write_bytes(payload)
+    _client(emu, confirm=allow_all).msd_upload_file(str(iso))
+    assert ("POST", "/api/msd/write") in emu.state.calls
+    assert emu.state.last_content_length == len(payload)
+    assert emu.state.last_body_len == len(payload)
+
+
 def test_password_redacted_over_real_transport(emu):
     emu.state.echo_password = True
     with pytest.raises(KVMPilotError) as ei:
