@@ -29,6 +29,7 @@ from collections.abc import Callable
 
 from ..errors import TimeoutError, VisionError
 from .base import (
+    ALL_PHASES,
     PHASE_CRASH_SCREEN,
     PHASE_GRUB_MENU,
     PHASE_NO_SIGNAL,
@@ -60,6 +61,7 @@ class ScreenAnalyzer:
         min_confidence: float = 0.70,
         on_state_change: Callable | None = None,
         gate_on_power_signal: bool = True,
+        gate_on_boot_progress: bool = True,
         skip_unchanged_frames: bool = True,
         ocr_rules: list[tuple[str, str]] | None = None,
     ):
@@ -69,6 +71,7 @@ class ScreenAnalyzer:
         self._min_confidence = min_confidence
         self._on_state_change = on_state_change
         self._gate_on_power_signal = gate_on_power_signal
+        self._gate_on_boot_progress = gate_on_boot_progress
         self._skip_unchanged_frames = skip_unchanged_frames
         self._ocr_rules = ocr_rules
         self._last_state: ScreenState | None = None
@@ -103,6 +106,12 @@ class ScreenAnalyzer:
             if cheap is not None:
                 self.cheap_resolves += 1
                 return self._finalize(cheap)
+
+        if gates_on and self._gate_on_boot_progress:
+            bp_state = self._probe_boot_progress()
+            if bp_state is not None:
+                self.cheap_resolves += 1
+                return self._finalize(bp_state)
 
         if gates_on and self._ocr_rules:
             ocr_state = self._probe_ocr()
@@ -159,6 +168,25 @@ class ScreenAnalyzer:
                 return ScreenState(PHASE_NO_SIGNAL, "Capture reports no video source.", 0.99, "")
         except Exception:  # noqa: BLE001 - a probe must never break classification
             return None
+        return None
+
+    def _probe_boot_progress(self) -> ScreenState | None:
+        """Resolve the phase from a device's structured BootProgress, or None.
+
+        The cheapest, most authoritative tier of the sensing hierarchy: a BMC's
+        ``BootProgress.LastState`` maps straight to a phase token, so no snapshot
+        or model call is needed. Devices without the capability (the PiKVM family)
+        return no ``get_boot_progress`` and simply skip this gate.
+        """
+        fn = getattr(self._kvm, "get_boot_progress", None)
+        if fn is None:
+            return None
+        try:
+            token = fn()
+        except Exception:  # noqa: BLE001 - a probe must never break classification
+            return None
+        if token and token != PHASE_UNKNOWN and token in ALL_PHASES:
+            return ScreenState(token, "Structured BootProgress reported by the device.", 0.99, "")
         return None
 
     def _probe_ocr(self) -> ScreenState | None:

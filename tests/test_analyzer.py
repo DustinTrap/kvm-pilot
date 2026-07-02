@@ -272,3 +272,40 @@ def test_wait_loop_backoff_grows_on_repeated_errors(monkeypatch):
     # base interval early, then grows (1.0 -> 1.5 after 10 consecutive errors).
     assert positive[0] == pytest.approx(1.0)
     assert max(positive) > positive[0]
+
+
+class BootProgressKVM:
+    """A device that reports structured BootProgress (like a BMC), no snapshot."""
+
+    def __init__(self, token):
+        self._token = token
+
+    def get_boot_progress(self):
+        return self._token
+
+    def snapshot_base64(self):
+        raise AssertionError("snapshot must not be taken when BootProgress resolves")
+
+
+def test_boot_progress_gate_resolves_without_model_or_snapshot():
+    backend = FakeBackend(["desktop"])
+    analyzer = ScreenAnalyzer(BootProgressKVM("os_running"), backend)
+    state = analyzer.classify()
+    assert state.phase == "os_running"
+    assert state.confidence == 0.99
+    assert backend.calls == 0          # no model call
+    assert analyzer.cheap_resolves == 1
+
+
+def test_boot_progress_unknown_falls_through_to_model():
+    # get_boot_progress() == "unknown" is not actionable -> fall through. Use a
+    # KVM that also serves a frame so the backend runs.
+    backend = FakeBackend(["login_prompt"])
+
+    class KVM(BootProgressKVM):
+        def snapshot_base64(self):
+            return "frame"
+
+    analyzer = ScreenAnalyzer(KVM("unknown"), backend)
+    assert analyzer.classify().phase == "login_prompt"
+    assert backend.calls == 1

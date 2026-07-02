@@ -48,6 +48,7 @@ if TYPE_CHECKING:
     # capability-partial (a BMC — strong on structured state, but no keyboard or
     # screen), so capability-specific subcommands gate on supports() before
     # dispatch instead of AttributeError-ing deep in a handler.
+    from .drivers.base import BootProgress, Logs, Sensors
     from .drivers.fake import FakeDriver
     from .drivers.redfish import RedfishDriver
 
@@ -172,6 +173,27 @@ def _rich_client(args, capability: Capability) -> RichDriver:
 def cmd_info(args) -> int:
     kvm = _client(args, Capability.SYSTEM_INFO)
     print(json.dumps(kvm.get_info(), indent=2, default=str))
+    return 0
+
+
+def cmd_sensors(args) -> int:
+    kvm = _client(args, Capability.SENSORS)
+    print(json.dumps(cast("Sensors", kvm).read_sensors(), indent=2, default=str))
+    return 0
+
+
+def cmd_logs(args) -> int:
+    kvm = _client(args, Capability.LOGS)
+    text = cast("Logs", kvm).get_logs(seek=args.seek)
+    print(text, end="" if text.endswith("\n") else "\n")
+    return 0
+
+
+def cmd_boot_progress(args) -> int:
+    kvm = _client(args, Capability.BOOT_PROGRESS)
+    phase = cast("BootProgress", kvm).get_boot_progress()
+    # None = the device can't report yet (e.g. powered off with no BootProgress).
+    print(phase if phase is not None else "unknown")
     return 0
 
 
@@ -368,6 +390,20 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("output")
     _add_common(p)
     p.set_defaults(func=cmd_snapshot)
+
+    p = sub.add_parser("sensors", help="Read structured sensors (temps/fans/power/voltages) — BMC")
+    _add_common(p)
+    p.set_defaults(func=cmd_sensors)
+
+    p = sub.add_parser("logs", help="Read the device/host event log")
+    p.add_argument("--seek", type=int, default=0,
+                   help="Seconds of lookback (0 = everything available)")
+    _add_common(p)
+    p.set_defaults(func=cmd_logs)
+
+    p = sub.add_parser("boot-progress", help="Structured boot phase (BMC BootProgress)")
+    _add_common(p)
+    p.set_defaults(func=cmd_boot_progress)
 
     p = sub.add_parser("power", help="Power action")
     p.add_argument("action", choices=["on", "off", "off-hard", "reset"])

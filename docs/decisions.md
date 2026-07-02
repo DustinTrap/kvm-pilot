@@ -164,6 +164,15 @@ request; re-firing a power/HID/MSD POST could run it twice. Connect-phase
 failures (nothing was sent) stay retryable for every method. Retrying 409/503
 stays safe for all methods: those are definitive "rejected" responses.
 
+### The analyzer consults structured BootProgress before snapshotting
+The sensing hierarchy prefers structured signals over pixels. `ScreenAnalyzer`
+now has a `BootProgress` gate (after the power/no-signal probe, before the
+snapshot): if the driver exposes `get_boot_progress()` and returns an actionable
+phase token, that resolves the classification at 0.99 with no snapshot and no
+model call. Devices without the capability (the PiKVM family) skip it and fall
+through to the pixel path. This makes a BMC classifiable with zero pixels and
+gives #13's roadmap its first structured-tier consumer.
+
 ### Redfish read_sensors() uses $expand where advertised
 Real BMCs expose 100-400 Sensor resources; one GET per member (each a fresh
 TCP+TLS handshake) is 10s of seconds to minutes, and the sensing hierarchy
