@@ -20,7 +20,7 @@ from kvm_pilot.errors import (
     SafetyError,
 )
 from kvm_pilot.safety import deny_all
-from redfish_emulator import RESET, SESSIONS, VM_EJECT, VM_INSERT
+from redfish_emulator import RESET, SESSIONS, SYS, VM_EJECT, VM_INSERT
 
 # The `emu` fixture (a running RedfishEmulator) is shared from tests/conftest.py.
 
@@ -444,6 +444,34 @@ def test_reauth_does_not_loop_on_bad_credentials(emu):
     emu.state.password_change_required = True  # the re-login POST will now fail
     with pytest.raises(AuthError):
         d.get_info()
+
+
+def test_chassis_and_manager_resolved_via_system_links(emu):
+    # #44: on multi-node gear the Chassis/Managers collections list a decoy first,
+    # so index-0 selection targets the wrong node. The driver must follow the
+    # ComputerSystem's Links.Chassis / Links.ManagedBy instead.
+    emu.state.multi_node = True
+    d = make(emu)
+    # chassis-sourced sensors resolve only if the REAL chassis was chosen
+    assert d.read_sensors()["temperatures"][0]["reading"] == 42
+    # manager-sourced logs resolve only if the REAL manager was chosen
+    assert "system booted" in d.get_logs()
+
+
+def test_out_of_range_system_index_is_a_hard_error(emu):
+    # A bad index must not silently fall back to member 0 (wrong node for a
+    # destructive op) — it raises, listing the members.
+    with pytest.raises(CapabilityError, match="out of range"):
+        make(emu, system_index=5).get_info()
+
+
+def test_reset_prompt_names_the_target_system(emu):
+    # The confirm description must name the resolved ComputerSystem so the
+    # operator sees which member a destructive op hits.
+    seen: list[str] = []
+    emu.state.power_state = "On"
+    make(emu, confirm=lambda op, desc: seen.append(desc) or True).power_off()
+    assert SYS in seen[0]
 
 
 def test_credentials_pinned_to_configured_origin():

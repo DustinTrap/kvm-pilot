@@ -128,6 +128,11 @@ class RedfishDriver(CapabilityMixin):
         verify_ssl: bool = False,
         timeout: float = 30.0,
         auth: str = "session",
+        # Which ComputerSystem member to drive on multi-node gear (0-based).
+        # Programmatic-only for now: from_config / the CLI do not expose it, so a
+        # profile always targets member 0. An out-of-range value is a hard error
+        # (never a silent fall-back). Chassis/manager are resolved from the chosen
+        # system's Links, not this index.
         system_index: int = 0,
         power_wait_timeout: float = 60.0,
         async_timeout: float = 120.0,
@@ -225,11 +230,35 @@ class RedfishDriver(CapabilityMixin):
         members = self._members(uri)
         if not members:
             raise CapabilityError(f"Redfish {what} collection is empty")
-        idx = self._system_index if 0 <= self._system_index < len(members) else 0
+        idx = self._system_index
+        if not 0 <= idx < len(members):
+            # NEVER silently fall back to member 0: on multi-node gear that would
+            # target the wrong ComputerSystem with a destructive op.
+            raise CapabilityError(
+                f"system_index={idx} is out of range for the {what} collection "
+                f"({len(members)} member(s)): {members}. Pass a valid system_index."
+            )
         if len(members) > 1:
             logger.info("Redfish %s has %d members; using index %d (%s)",
                         what, len(members), idx, members[idx])
         return members[idx]
+
+    def _linked_uri(self, link_name: str, collection_link: dict | None, what: str) -> str:
+        """Resolve a chassis/manager URI from the chosen System's ``Links``.
+
+        DSP0268 associates a ComputerSystem with its chassis (``Links.Chassis``)
+        and manager (``Links.ManagedBy``). The global Chassis/Managers collection
+        ordering has NO defined correspondence to Systems ordering, so indexing it
+        (as the old code did) can target a different node than power ops on
+        multi-node gear (blades, Supermicro twins). Fall back to the collection
+        only when the System advertises no such link.
+        """
+        linked = (self._system().get("Links") or {}).get(link_name)
+        if isinstance(linked, list) and linked and isinstance(linked[0], dict):
+            uri = linked[0].get("@odata.id")
+            if uri:
+                return uri
+        return self._pick_member(collection_link, what)
 
     def _system(self) -> dict:
         if self._system_doc is None:
@@ -246,12 +275,14 @@ class RedfishDriver(CapabilityMixin):
 
     def _chassis(self) -> dict:
         if self._chassis_uri is None:
-            self._chassis_uri = self._pick_member(self._root().get("Chassis"), "Chassis")
+            self._chassis_uri = self._linked_uri("Chassis", self._root().get("Chassis"), "Chassis")
         return self._http.get_json(self._chassis_uri)
 
     def _manager_uri_resolved(self) -> str:
         if self._manager_uri is None:
-            self._manager_uri = self._pick_member(self._root().get("Managers"), "Managers")
+            self._manager_uri = self._linked_uri(
+                "ManagedBy", self._root().get("Managers"), "Managers"
+            )
         return self._manager_uri
 
     def _reset_info(self) -> tuple[str, list[str]]:
@@ -432,7 +463,10 @@ class RedfishDriver(CapabilityMixin):
                         "on" if target_on else "off")
             return
         reset_type = self._choose_reset_type(intent, powered_on)
-        if not self.safety.guard(op, f"{desc} via ComputerSystem.Reset({reset_type})"):
+        # Name the resolved system in the prompt so the operator can see exactly
+        # which ComputerSystem member a destructive op targets on multi-node gear.
+        target_desc = f"{desc} [{self._system_uri}] via ComputerSystem.Reset({reset_type})"
+        if not self.safety.guard(op, target_desc):
             return  # dry-run: gated and skipped
         target, _ = self._reset_info()
         try:
