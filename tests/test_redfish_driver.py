@@ -432,6 +432,33 @@ def test_mount_iso_usb_threads_cdrom_flag(emu):
     assert emu.state.inserted is True
 
 
+def test_redfish_gated_methods_block_on_deny(emu):
+    # #52: every destructive RedfishDriver method must gate. States are set so a
+    # power op does not no-op before the guard (see #42), then deny must raise
+    # and no destructive POST reaches the BMC.
+    emu.state.power_state = "On"
+    with pytest.raises(SafetyError):
+        make(emu, confirm=deny_all).power_off()
+    emu.state.power_state = "On"
+    with pytest.raises(SafetyError):
+        make(emu, confirm=deny_all).power_off_hard()
+    emu.state.power_state = "Off"
+    with pytest.raises(SafetyError):
+        make(emu, confirm=deny_all).power_on()
+    with pytest.raises(SafetyError):
+        make(emu, confirm=deny_all).reset_hard()
+    with pytest.raises(SafetyError):
+        make(emu, confirm=deny_all).mount_iso("http://srv/x.iso")
+    with pytest.raises(SafetyError):
+        make(emu, confirm=deny_all).msd_disconnect()
+    assert not any(p in (RESET, VM_INSERT, VM_EJECT) for p, _ in emu.state.posts)
+
+
+def test_redfish_eject_skipped_under_dry_run(emu):
+    make(emu, dry_run=True).msd_disconnect()
+    assert not any(p == VM_EJECT for p, _ in emu.state.posts)
+
+
 def _session_posts(emu) -> int:
     return sum(1 for path, _ in emu.state.posts if path == SESSIONS)
 

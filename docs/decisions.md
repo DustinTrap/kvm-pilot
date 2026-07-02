@@ -110,6 +110,16 @@ resolution.
 
 ## Safety
 
+### Guard fail-open is covered by a systematic contract test
+`SafetyPolicy.guard` returns True for any op id NOT in `DESTRUCTIVE_OPS` (so
+adding a driver method doesn't accidentally gate a read) — but that means a
+typo'd op id or a dropped `guard()` call silently un-gates a destructive method.
+Because gating is the tool's one safety mechanism (and it's exposed to LLM
+agents), a table-driven contract test exercises every gated method under
+deny/dry-run/recording, and a source-scan invariant asserts every literal op id
+passed to `.guard()` is registered. A dropped guard now fails CI (verified by
+mutation); previously the suite stayed green.
+
 ### Dry-run short-circuits BEFORE the confirm callback
 `SafetyPolicy.guard` checks `dry_run` first and never invokes `confirm` for a
 skipped call. The old order (confirm first) made `--dry-run` prompt — and in

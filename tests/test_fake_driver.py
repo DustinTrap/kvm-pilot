@@ -178,3 +178,37 @@ def test_analyzer_reports_no_signal_when_powered_but_dark():
 
     analyzer = ScreenAnalyzer(FakeDriver(powered=True, video_signal=False), _ExplodingBackend())
     assert analyzer.classify().phase == PHASE_NO_SIGNAL
+
+
+# -- systematic safety-guard coverage (#52), FakeDriver side ---------------
+
+_GATED_FAKE = [
+    ("power_on", lambda d: d.power_on()),
+    ("power_off", lambda d: d.power_off()),
+    ("power_off_hard", lambda d: d.power_off_hard()),
+    ("reset_hard", lambda d: d.reset_hard()),
+    ("type_text", lambda d: d.type_text("x")),
+    ("press_key", lambda d: d.press_key("Enter")),
+    ("send_shortcut", lambda d: d.send_shortcut("MetaLeft")),
+    ("mouse_click", lambda d: d.mouse_click()),
+    ("msd_connect", lambda d: d.msd_connect()),
+    ("msd_disconnect", lambda d: d.msd_disconnect()),
+    ("gpio_switch", lambda d: d.gpio_switch("r", True)),
+    ("gpio_pulse", lambda d: d.gpio_pulse("r")),
+]
+_GATED_FAKE_IDS = [e[0] for e in _GATED_FAKE]
+
+
+@pytest.mark.parametrize("_id,call", _GATED_FAKE, ids=_GATED_FAKE_IDS)
+def test_fake_gated_method_blocks_on_deny(_id, call):
+    d = FakeDriver(powered=True, confirm=deny_all)
+    with pytest.raises(SafetyError):
+        call(d)
+    assert d.actions == []  # a fail-open op would have recorded an action
+
+
+@pytest.mark.parametrize("_id,call", _GATED_FAKE, ids=_GATED_FAKE_IDS)
+def test_fake_gated_method_skipped_under_dry_run(_id, call):
+    d = FakeDriver(powered=True, dry_run=True)
+    call(d)
+    assert d.actions == []
