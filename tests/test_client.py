@@ -366,3 +366,103 @@ def test_every_guard_literal_is_a_registered_destructive_op():
         used |= set(pat.findall(py.read_text()))
     assert used  # sanity: the scan found guard() calls
     assert used <= DESTRUCTIVE_OPS, f"guard() op ids not registered: {used - DESTRUCTIVE_OPS}"
+
+
+# -- broaden KVMClient public-surface coverage (#53) -----------------------
+
+def test_check_auth_true_on_success(client, fake_http):
+    assert client.check_auth() is True
+    assert "/api/auth/check" in fake_http.paths()
+
+
+def test_logout_clears_token(client, fake_http):
+    client._http._auth_token = "tok"
+    client.logout()
+    assert "/api/auth/logout" in fake_http.paths()
+    assert fake_http._auth_token is None
+
+
+def test_get_logs_and_metrics_decode_raw(client, fake_http):
+    fake_http.results["/api/log"] = b"line1\nline2\n"
+    fake_http.results["/api/export/prometheus/metrics"] = b"kvmd_up 1\n"
+    assert client.get_logs() == "line1\nline2\n"
+    assert client.get_metrics() == "kvmd_up 1\n"
+
+
+def test_snapshot_ocr_sends_region_and_decodes(client, fake_http):
+    fake_http.results["/api/streamer/snapshot"] = b"GNU GRUB"
+    text = client.snapshot_ocr(region=(1, 2, 3, 4))
+    assert text == "GNU GRUB"
+    call = [c for c in fake_http.calls if c["path"] == "/api/streamer/snapshot"][0]
+    assert call["params"]["ocr"] == "true"
+    assert call["params"]["ocr_left"] == 1 and call["params"]["ocr_bottom"] == 4
+
+
+def test_state_getters_hit_their_endpoints(client, fake_http):
+    for method, path in [
+        (client.get_streamer_state, "/api/streamer"),
+        (client.get_hid_state, "/api/hid"),
+        (client.get_gpio_state, "/api/gpio"),
+        (client.get_msd_state, "/api/msd"),
+        (client.get_atx_state, "/api/atx"),
+        (client.redfish_get_system, "/api/redfish/v1/Systems/0"),
+    ]:
+        method()
+        assert path in fake_http.paths()
+
+
+def test_reset_hid_and_set_params(client, fake_http):
+    client.reset_hid()
+    client.set_hid_params(keyboard_output="usb", jiggler=True)
+    paths = fake_http.paths()
+    assert "/api/hid/reset" in paths and "/api/hid/set_params" in paths
+    sp = [c for c in fake_http.calls if c["path"] == "/api/hid/set_params"][0]
+    assert sp["params"]["jiggler"] == "true"
+
+
+def test_mouse_rel_and_scroll(client, fake_http):
+    client.mouse_move_rel(3, -4)
+    client.mouse_scroll(delta_y=-2)
+    paths = fake_http.paths()
+    assert "/api/hid/events/send_mouse_relative" in paths
+    assert "/api/hid/events/send_mouse_wheel" in paths
+
+
+def test_key_event_posts_state(client, fake_http):
+    client.key_event("Escape", True)
+    call = [c for c in fake_http.calls if c["path"] == "/api/hid/events/send_key"][0]
+    assert call["params"]["state"] == "true"
+
+
+def test_wait_for_power_state_returns_when_reached(client, fake_http):
+    fake_http.results["/api/atx"] = {"enabled": True, "leds": {"power": True}}
+    client.wait_for_power_state(True, timeout=1, poll=0.0)  # already on -> returns
+
+
+def test_wait_for_power_state_times_out(client, fake_http):
+    from kvm_pilot.errors import TimeoutError as KVMTimeoutError
+    fake_http.results["/api/atx"] = {"enabled": True, "leds": {"power": False}}
+    with pytest.raises(KVMTimeoutError):
+        client.wait_for_power_state(True, timeout=0.05, poll=0.0)
+
+
+def test_send_password_types_without_logging_secret(client, fake_http, caplog):
+    import logging
+    with caplog.at_level(logging.DEBUG):
+        client.send_password("hunter2")
+    assert "/api/hid/print" in fake_http.paths()
+    assert "hunter2" not in caplog.text
+
+
+def test_msd_upload_url_posts_write_remote(client, fake_http):
+    client.msd_upload_url("https://srv/x.iso", image_name="x.iso")
+    assert "/api/msd/write_remote" in fake_http.paths()
+
+
+def test_enter_bios_cycles_then_spams_key(client, fake_http, monkeypatch):
+    import kvm_pilot.client as cmod
+    monkeypatch.setattr(cmod.time, "sleep", lambda *_: None)  # no real waits
+    client.enter_bios(key="F2")
+    paths = fake_http.paths()
+    assert "/api/atx/power" in paths                       # hard_cycle
+    assert "/api/hid/events/send_key" in paths             # key spam
