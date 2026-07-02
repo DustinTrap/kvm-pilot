@@ -84,6 +84,8 @@ class RedfishState:
         # When set, the Chassis/Managers collections list a decoy member first;
         # only ComputerSystem.Links.Chassis/ManagedBy point at the real node.
         self.multi_node = False
+        # Override the LogService entries (to test time-based seek). None = default.
+        self.log_entries: list[dict] | None = None
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -225,6 +227,8 @@ class _Handler(BaseHTTPRequestHandler):
         if path == LOG_LCLOG:
             return {"@odata.id": LOG_LCLOG, "Entries": {"@odata.id": LOG_ENTRIES}}
         if path == LOG_ENTRIES:
+            if st.log_entries is not None:
+                return {"Members": st.log_entries}
             return {
                 "Members": [
                     {"Created": "2026-06-27T00:00:00Z", "Severity": "OK",

@@ -28,6 +28,7 @@ from __future__ import annotations
 import logging
 import time
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 from ...errors import CapabilityError, KVMPilotError, TimeoutError
@@ -112,6 +113,43 @@ def _param_missing(exc: KVMPilotError, name: str) -> bool:
         if name in (info.get("MessageArgs") or []) or name in str(info.get("Message", "")):
             return True
     return False
+
+
+# LogEntry.Created at/before this epoch (~1971) means an unset RTC (a fresh or
+# clockless BMC); a time-based log seek includes such entries rather than
+# dropping them.
+_UNSET_RTC_EPOCH = 31_536_000
+
+
+def _log_entry_epoch(created: object) -> float | None:
+    """Parse a Redfish LogEntry.Created (ISO 8601) to a Unix epoch, or None."""
+    if not isinstance(created, str) or not created:
+        return None
+    try:
+        dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=UTC)
+    return dt.timestamp()
+
+
+def _log_within_lookback(created: object, cutoff: float | None) -> bool:
+    """Whether a log entry falls within a ``seconds`` lookback (cutoff epoch).
+
+    ``cutoff`` is None for seek==0 (include everything). Otherwise include
+    entries at/after the cutoff — but a missing/unparseable timestamp or an
+    unset-RTC (epoch) stamp is included, since a strict filter would silently
+    return nothing on fresh or clockless BMCs, and LogEntry ordering varies by
+    vendor (iDRAC newest-first, OpenBMC oldest-first) so index skipping is
+    unstable.
+    """
+    if cutoff is None:
+        return True
+    ts = _log_entry_epoch(created)
+    if ts is None or ts <= _UNSET_RTC_EPOCH:
+        return True
+    return ts >= cutoff
 
 
 class RedfishDriver(CapabilityMixin):
@@ -573,8 +611,10 @@ class RedfishDriver(CapabilityMixin):
     def get_logs(self, seek: int = 0, follow: bool = False) -> str:
         if follow:
             raise CapabilityError("Redfish has no log tail-follow; call get_logs() without follow")
+        # seek is SECONDS of lookback — the same contract as the PiKVM driver
+        # (kvmd's /api/log?seek=N), NOT an entry index. Filter by LogEntry.Created.
+        cutoff = time.time() - seek if seek else None
         lines: list[str] = []
-        idx = 0
         uri: str | None = self._resolve_log_entries()
         seen: set[str] = set()
         while uri:
@@ -583,13 +623,13 @@ class RedfishDriver(CapabilityMixin):
             seen.add(uri)
             coll = self._http.get_json(uri)
             for e in coll.get("Members", []) or []:
-                if idx >= seek:
-                    sev = e.get("Severity") or e.get("MessageSeverity") or ""
-                    lines.append(
-                        f"{e.get('Created', '')}\t{sev}\t"
-                        f"{e.get('MessageId', '')}\t{e.get('Message', '')}"
-                    )
-                idx += 1
+                if not _log_within_lookback(e.get("Created"), cutoff):
+                    continue
+                sev = e.get("Severity") or e.get("MessageSeverity") or ""
+                lines.append(
+                    f"{e.get('Created', '')}\t{sev}\t"
+                    f"{e.get('MessageId', '')}\t{e.get('Message', '')}"
+                )
             uri = coll.get("Members@odata.nextLink")
         return "\n".join(lines)
 

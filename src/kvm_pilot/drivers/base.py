@@ -117,6 +117,11 @@ class Logs(Protocol):
     """Read device or host event logs (kvmd journal, Redfish SEL / lifecycle
     log, IPMI SEL).
 
+    ``seek`` is **seconds of lookback** — ``seek=3600`` returns the last hour —
+    uniformly across drivers (kvmd's fixed ``/api/log?seek=N`` semantics; the
+    Redfish driver filters ``LogEntry.Created`` to match). ``seek=0`` (default)
+    returns everything available.
+
     ``follow`` (tail -f) is a streaming mode the current blocking transport
     cannot serve; drivers raise ``CapabilityError`` for it until a streaming
     entry point exists (see ``PiKVMDriver`` / ``RedfishDriver``).

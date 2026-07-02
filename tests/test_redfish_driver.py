@@ -247,8 +247,36 @@ def test_get_logs_pages_and_renders(emu):
     assert "Warning" in text  # MessageSeverity fallback parsed
 
 
-def test_get_logs_seek(emu):
-    assert len(make(emu).get_logs(seek=1).splitlines()) == 1
+def test_get_logs_seek_is_seconds_of_lookback(emu):
+    # #46: seek is SECONDS of lookback (the cross-driver contract), not an entry
+    # index. Timestamps are computed relative to now so this is clock-stable.
+    import datetime as _dt
+
+    now = _dt.datetime.now(_dt.UTC)
+
+    def iso(delta_s: int) -> str:
+        return (now - _dt.timedelta(seconds=delta_s)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    emu.state.log_entries = [
+        {"Created": iso(10), "MessageId": "X.recent", "Message": "recent event"},
+        {"Created": iso(7200), "MessageId": "X.old", "Message": "two hours ago"},
+    ]
+    text = make(emu).get_logs(seek=3600)  # last hour
+    assert "recent event" in text
+    assert "two hours ago" not in text
+    assert "two hours ago" in make(emu).get_logs()  # seek=0 -> everything
+
+
+def test_get_logs_keeps_unset_rtc_and_stampless_entries(emu):
+    # A strict time filter would return nothing on a fresh/clockless BMC; unset-RTC
+    # (epoch) and timestamp-less entries are kept even under a tight lookback.
+    emu.state.log_entries = [
+        {"Created": "1970-01-01T00:00:00Z", "MessageId": "X.epoch", "Message": "clockless boot"},
+        {"MessageId": "X.nostamp", "Message": "no timestamp"},
+    ]
+    text = make(emu).get_logs(seek=60)
+    assert "clockless boot" in text
+    assert "no timestamp" in text
 
 
 def test_logs_follow_raises(emu):
