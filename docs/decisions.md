@@ -152,6 +152,18 @@ request; re-firing a power/HID/MSD POST could run it twice. Connect-phase
 failures (nothing was sent) stay retryable for every method. Retrying 409/503
 stays safe for all methods: those are definitive "rejected" responses.
 
+### Redfish InsertMedia sends only `Image`
+`Inserted`/`WriteProtected` are optional (DSP2046) and merely restate the insert
+defaults, but strict firmware (Supermicro X11/X12, some Lenovo/older iDRAC)
+*rejects* an InsertMedia body that carries them (the fix OpenStack sushy adopted
+for Supermicro). So the driver POSTs `{"Image": source}` alone. For the inverse
+quirk — a BMC that *requires* `TransferProtocolType` (sushy bug #2072805,
+reported as 400 `ActionParameterMissing`) — it retries once with the type
+derived from the URL scheme. Full `@Redfish.ActionInfo`-driven parameter
+negotiation (as `_reset_info` does for Reset) was deliberately not built: the
+omit-plus-targeted-retry pair covers the field-known cases with far less code
+(CLAUDE.md: smallest change that works, no speculative generality).
+
 ### Redfish re-authenticates once on a mid-flight 401
 Real BMCs terminate idle sessions (DSP0266 SessionService inactivity timeout,
 ~30 min default) and drop every token on reboot, and a token cleared by

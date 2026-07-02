@@ -274,12 +274,52 @@ def test_sensors_unified_model(emu):
 
 # -- virtual media ---------------------------------------------------------
 
+def _insert_bodies(emu) -> list[dict]:
+    return [b for p, b in emu.state.posts if p == VM_INSERT]
+
+
 def test_mount_iso_inserts_and_returns_name(emu):
     name = make(emu).mount_iso("http://srv/imgs/ubuntu-24.04.iso?sig=x")
     assert name == "ubuntu-24.04.iso"
     assert emu.state.inserted is True
     assert emu.state.last_image == "http://srv/imgs/ubuntu-24.04.iso?sig=x"
     assert any(p == VM_INSERT for p, _ in emu.state.posts)
+
+
+def test_insert_media_sends_only_image(emu):
+    # #43: Inserted/WriteProtected are optional and strict BMCs (Supermicro)
+    # reject them. The body must carry Image alone.
+    make(emu).mount_iso("http://srv/x.iso")
+    assert _insert_bodies(emu) == [{"Image": "http://srv/x.iso"}]
+
+
+def test_insert_media_succeeds_against_strict_bmc(emu):
+    # A BMC that 400s on optional params must still mount, since we omit them.
+    emu.state.vm_reject_optional_params = True
+    make(emu).mount_iso("http://srv/x.iso")
+    assert emu.state.inserted is True
+    assert _insert_bodies(emu) == [{"Image": "http://srv/x.iso"}]
+
+
+def test_insert_media_retries_with_transfer_protocol_when_required(emu):
+    # Inverse quirk (sushy #2072805): a BMC that requires TransferProtocolType
+    # answers 400 ActionParameterMissing; the driver retries once with it,
+    # derived from the URL scheme.
+    emu.state.vm_require_transfer_protocol = True
+    make(emu).mount_iso("https://srv/x.iso")
+    assert emu.state.inserted is True
+    bodies = _insert_bodies(emu)
+    assert len(bodies) == 2
+    assert "TransferProtocolType" not in bodies[0]
+    assert bodies[1] == {"Image": "https://srv/x.iso", "TransferProtocolType": "HTTPS"}
+
+
+def test_insert_media_missing_param_without_scheme_still_raises(emu):
+    # If the param is required but we can't derive it (no URL scheme), surface
+    # the original 400 rather than retrying blindly.
+    emu.state.vm_require_transfer_protocol = True
+    with pytest.raises(KVMPilotError):
+        make(emu).mount_iso("just-a-name.iso")
 
 
 def test_msd_disconnect_ejects(emu):

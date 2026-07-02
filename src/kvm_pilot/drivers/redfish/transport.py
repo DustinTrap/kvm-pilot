@@ -182,8 +182,26 @@ class RedfishHTTP:
             if isinstance(i, dict)
         )
 
+    @staticmethod
+    def _extended_info(body: dict | None) -> list[dict]:
+        """The Redfish @Message.ExtendedInfo entries from an error body, if any."""
+        if not isinstance(body, dict):
+            return []
+        err = body.get("error")
+        infos = err.get("@Message.ExtendedInfo", []) if isinstance(err, dict) else []
+        infos = infos or body.get("@Message.ExtendedInfo", []) or []
+        return [i for i in infos if isinstance(i, dict)]
+
     def _raise(self, status: int, body: dict | None, raw: str) -> None:
         detail = self._redact(self._extract_message(body) or raw[:400])
+        err = self._build_error(status, body, detail)
+        # Attach the structured ExtendedInfo so callers can react to specific
+        # MessageIds (e.g. InsertMedia's ActionParameterMissing) without string
+        # scraping the human-facing detail.
+        err.extended_info = self._extended_info(body)  # type: ignore[attr-defined]
+        raise err
+
+    def _build_error(self, status: int, body: dict | None, detail: str) -> KVMPilotError:
         if status in (401, 403):
             if self._password_change_required(body):
                 err = AuthError(
@@ -193,13 +211,13 @@ class RedfishHTTP:
                 )
                 # Re-login cannot fix this and would leak a session slot.
                 err.password_change_required = True  # type: ignore[attr-defined]
-                raise err
-            raise AuthError(f"Authentication failed (HTTP {status}): {detail}", status)
+                return err
+            return AuthError(f"Authentication failed (HTTP {status}): {detail}", status)
         if status == 409:
-            raise BusyError(f"Resource busy (HTTP {status}): {detail}", status)
+            return BusyError(f"Resource busy (HTTP {status}): {detail}", status)
         if status == 503:
-            raise UnavailableError(f"Service unavailable (HTTP {status}): {detail}", status)
-        raise KVMPilotError(f"Redfish HTTP {status}: {detail}", status)
+            return UnavailableError(f"Service unavailable (HTTP {status}): {detail}", status)
+        return KVMPilotError(f"Redfish HTTP {status}: {detail}", status)
 
     @staticmethod
     def _is_retryable(exc: Exception, method: str) -> bool:
