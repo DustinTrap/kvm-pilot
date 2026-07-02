@@ -11,7 +11,7 @@ import pytest
 
 from emulator import EmulatorServer
 from kvm_pilot import KVMClient
-from kvm_pilot.errors import KVMPilotError, SafetyError
+from kvm_pilot.errors import AuthError, KVMPilotError, SafetyError
 from kvm_pilot.safety import allow_all, deny_all
 
 
@@ -93,3 +93,36 @@ def test_get_logs_returns_text(emu):
     text = _client(emu).get_logs()
     assert "kvmd started" in text
     assert ("GET", "/api/log") in emu.state.calls
+
+
+def test_wrong_password_raises_auth_error(emu):
+    # The fake now validates credentials, like real kvmd.
+    from kvm_pilot import KVMClient
+    c = KVMClient(emu.host, "admin", "wrong-pw", port=emu.port, scheme="http")
+    c._http._backoff_base = 0.0
+    with pytest.raises(AuthError):
+        c.get_info()
+
+
+def test_unknown_post_route_404s(emu):
+    # A typo'd endpoint 404s instead of a lenient 200 — so a driver typo would fail.
+    c = _client(emu)
+    with pytest.raises(KVMPilotError):
+        c._http.post("/api/hid/typodest")
+
+
+def test_credentials_are_sent_on_state_changing_post(emu):
+    _client(emu, confirm=allow_all).power_on()
+    assert ("POST", "/api/atx/power") in emu.state.calls
+    assert emu.state.last_headers.get("x-kvmd-user") == "admin"
+    assert emu.state.last_headers.get("x-kvmd-passwd") == "s3cr3t"
+
+
+def test_network_guard_blocks_non_loopback():
+    import socket
+    s = socket.socket()
+    try:
+        with pytest.raises(RuntimeError, match="Blocked external network"):
+            s.connect(("198.51.100.7", 80))  # TEST-NET-2, never dialed
+    finally:
+        s.close()
