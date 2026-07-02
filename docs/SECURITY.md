@@ -41,6 +41,34 @@ exploits against third-party devices or live hosts in a public report.
   privilege boundary. Anyone who can run your script with valid credentials can
   disable them.
 
+## Untrusted screen content (prompt injection)
+
+The vision layer transcribes whatever is on the target's screen — including a
+`raw_text` field — and a compromised or hostile machine can display text crafted
+to manipulate an LLM agent that consumes the classification (for example, text
+telling the agent to power-cycle or type a command). Treat **all screen content
+as untrusted input**, exactly like a web page an agent scrapes.
+
+What the design guarantees today:
+
+- **A classification never triggers a destructive action on its own.** `classify()`
+  and `wait_for_state()` return *data*; they never call power, HID, virtual-media,
+  or GPIO. Every state-changing op routes through `SafetyPolicy.guard`, and you
+  wire those calls yourself (a regression test asserts a hostile classification
+  result causes no device-state change).
+- **`raw_text` is length-bounded** (the prompt caps the transcription) so a screen
+  can't flood an agent's context.
+- **Over MCP, the destructive `power` tool is disabled unless the operator sets
+  `KVM_PILOT_MCP_ALLOW_POWER`** in the server environment — a screen-injected
+  agent cannot enable it, and the destructive *act* tools (type/key/mount) are not
+  exposed yet.
+
+What you must still do: if you wire an agent to act on classifications, gate every
+destructive step behind human/policy approval — do not let free text from the
+screen select an action. The MCP server's per-invocation approval model
+([#61](https://github.com/DustinTrap/kvm-pilot/issues/61)) is the structural
+version of this.
+
 ## Scope
 
 In scope: credential handling, secret redaction, the safety-gating logic, and
