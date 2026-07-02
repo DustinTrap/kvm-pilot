@@ -38,7 +38,7 @@ dependencies = []
 totp = ["pyotp>=2.10.0"]
 ws = ["websocket-client>=1.7"]
 dev = [
-    "pytest>=8.0",
+    "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
     "ruff>=0.6",
     "mypy>=2.1.0",
