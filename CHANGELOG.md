@@ -38,6 +38,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   ([#42](https://github.com/DustinTrap/kvm-pilot/issues/42)).
 - Redfish: transitional `PowerState` values (`PoweringOn`/`PoweringOff`/
   `Paused`) map to `unknown`, not `power_off`.
+- Vision: a truncated model response (Anthropic `stop_reason=max_tokens` /
+  OpenAI-compat `finish_reason=length`) now raises a specific "truncated"
+  `VisionError` instead of a misleading "did not return valid JSON"; the default
+  `max_tokens` is 1024 and the prompt bounds `raw_text` to ~500 chars so
+  text-dense boot screens stop overflowing it
+  ([#49](https://github.com/DustinTrap/kvm-pilot/issues/49)). Anthropic model
+  auto-resolution now skips entries whose `capabilities.image_input` is
+  explicitly unsupported, instead of blindly taking the first id
+  ([#50](https://github.com/DustinTrap/kvm-pilot/issues/50)).
 - Vision: `VisionError` is honored on every failure path (non-JSON 200s,
   non-object JSON, raw socket errors); model confidence is clamped/normalized
   (percent-scale answers no longer defeat `min_confidence`); the

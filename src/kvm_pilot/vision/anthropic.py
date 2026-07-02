@@ -5,7 +5,8 @@ No model version is hard-coded. Resolution order for the model id:
   1. Explicit ``model=`` argument.
   2. ``KVM_PILOT_VISION_MODEL`` environment variable.
   3. Newest vision-capable model discovered at runtime via the Models API
-     (GET /v1/models), picking the most recently created entry.
+     (GET /v1/models): the most recently created entry whose
+     ``capabilities.image_input`` is not explicitly unsupported.
   4. As a last resort, if the Models API is unreachable, raise a clear error
      telling the user to pin a model — we deliberately do NOT bake in a guess
      that could rot.
@@ -31,7 +32,9 @@ _API_BASE = "https://api.anthropic.com"
 _MESSAGES = "/v1/messages"
 _MODELS = "/v1/models"
 _VERSION = "2023-06-01"
-_DEFAULT_MAX_TOKENS = 512
+# Headroom for the JSON envelope plus a bounded raw_text transcription; a
+# text-dense boot console overflows a smaller budget and truncates the JSON.
+_DEFAULT_MAX_TOKENS = 1024
 
 
 class AnthropicBackend(VisionBackend):
@@ -62,11 +65,13 @@ class AnthropicBackend(VisionBackend):
     # -- model discovery -------------------------------------------------
 
     def _resolve_latest_model(self) -> str:
-        """Pick the newest model from the Models API.
+        """Pick the newest vision-capable model from the Models API.
 
-        The Models API returns entries newest-first. We take the first id that
-        looks like a current general model (skips any we can't use). We do not
-        hard-code a fallback version string on purpose.
+        The API lists entries newest-first. We return the first whose
+        ``capabilities.image_input.supported`` is not explicitly ``false`` — a
+        missing/absent capabilities tree is treated as usable, so older or
+        proxied API responses keep the plain newest-first behavior. No fallback
+        version string is hard-coded on purpose.
         """
         try:
             data = self._http_get_json(_MODELS)
@@ -81,14 +86,18 @@ class AnthropicBackend(VisionBackend):
         if not models:
             raise VisionError("Anthropic Models API returned no models.")
 
-        # The API lists newest first. Prefer a non-legacy entry; all current
-        # Claude models accept image input, so the newest is the right default
-        # for cost/latency the user can override upward if they want.
         for entry in models:
             mid = entry.get("id", "")
-            if mid:
-                return mid
-        raise VisionError("No usable model id found in Models API response.")
+            if not mid:
+                continue
+            caps = entry.get("capabilities") or {}
+            if (caps.get("image_input") or {}).get("supported") is False:
+                continue  # explicitly no image input — can't classify screenshots
+            return mid
+        raise VisionError(
+            "No vision-capable model found in the Anthropic Models API response. "
+            "Pin one explicitly via model= or KVM_PILOT_VISION_MODEL."
+        )
 
     # -- classification --------------------------------------------------
 
@@ -115,6 +124,13 @@ class AnthropicBackend(VisionBackend):
             ],
         }
         envelope = self._http_post_json(_MESSAGES, payload)
+        # A max_tokens stop cuts the JSON mid-string; surface that specifically
+        # instead of the misleading "did not return valid JSON" from the parser.
+        if envelope.get("stop_reason") == "max_tokens":
+            raise VisionError(
+                f"Anthropic vision response truncated at max_tokens={self._max_tokens}; "
+                "raise max_tokens= or shorten the on-screen text transcription"
+            )
         text = ""
         for block in envelope.get("content", []):
             if block.get("type") == "text":
