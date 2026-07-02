@@ -94,3 +94,22 @@ def test_cli_basic_auth_creates_no_session_to_leak(emu):
     rc = main([*_argv(emu, "info"), "--redfish-auth", "basic"])
     assert rc == 0
     assert emu.state.session_deleted is False
+
+
+def test_cli_sensors_reads_structured_values(emu):
+    emu.state.power_state = "On"
+    rc = main(_argv(emu, "sensors"))
+    assert rc == 0
+
+
+def test_cli_logs_reads_journal(emu, capsys):
+    rc = main(_argv(emu, "logs"))
+    assert rc == 0
+    assert "system booted" in capsys.readouterr().out
+
+
+def test_cli_boot_progress_reports_phase(emu, capsys):
+    emu.state.boot_progress = "OSRunning"
+    rc = main(_argv(emu, "boot-progress"))
+    assert rc == 0
+    assert "os_running" in capsys.readouterr().out

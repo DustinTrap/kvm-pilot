@@ -271,3 +271,17 @@ def test_fake_driver_never_prompts_without_ask_flag(monkeypatch):
 
     monkeypatch.setattr(getpass, "getpass", boom)
     assert main(["capabilities", "--driver", "fake"]) == 0
+
+
+def test_cli_boot_progress_on_fake(capsys):
+    # FakeDriver serves BootProgress; powered off -> "unknown" (None).
+    rc = main(["boot-progress", "--driver", "fake"])
+    assert rc == 0
+    assert "unknown" in capsys.readouterr().out
+
+
+def test_cli_sensors_unsupported_on_pikvm_fails_cleanly(capsys):
+    # The PiKVM family has no Sensors capability -> clean exit 1, not a crash.
+    rc = main(["sensors", "--host", "h"])
+    assert rc == 1
+    assert "sensors" in capsys.readouterr().err

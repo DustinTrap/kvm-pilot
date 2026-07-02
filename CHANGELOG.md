@@ -134,6 +134,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   TOTP secret is group/other-readable (POSIX), matching the ssh/pgpass 0600 bar
   ([#59](https://github.com/DustinTrap/kvm-pilot/issues/59)).
 
+### Added (structured sensing reachable)
+- **CLI `sensors` / `logs` / `boot-progress`** — the `Sensors`/`Logs`/
+  `BootProgress` capabilities were implemented in drivers but reachable from no
+  entry point; they now have capability-gated subcommands (`sensors` is a
+  BMC/Redfish capability). `ScreenAnalyzer` also gained a structured-`BootProgress`
+  gate that resolves the phase with no snapshot/model call when the driver
+  reports it ([#60](https://github.com/DustinTrap/kvm-pilot/issues/60)).
+
 ### Added (deep-review batch)
 - **TLS pinning** (`#38` decision): `ssl_ca_file=` / `--ssl-ca-file` /
   `KVM_PILOT_SSL_CA_FILE` pins verification to a CA bundle or the device's own
