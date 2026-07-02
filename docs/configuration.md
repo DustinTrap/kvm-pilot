@@ -20,7 +20,8 @@ Resolution lives in [`src/kvm_pilot/config.py`](https://github.com/DustinTrap/kv
 
 ## The config file
 
-Default location: `~/.config/kvm-pilot/config.toml`. Override the path with the
+Default location: `~/.config/kvm-pilot/config.toml` (honoring `$XDG_CONFIG_HOME`) on
+Unix, `%APPDATA%\kvm-pilot\config.toml` on Windows. Override the path with the
 `KVM_PILOT_CONFIG` environment variable (read once, at import time). The file
 is optional — everything works from flags + env alone.
 

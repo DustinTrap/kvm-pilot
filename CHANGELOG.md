@@ -75,6 +75,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Config: unknown profile keys warn loudly instead of silently falling back to
   `admin`/`admin`; `KVM_PILOT_PROFILE` is honored everywhere; `--scheme http`
   defaults the port to 80; IPv6 literal hosts work.
+- **Platform envelope:** Python 3.14 added to the CI matrix and PyPI
+  classifiers, and the default config path is now platform-correct — `%APPDATA%`
+  on Windows, `$XDG_CONFIG_HOME` then `~/.config` elsewhere — instead of forcing
+  a Unix path while claiming "OS Independent"
+  ([#65](https://github.com/DustinTrap/kvm-pilot/issues/65)).
 - MSD uploads stream the file instead of reading it all into RAM: `mount_iso`
   / `msd_upload_file` on a multi-GB ISO no longer needs the whole image resident
   (urllib streams it in 8 KiB blocks with a pinned Content-Length), so a small

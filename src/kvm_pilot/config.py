@@ -4,8 +4,9 @@ Configuration resolution for the CLI and library convenience.
 Precedence (highest first):
   1. Explicit keyword arguments / CLI flags.
   2. Environment variables (KVM_PILOT_*).
-  3. A config file (TOML), default ~/.config/kvm-pilot/config.toml, with named
-     host profiles.
+  3. A config file (TOML) with named host profiles. Default location is
+     platform-specific: ~/.config/kvm-pilot/config.toml (or $XDG_CONFIG_HOME)
+     on Unix, and under %APPDATA% on Windows.
 
 The config file is optional; everything works from flags + env alone. Secrets
 may live in the file, env, or a password manager you template into env — the
@@ -23,9 +24,31 @@ from typing import Any
 
 logger = logging.getLogger("kvm_pilot.config")
 
-DEFAULT_CONFIG_PATH = Path(
-    os.environ.get("KVM_PILOT_CONFIG", Path.home() / ".config" / "kvm-pilot" / "config.toml")
-)
+def _config_base_dir(name: str = os.name) -> str:
+    """The platform config-dir base as a string (kept out of ``Path`` so it's
+    testable on any OS without instantiating the other flavour of ``Path``).
+
+    ``%APPDATA%`` on Windows, ``$XDG_CONFIG_HOME`` then ``~/.config`` elsewhere.
+    """
+    home = os.path.expanduser("~")
+    if name == "nt":
+        return os.environ.get("APPDATA") or os.path.join(home, "AppData", "Roaming")
+    return os.environ.get("XDG_CONFIG_HOME") or os.path.join(home, ".config")
+
+
+def _default_config_path() -> Path:
+    """Per-platform default config path (stdlib-only, no platformdirs dep).
+
+    ``KVM_PILOT_CONFIG`` overrides everything; otherwise it follows the platform's
+    conventions so the package's "OS Independent" claim holds on Windows too.
+    """
+    override = os.environ.get("KVM_PILOT_CONFIG")
+    if override:
+        return Path(override)
+    return Path(_config_base_dir()) / "kvm-pilot" / "config.toml"
+
+
+DEFAULT_CONFIG_PATH = _default_config_path()
 
 
 @dataclass

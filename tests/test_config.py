@@ -171,3 +171,39 @@ def test_world_readable_config_without_secret_does_not_warn(tmp_path, caplog):
     with caplog.at_level(logging.WARNING, logger="kvm_pilot.config"):
         resolve_host("lab", config_path=cfg)
     assert not any("chmod 600" in r.message for r in caplog.records)
+
+
+# -- platform config-dir (#65). The base-dir logic is tested in string-space so
+# monkeypatching os.name does not force Path() to build the other OS's flavour.
+
+def test_config_base_dir_windows_uses_appdata(monkeypatch):
+    import kvm_pilot.config as cfg
+    monkeypatch.setenv("APPDATA", "/fake/AppData/Roaming")
+    assert cfg._config_base_dir("nt") == "/fake/AppData/Roaming"
+
+
+def test_config_base_dir_unix_honors_xdg(monkeypatch):
+    import kvm_pilot.config as cfg
+    monkeypatch.setenv("XDG_CONFIG_HOME", "/tmp/xdg")
+    assert cfg._config_base_dir("posix") == "/tmp/xdg"
+
+
+def test_config_base_dir_unix_default_is_dot_config(monkeypatch):
+    import os
+
+    import kvm_pilot.config as cfg
+    monkeypatch.delenv("XDG_CONFIG_HOME", raising=False)
+    assert cfg._config_base_dir("posix") == os.path.join(os.path.expanduser("~"), ".config")
+
+
+def test_default_config_path_override_wins(monkeypatch, tmp_path):
+    import kvm_pilot.config as cfg
+    monkeypatch.setenv("KVM_PILOT_CONFIG", str(tmp_path / "custom.toml"))
+    assert cfg._default_config_path() == tmp_path / "custom.toml"
+
+
+def test_default_config_path_ends_with_kvm_pilot_config(monkeypatch):
+    import kvm_pilot.config as cfg
+    monkeypatch.delenv("KVM_PILOT_CONFIG", raising=False)
+    p = cfg._default_config_path()
+    assert p.name == "config.toml" and p.parent.name == "kvm-pilot"
