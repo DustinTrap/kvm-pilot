@@ -152,6 +152,19 @@ request; re-firing a power/HID/MSD POST could run it twice. Connect-phase
 failures (nothing was sent) stay retryable for every method. Retrying 409/503
 stays safe for all methods: those are definitive "rejected" responses.
 
+### Redfish resolves chassis/manager from the System's Links, not a global index
+The Chassis and Managers collections have no defined ordering correspondence to
+the Systems collection (DSP0266), so indexing all three with one `system_index`
+could read sensors/logs/virtual-media from a different node than the one being
+power-cycled on multi-node gear (blades, Supermicro twins). The driver now
+resolves them from the chosen ComputerSystem's `Links.Chassis` /
+`Links.ManagedBy` (DSP0268), falling back to the collection only when the System
+advertises no such link. An out-of-range `system_index` is a hard `CapabilityError`
+(never a silent fall-back to member 0 — that would target the wrong node with a
+destructive op), the reset confirm prompt names the resolved system URI, and
+`system_index` stays programmatic-only (not plumbed through config) until a
+multi-node config surface is actually needed.
+
 ### Redfish InsertMedia sends only `Image`
 `Inserted`/`WriteProtected` are optional (DSP2046) and merely restate the insert
 defaults, but strict firmware (Supermicro X11/X12, some Lenovo/older iDRAC)

@@ -19,6 +19,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 SYS = "/redfish/v1/Systems/Self.1"
 CHAS = "/redfish/v1/Chassis/Chas.1"
 MGR = "/redfish/v1/Managers/BMC.1"
+# Decoy members listed FIRST in their collections when multi_node is set, so
+# index-0 selection picks the wrong node and only Links-based resolution is right.
+DECOY_CHAS = "/redfish/v1/Chassis/Enclosure.0"
+DECOY_MGR = "/redfish/v1/Managers/Enclosure.0"
 RESET = f"{SYS}/Actions/ComputerSystem.Reset"
 VM_COLL = f"{MGR}/VirtualMedia"
 VM_CD = f"{VM_COLL}/CD"
@@ -77,6 +81,9 @@ class RedfishState:
         # TransferProtocolType (sushy bug #2072805).
         self.vm_reject_optional_params = False
         self.vm_require_transfer_protocol = False
+        # When set, the Chassis/Managers collections list a decoy member first;
+        # only ComputerSystem.Links.Chassis/ManagedBy point at the real node.
+        self.multi_node = False
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -169,7 +176,9 @@ class _Handler(BaseHTTPRequestHandler):
         if path == SYS:
             return self._computer_system()
         if path == "/redfish/v1/Chassis":
-            return self._collection([CHAS])
+            return self._collection([DECOY_CHAS, CHAS] if st.multi_node else [CHAS])
+        if path == DECOY_CHAS:
+            return {"@odata.id": DECOY_CHAS, "ChassisType": "Enclosure"}  # no Thermal/Power/Sensors
         if path == CHAS:
             return self._chassis()
         if path == f"{CHAS}/Thermal":
@@ -194,7 +203,9 @@ class _Handler(BaseHTTPRequestHandler):
             return {"Name": "Fan1", "Reading": 4200, "ReadingUnits": "RPM",
                     "ReadingType": "Rotational", "Status": {"Health": "OK"}}
         if path == "/redfish/v1/Managers":
-            return self._collection([MGR])
+            return self._collection([DECOY_MGR, MGR] if st.multi_node else [MGR])
+        if path == DECOY_MGR:
+            return {"@odata.id": DECOY_MGR}  # no VirtualMedia/LogServices
         if path == MGR:
             return {"@odata.id": MGR, "VirtualMedia": {"@odata.id": VM_COLL},
                     "LogServices": {"@odata.id": LOGS}}
@@ -243,6 +254,9 @@ class _Handler(BaseHTTPRequestHandler):
             "PowerState": st.power_state,
             "Status": {"Health": "OK", "State": "Enabled"},
             "BootProgress": {"LastState": st.boot_progress},
+            # DSP0268 associations — the driver resolves chassis/manager from
+            # these, not by indexing the global collections.
+            "Links": {"Chassis": [{"@odata.id": CHAS}], "ManagedBy": [{"@odata.id": MGR}]},
             "VirtualMedia": {"@odata.id": VM_COLL},
             # No system-side LogServices link here — logs live under the Manager
             # (Dell shape); the driver must scan both and follow the link.

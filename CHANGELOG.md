@@ -46,6 +46,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Config: unknown profile keys warn loudly instead of silently falling back to
   `admin`/`admin`; `KVM_PILOT_PROFILE` is honored everywhere; `--scheme http`
   defaults the port to 80; IPv6 literal hosts work.
+- **Redfish:** chassis and manager are resolved from the ComputerSystem's
+  `Links.Chassis`/`Links.ManagedBy`, not by indexing the global collections, so
+  sensors/logs/virtual-media can't come from a different node than power ops on
+  multi-node gear; an out-of-range `system_index` is now a hard error, and the
+  reset confirm prompt names the target system
+  ([#44](https://github.com/DustinTrap/kvm-pilot/issues/44)).
 - **Redfish:** InsertMedia now sends only `Image` — the optional
   `Inserted`/`WriteProtected` params that strict BMCs (Supermicro) reject are
   gone — and retries once with `TransferProtocolType` for BMCs that require it
