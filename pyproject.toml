@@ -35,7 +35,7 @@ classifiers = [
 dependencies = []
 
 [project.optional-dependencies]
-totp = ["pyotp>=2.9"]
+totp = ["pyotp>=2.10.0"]
 ws = ["websocket-client>=1.7"]
 dev = [
     "pytest>=8.0",
