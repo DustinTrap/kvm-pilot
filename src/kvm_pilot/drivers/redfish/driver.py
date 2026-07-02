@@ -201,6 +201,9 @@ class RedfishDriver(CapabilityMixin):
         # (insert, eject, slot) keyed by cdrom flag — CD vs removable media differ.
         self._vm: dict[bool, tuple[str, str, str]] = {}
         self._log_entries_uri: str | None = None
+        # $expand support for collection fan-out (sensors): None=untried,
+        # True=works, False=known-unsupported (learned from a 501).
+        self._expand_ok: bool | None = None
 
     @classmethod
     def from_config(
@@ -647,12 +650,53 @@ class RedfishDriver(CapabilityMixin):
                    "Voltage": "voltages", "Power": "power"}
         out: dict[str, list] = {v: [] for v in buckets.values()}
         out["other"] = []
-        for uri in self._members(sensors_link):
-            s = self._http.get_json(uri)
+        for s in self._sensor_members(sensors_link):
             entry = {"name": s.get("Name"), "reading": s.get("Reading"),
                      "units": s.get("ReadingUnits"), "status": (s.get("Status") or {}).get("Health")}
             out[buckets.get(s.get("ReadingType", ""), "other")].append(entry)
         return out
+
+    def _sensor_members(self, collection_uri: str) -> list[dict]:
+        """Full Sensor docs — one ``?$expand`` GET where the service supports it,
+        else one GET per member.
+
+        Real BMCs expose 100–400 Sensor resources; the per-member fan-out (a
+        fresh request each) is 10s of seconds to minutes, and the sensing
+        hierarchy (#13) polls it. ``$expand`` collapses that to a single request.
+        """
+        if self._expand_ok is not False:
+            expanded = self._try_expand(collection_uri)
+            if expanded is not None:
+                return expanded
+        return [self._http.get_json(u) for u in self._members(collection_uri)]
+
+    def _expand_operator(self) -> str | None:
+        """The ``$expand`` operator the service advertises (ProtocolFeaturesSupported)."""
+        eq = (self._root().get("ProtocolFeaturesSupported") or {}).get("ExpandQuery") or {}
+        if eq.get("ExpandAll"):
+            return "*"
+        if eq.get("Levels"):
+            return "."
+        return None
+
+    def _try_expand(self, collection_uri: str) -> list[dict] | None:
+        op = self._expand_operator()
+        if op is None:
+            return None  # not advertised — go straight to per-member
+        sep = "&" if "?" in collection_uri else "?"
+        try:
+            coll = self._http.get_json(f"{collection_uri}{sep}$expand={op}($levels=1)")
+        except KVMPilotError as exc:
+            # DSP0266 requires 501 for an unsupported $-query — remember it.
+            if exc.status_code == 501:
+                self._expand_ok = False
+            return None
+        members = coll.get("Members") or []
+        # Members are actually expanded only if they carry more than an @odata.id.
+        if members and any(isinstance(m, dict) and len(m) > 1 for m in members):
+            self._expand_ok = True
+            return [m for m in members if isinstance(m, dict)]
+        return None
 
     def _read_thermal_power(self, chassis: dict) -> dict:
         out: dict[str, list] = {"temperatures": [], "fans": [], "voltages": [], "power": []}

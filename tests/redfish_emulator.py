@@ -86,6 +86,9 @@ class RedfishState:
         self.multi_node = False
         # Override the LogService entries (to test time-based seek). None = default.
         self.log_entries: list[dict] | None = None
+        # If True, ServiceRoot advertises $expand and the Sensors collection
+        # serves its members inline for a ?$expand request (one GET, no fan-out).
+        self.sensors_expandable = False
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -155,7 +158,13 @@ class _Handler(BaseHTTPRequestHandler):
     def do_GET(self) -> None:
         if self._pre():
             return
-        doc = self._doc(self._path())
+        path = self._path()
+        # $expand on the Sensors collection: serve members inline (one GET).
+        if "$expand" in self.path and path == f"{CHAS}/Sensors" and self._state.sensors_expandable:
+            self._send({"Members": [self._doc(f"{CHAS}/Sensors/CPUTemp"),
+                                    self._doc(f"{CHAS}/Sensors/Fan1")]})
+            return
+        doc = self._doc(path)
         if doc is None:
             self._send({"error": {"message": "not found"}}, status=404)
         else:
@@ -164,7 +173,7 @@ class _Handler(BaseHTTPRequestHandler):
     def _doc(self, path: str) -> dict | None:
         st = self._state
         if path in ("/redfish/v1", "/redfish/v1/"):
-            return {
+            root = {
                 "@odata.type": "#ServiceRoot.v1_15_0.ServiceRoot",
                 "RedfishVersion": "1.15.1",
                 "Systems": {"@odata.id": "/redfish/v1/Systems"},
@@ -173,6 +182,11 @@ class _Handler(BaseHTTPRequestHandler):
                 "SessionService": {"@odata.id": "/redfish/v1/SessionService"},
                 "Links": {"Sessions": {"@odata.id": SESSIONS}},
             }
+            if st.sensors_expandable:
+                root["ProtocolFeaturesSupported"] = {
+                    "ExpandQuery": {"ExpandAll": True, "Levels": True, "MaxLevels": 6}
+                }
+            return root
         if path == "/redfish/v1/Systems":
             return self._collection([SYS])
         if path == SYS:

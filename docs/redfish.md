@@ -104,7 +104,9 @@ report"); unknown enum → `unknown` (never raise).
   `Severity`/`MessageSeverity` is present). Map `401/403`→`AuthError`,
   `409`→`BusyError`, `503`→`UnavailableError`.
 - **Sensors:** prefer the unified `Sensors` collection if the `Chassis` advertises
-  the link; else legacy `Thermal` + `Power`.
+  the link; else legacy `Thermal` + `Power`. The unified read uses `?$expand`
+  (one GET) when `ProtocolFeaturesSupported.ExpandQuery` advertises it, falling
+  back to one GET per member — real BMCs expose 100+ sensors.
 - **VirtualMedia:** collect slots from **both** System- and Manager-level
   collections, pick by `MediaTypes` (`cdrom` flag), read `InsertMedia`/`EjectMedia`
   targets from the slot. Redfish has no separate "connect" step — Insert attaches.
