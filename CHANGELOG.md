@@ -118,6 +118,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   operator-side `KVM_PILOT_MCP_ALLOW_POWER` gate on the power tool,
   `KVM_PILOT_MCP_DRY_RUN`, and local-VLM support via `KVM_PILOT_VISION_*`.
 
+### Changed (internal)
+- `hard_cycle` is now a single `PowerMixin.hard_cycle` (in `drivers/base.py`)
+  shared by all three drivers instead of a copy each; per-driver settle delays
+  are class attributes (PiKVM 5.0/3.0, Redfish/Fake 0.0). The public
+  `hard_cycle(off_delay=, on_delay=)` defaults are now `None` (= "use the
+  driver's class attribute"); passing explicit values is unchanged
+  ([#63](https://github.com/DustinTrap/kvm-pilot/issues/63)).
+
 ### Added (credential hygiene)
 - **`--passwd-file` / `--ask-passwd`** (and `--totp-secret-file`) so secrets
   needn't go on argv, where they're visible in `ps` and shell history; the

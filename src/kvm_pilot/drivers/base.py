@@ -14,8 +14,12 @@ come in later steps; see ``docs/architecture.md``.
 
 from __future__ import annotations
 
+import logging
+import time
 from enum import StrEnum
 from typing import Protocol, runtime_checkable
+
+logger = logging.getLogger("kvm_pilot.drivers")
 
 
 class Capability(StrEnum):
@@ -223,6 +227,29 @@ class CapabilityMixin:
         self.close()
 
 
+class PowerMixin:
+    """A default ``hard_cycle`` composed from the ``Power`` protocol methods.
+
+    Every POWER driver needs the same ``power_off_hard`` → settle → ``power_on`` →
+    settle composition; this keeps it in one place instead of a copy per driver.
+    The settle delays are overridable class attributes: the PiKVM ATX path needs
+    a pause (its power ops don't block on the state change), while Redfish blocks
+    on the PowerState transition and Fake is instant, so both leave them 0.
+    """
+
+    _hard_cycle_off_delay: float = 0.0
+    _hard_cycle_on_delay: float = 0.0
+
+    def hard_cycle(self, off_delay: float | None = None, on_delay: float | None = None) -> None:
+        off = self._hard_cycle_off_delay if off_delay is None else off_delay
+        on = self._hard_cycle_on_delay if on_delay is None else on_delay
+        logger.info("Hard power cycling %s", getattr(self, "host", "?"))
+        self.power_off_hard()  # type: ignore[attr-defined]
+        time.sleep(off)
+        self.power_on()  # type: ignore[attr-defined]
+        time.sleep(on)
+
+
 @runtime_checkable
 class KVMDriver(Protocol):
     """Anything that exposes a host and reports its capabilities."""
@@ -249,6 +276,7 @@ __all__ = [
     "Watchdog",
     "KVMDriver",
     "CapabilityMixin",
+    "PowerMixin",
     "CAPABILITY_PROTOCOLS",
     "detect_capabilities",
 ]

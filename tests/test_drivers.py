@@ -152,3 +152,49 @@ def test_make_driver_from_config_dispatches_on_cfg_driver() -> None:
     # A genuinely unknown kind still raises a clean, actionable error.
     with pytest.raises(KVMPilotError, match="does not support"):
         make_driver_from_config(HostConfig(host="h", driver="ipmi"))
+
+
+# -- shared PowerMixin.hard_cycle (#63) ------------------------------------
+
+def test_hard_cycle_is_shared_from_power_mixin():
+    from kvm_pilot.client import PiKVMDriver
+    from kvm_pilot.drivers.base import PowerMixin
+    from kvm_pilot.drivers.fake import FakeDriver
+    from kvm_pilot.drivers.redfish import RedfishDriver
+
+    for cls in (PiKVMDriver, FakeDriver, RedfishDriver):
+        assert issubclass(cls, PowerMixin)
+        # none of them redefines hard_cycle — it comes from the mixin
+        assert "hard_cycle" not in cls.__dict__
+
+
+def test_hard_cycle_default_delays_per_driver():
+    from kvm_pilot.client import PiKVMDriver
+    from kvm_pilot.drivers.fake import FakeDriver
+    from kvm_pilot.drivers.redfish import RedfishDriver
+
+    # PiKVM (ATX, non-blocking) settles; Redfish/Fake (blocking/instant) do not.
+    assert (PiKVMDriver._hard_cycle_off_delay, PiKVMDriver._hard_cycle_on_delay) == (5.0, 3.0)
+    assert (RedfishDriver._hard_cycle_off_delay, RedfishDriver._hard_cycle_on_delay) == (0.0, 0.0)
+    assert (FakeDriver._hard_cycle_off_delay, FakeDriver._hard_cycle_on_delay) == (0.0, 0.0)
+
+
+def test_hard_cycle_composes_off_then_on_on_fake():
+    from kvm_pilot.drivers.fake import FakeDriver
+
+    d = FakeDriver(powered=True)
+    d.hard_cycle()
+    names = [a[0] for a in d.actions]
+    assert names == ["power_off_hard", "power_on"]
+
+
+def test_hard_cycle_explicit_delays_override_class_attr(monkeypatch):
+    # An explicit delay wins over the class attribute; assert the mixin passes it
+    # to time.sleep without actually sleeping.
+    import kvm_pilot.drivers.base as base
+    from kvm_pilot.drivers.fake import FakeDriver
+
+    slept: list[float] = []
+    monkeypatch.setattr(base.time, "sleep", lambda s: slept.append(s))
+    FakeDriver(powered=True).hard_cycle(off_delay=1.5, on_delay=2.5)
+    assert slept == [1.5, 2.5]

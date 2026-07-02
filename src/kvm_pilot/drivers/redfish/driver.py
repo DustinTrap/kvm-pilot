@@ -41,7 +41,7 @@ from ...vision.base import (
     PHASE_POWER_OFF,
     PHASE_UNKNOWN,
 )
-from ..base import CapabilityMixin
+from ..base import CapabilityMixin, PowerMixin
 from .transport import RedfishHTTP
 
 if TYPE_CHECKING:
@@ -152,7 +152,7 @@ def _log_within_lookback(created: object, cutoff: float | None) -> bool:
     return ts >= cutoff
 
 
-class RedfishDriver(CapabilityMixin):
+class RedfishDriver(PowerMixin, CapabilityMixin):
     """A Redfish BMC driver. See module docstring for the capability scope."""
 
     def __init__(
@@ -577,21 +577,8 @@ class RedfishDriver(CapabilityMixin):
             f"HARD reset {self.host} (data loss risk)", wait, None,
         )
 
-    def hard_cycle(self, off_delay: float = 0.0, on_delay: float = 0.0) -> None:
-        """Force off then power on — a full off→on cycle.
-
-        A BMC has no ATX double-tap, so this composes the two gated power ops.
-        Both already block on the real PowerState transition (``power_off_hard``
-        waits for Off, ``power_on`` waits for On), so no fixed settle delay is
-        needed; ``off_delay``/``on_delay`` are optional caller-tunable pauses,
-        defaulting to none. Lets every POWER driver answer ``power-cycle``
-        uniformly (signature mirrors ``FakeDriver.hard_cycle``).
-        """
-        logger.info("Hard power cycling %s via Redfish", self.host)
-        self.power_off_hard()
-        time.sleep(off_delay)
-        self.power_on()
-        time.sleep(on_delay)
+    # hard_cycle (PowerMixin): power_off_hard → power_on, both blocking on the
+    # real PowerState transition, so the settle delays stay 0.
 
     # -- BootProgress ----------------------------------------------------
 
