@@ -121,7 +121,7 @@ kvm.press_key("Enter")
 ### CLI
 
 ```bash
-kvm-pilot info     --host 192.168.8.1 --user admin --passwd secret
+kvm-pilot info     --host 192.168.8.1 --user admin --ask-passwd   # prompt (no echo)
 kvm-pilot capabilities --profile homelab                 # what this driver supports
 kvm-pilot snapshot screen.jpg --profile homelab
 kvm-pilot --timeout 60 power-cycle --profile homelab --dry-run   # log, don't send

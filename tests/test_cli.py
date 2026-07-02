@@ -230,3 +230,44 @@ def test_eject_dispatches_and_honors_dry_run(capsys):
     rc = main(["eject", "--driver", "fake", "--yes"])
     assert rc == 0
     assert "ejected" in capsys.readouterr().out
+
+
+def test_passwd_file_supplies_password(tmp_path, monkeypatch):
+    from kvm_pilot.cli import _build_client, build_parser
+    pf = tmp_path / "pw"
+    pf.write_text("filesecret\n")  # trailing newline must be stripped
+    monkeypatch.delenv("KVM_PILOT_PASSWD", raising=False)
+    args = build_parser().parse_args(["info", "--host", "h", "--passwd-file", str(pf)])
+    kvm = _build_client(args)
+    assert kvm._http._passwd == "filesecret"
+
+
+def test_passwd_flag_wins_over_passwd_file(tmp_path):
+    from kvm_pilot.cli import _build_client, build_parser
+    pf = tmp_path / "pw"
+    pf.write_text("fromfile\n")
+    args = build_parser().parse_args(
+        ["info", "--host", "h", "--passwd", "fromflag", "--passwd-file", str(pf)]
+    )
+    assert _build_client(args)._http._passwd == "fromflag"
+
+
+def test_ask_passwd_prompts_via_getpass(monkeypatch):
+    import getpass
+
+    from kvm_pilot.cli import _build_client, build_parser
+    monkeypatch.delenv("KVM_PILOT_PASSWD", raising=False)
+    monkeypatch.setattr(getpass, "getpass", lambda prompt="": "prompted")
+    args = build_parser().parse_args(["info", "--host", "h", "--ask-passwd"])
+    assert _build_client(args)._http._passwd == "prompted"
+
+
+def test_fake_driver_never_prompts_without_ask_flag(monkeypatch):
+    # No --ask-passwd => getpass must not be called (would hang in CI).
+    import getpass
+
+    def boom(*a, **k):
+        raise AssertionError("getpass should not be called without --ask-passwd")
+
+    monkeypatch.setattr(getpass, "getpass", boom)
+    assert main(["capabilities", "--driver", "fake"]) == 0

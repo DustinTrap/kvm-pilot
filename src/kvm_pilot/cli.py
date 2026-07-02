@@ -6,8 +6,14 @@ The CLI defaults to *interactive confirmation* on destructive operations; pass
 without sending them. Credentials resolve through kvm_pilot.config (flags > env
 > config-file profile).
 
+Prefer env/profile credentials over ``--passwd``/``--totp-secret`` on the
+command line: argv is visible to any local user via ``ps`` and is persisted in
+shell history. Use ``KVM_PILOT_PASSWD`` / a config profile, ``--passwd-file``,
+or ``--ask-passwd`` (interactive, no echo).
+
 Examples:
-    kvm-pilot info --host 192.168.8.1 --user admin --passwd secret
+    kvm-pilot info --host 192.168.8.1 --user admin --ask-passwd
+    KVM_PILOT_PASSWD=secret kvm-pilot info --host 192.168.8.1 --user admin
     kvm-pilot capabilities --profile homelab        # what this driver supports
     kvm-pilot snapshot out.jpg --profile homelab
     kvm-pilot --timeout 60 power-cycle --profile homelab --dry-run
@@ -25,6 +31,7 @@ import argparse
 import json
 import logging
 import sys
+from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from .__about__ import __version__
@@ -48,18 +55,48 @@ if TYPE_CHECKING:
     RichDriver = KVMClient | FakeDriver
 
 
+def _first_line(path: str) -> str:
+    """First line of a secret file (newline stripped), or '' if empty."""
+    lines = Path(path).read_text().splitlines()
+    return lines[0] if lines else ""
+
+
+def _resolve_secret(direct, file_path, ask: bool, prompt: str) -> str | None:
+    """A secret from --x (argv), --x-file, or an interactive --ask prompt.
+
+    Explicit flags only — nothing prompts implicitly, so `--driver fake` and
+    existing scripts relying on the admin/admin default are unaffected.
+    """
+    if direct is not None:
+        return direct
+    if file_path:
+        return _first_line(file_path)
+    if ask:
+        import getpass
+        return getpass.getpass(prompt)
+    return None
+
+
 def _build_client(args) -> AnyDriver:
     confirm = allow_all if getattr(args, "yes", False) else interactive_confirm
     dry_run = getattr(args, "dry_run", False)
+    passwd = _resolve_secret(
+        getattr(args, "passwd", None), getattr(args, "passwd_file", None),
+        getattr(args, "ask_passwd", False), "Password: ",
+    )
+    totp_secret = _resolve_secret(
+        getattr(args, "totp_secret", None), getattr(args, "totp_secret_file", None),
+        False, "",
+    )
     cfg = resolve_host(
         getattr(args, "profile", None),
         host=getattr(args, "host", None),
         user=getattr(args, "user", None),
-        passwd=getattr(args, "passwd", None),
+        passwd=passwd,
         port=getattr(args, "port", None),
         scheme=getattr(args, "scheme", None),
         timeout=getattr(args, "http_timeout", None),
-        totp_secret=getattr(args, "totp_secret", None),
+        totp_secret=totp_secret,
         verify_ssl=getattr(args, "verify_ssl", None),
         ssl_ca_file=getattr(args, "ssl_ca_file", None),
         driver=getattr(args, "driver", None),
@@ -271,11 +308,21 @@ def _add_common(p: argparse.ArgumentParser) -> None:
                         "Redfish BMC (no HID/Video — capability-partial), 'fake' = no hardware)")
     p.add_argument("--host")
     p.add_argument("--user")
-    p.add_argument("--passwd")
+    p.add_argument("--passwd",
+                   help="Password (VISIBLE in `ps` and shell history — prefer "
+                        "KVM_PILOT_PASSWD, a config profile, --passwd-file, or --ask-passwd)")
+    p.add_argument("--passwd-file", dest="passwd_file",
+                   help="Read the password from the first line of PATH (avoids argv exposure)")
+    p.add_argument("--ask-passwd", dest="ask_passwd", action="store_true",
+                   help="Prompt for the password on the terminal (no echo)")
     p.add_argument("--port", type=int)
     p.add_argument("--scheme", choices=["http", "https"])
     p.add_argument("--profile", help="Named host profile from the config file")
-    p.add_argument("--totp-secret", dest="totp_secret")
+    p.add_argument("--totp-secret", dest="totp_secret",
+                   help="TOTP/2FA seed (VISIBLE in `ps` — prefer KVM_PILOT_TOTP_SECRET "
+                        "or --totp-secret-file)")
+    p.add_argument("--totp-secret-file", dest="totp_secret_file",
+                   help="Read the TOTP seed from the first line of PATH")
     p.add_argument("--redfish-auth", dest="redfish_auth", choices=["session", "basic"],
                    help="Redfish HTTP auth mode (default session; use 'basic' for a BMC or "
                         "emulator without a SessionService). Ignored by non-redfish drivers.")

@@ -126,3 +126,48 @@ def test_ssl_ca_file_resolves_through_precedence(tmp_path, monkeypatch):
         resolve_host("lab", config_path=cfg, ssl_ca_file="/from/arg.pem").ssl_ca_file
         == "/from/arg.pem"
     )
+
+
+def test_world_readable_config_with_secret_warns(tmp_path, caplog):
+    import logging
+    import os
+
+    if os.name != "posix":
+        import pytest
+        pytest.skip("permission bits are POSIX-only")
+    cfg = tmp_path / "config.toml"
+    cfg.write_text('[hosts.lab]\nhost = "h"\npasswd = "s3cr3t"\n')
+    cfg.chmod(0o644)  # group/other-readable
+    with caplog.at_level(logging.WARNING, logger="kvm_pilot.config"):
+        resolve_host("lab", config_path=cfg)
+    assert any("chmod 600" in r.message for r in caplog.records)
+
+
+def test_mode_600_config_with_secret_does_not_warn(tmp_path, caplog):
+    import logging
+    import os
+
+    if os.name != "posix":
+        import pytest
+        pytest.skip("permission bits are POSIX-only")
+    cfg = tmp_path / "config.toml"
+    cfg.write_text('[hosts.lab]\nhost = "h"\npasswd = "s3cr3t"\n')
+    cfg.chmod(0o600)
+    with caplog.at_level(logging.WARNING, logger="kvm_pilot.config"):
+        resolve_host("lab", config_path=cfg)
+    assert not any("chmod 600" in r.message for r in caplog.records)
+
+
+def test_world_readable_config_without_secret_does_not_warn(tmp_path, caplog):
+    import logging
+    import os
+
+    if os.name != "posix":
+        import pytest
+        pytest.skip("permission bits are POSIX-only")
+    cfg = tmp_path / "config.toml"
+    cfg.write_text('[hosts.lab]\nhost = "h"\nuser = "admin"\n')  # no secret
+    cfg.chmod(0o644)
+    with caplog.at_level(logging.WARNING, logger="kvm_pilot.config"):
+        resolve_host("lab", config_path=cfg)
+    assert not any("chmod 600" in r.message for r in caplog.records)
