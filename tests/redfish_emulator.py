@@ -72,6 +72,11 @@ class RedfishState:
         self.valid_token: str | None = None
         self.token_seq = 0
         self.expire_token_once = False
+        # VirtualMedia strictness knobs (real BMCs vary): reject the optional
+        # Inserted/WriteProtected params (Supermicro), or require
+        # TransferProtocolType (sushy bug #2072805).
+        self.vm_reject_optional_params = False
+        self.vm_require_transfer_protocol = False
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -297,6 +302,18 @@ class _Handler(BaseHTTPRequestHandler):
                 self._send(None, status=204)
             return
         if path == VM_INSERT:
+            if st.vm_reject_optional_params and ("Inserted" in body or "WriteProtected" in body):
+                self._send({"error": {"@Message.ExtendedInfo": [
+                    {"MessageId": "Base.1.8.ActionParameterNotSupported",
+                     "Message": "Inserted is read-only on this system",
+                     "MessageArgs": ["InsertMedia", "Inserted"]}]}}, status=400)
+                return
+            if st.vm_require_transfer_protocol and "TransferProtocolType" not in body:
+                self._send({"error": {"@Message.ExtendedInfo": [
+                    {"MessageId": "Base.1.8.ActionParameterMissing",
+                     "Message": "TransferProtocolType is required",
+                     "MessageArgs": ["InsertMedia", "TransferProtocolType"]}]}}, status=400)
+                return
             st.inserted = True
             st.last_image = body.get("Image")
             self._send(None, status=204)

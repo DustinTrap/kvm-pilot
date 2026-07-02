@@ -92,6 +92,27 @@ _MAX_PAGES = 64
 # MediaTypes that count as removable (non-CD) media when cdrom=False.
 _REMOVABLE_MEDIA = {"USBStick", "Floppy", "RemovableDisk"}
 
+# URL scheme -> Redfish TransferProtocolType, for BMCs that require it explicitly.
+_TRANSFER_PROTOCOLS = {
+    "http": "HTTP", "https": "HTTPS", "nfs": "NFS",
+    "cifs": "CIFS", "smb": "CIFS", "ftp": "FTP", "tftp": "TFTP", "scp": "SCP",
+}
+
+
+def _transfer_protocol(source: str) -> str | None:
+    scheme = source.split("://", 1)[0].lower() if "://" in source else ""
+    return _TRANSFER_PROTOCOLS.get(scheme)
+
+
+def _param_missing(exc: KVMPilotError, name: str) -> bool:
+    """True if a Redfish error reports ``name`` as a missing action parameter."""
+    for info in getattr(exc, "extended_info", []) or []:
+        if "ParameterMissing" not in str(info.get("MessageId", "")):
+            continue
+        if name in (info.get("MessageArgs") or []) or name in str(info.get("Message", "")):
+            return True
+    return False
+
 
 class RedfishDriver(CapabilityMixin):
     """A Redfish BMC driver. See module docstring for the capability scope."""
@@ -594,12 +615,30 @@ class RedfishDriver(CapabilityMixin):
             "redfish.virtual_media_insert", f"Insert virtual media {source!r} on {self.host}"
         ):
             return name
-        resp = self._http.request(
-            "POST", insert,
-            json_body={"Image": source, "Inserted": True, "WriteProtected": True},
-        )
-        self._handle_async(resp)
+        self._handle_async(self._insert_media(insert, source))
         return name
+
+    def _insert_media(self, target: str, source: str):
+        """POST InsertMedia with the minimal body, adapting to strict BMCs.
+
+        ``Inserted``/``WriteProtected`` are optional (DSP2046) and merely restate
+        the insert defaults, but strict firmware (Supermicro X11/X12, some
+        Lenovo/older iDRAC) rejects an InsertMedia body that carries them — so we
+        send only ``Image``. The inverse quirk (a BMC that *requires*
+        ``TransferProtocolType``) answers 400 ``ActionParameterMissing``; retry
+        once with it derived from the URL scheme. The safety guard already ran in
+        the caller, so the retry does not re-gate.
+        """
+        try:
+            return self._http.request("POST", target, json_body={"Image": source})
+        except KVMPilotError as exc:
+            proto = _transfer_protocol(source)
+            if exc.status_code == 400 and proto and _param_missing(exc, "TransferProtocolType"):
+                logger.info("BMC requires TransferProtocolType; retrying InsertMedia with %s", proto)
+                return self._http.request(
+                    "POST", target, json_body={"Image": source, "TransferProtocolType": proto}
+                )
+            raise
 
     def msd_disconnect(self) -> None:
         _insert, eject, _slot = self._virtual_media()

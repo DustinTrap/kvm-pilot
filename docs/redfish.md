@@ -108,6 +108,11 @@ report"); unknown enum → `unknown` (never raise).
 - **VirtualMedia:** collect slots from **both** System- and Manager-level
   collections, pick by `MediaTypes` (`cdrom` flag), read `InsertMedia`/`EjectMedia`
   targets from the slot. Redfish has no separate "connect" step — Insert attaches.
+  `InsertMedia` sends only `Image`: the optional `Inserted`/`WriteProtected`
+  properties (DSP2046) are rejected by strict firmware (Supermicro; the fix
+  sushy adopted), and a BMC that instead *requires* `TransferProtocolType`
+  (400 `ActionParameterMissing`) gets one retry with it derived from the URL
+  scheme.
 - **Logs:** scan `LogServices` under both the System and the Manager (Dell SEL/Lclog
   under Manager; HPE IML under System); follow the `@odata.id` link, never build
   `/LogServices` by hand.

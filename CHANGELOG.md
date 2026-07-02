@@ -46,6 +46,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Config: unknown profile keys warn loudly instead of silently falling back to
   `admin`/`admin`; `KVM_PILOT_PROFILE` is honored everywhere; `--scheme http`
   defaults the port to 80; IPv6 literal hosts work.
+- **Redfish:** InsertMedia now sends only `Image` — the optional
+  `Inserted`/`WriteProtected` params that strict BMCs (Supermicro) reject are
+  gone — and retries once with `TransferProtocolType` for BMCs that require it
+  ([#43](https://github.com/DustinTrap/kvm-pilot/issues/43)).
 - **Redfish:** a session-mode `401` now triggers a one-shot re-login and retry,
   so an expired/evicted session (idle timeout, BMC reboot) or a token cleared by
   `close()` recovers transparently instead of failing every subsequent request
