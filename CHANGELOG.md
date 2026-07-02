@@ -22,6 +22,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   (`TimeoutError`/`ConnectionError`) instead of leaking raw builtins, and
   never auto-retry a non-idempotent request after a failure that may already
   have reached the device (a lost response can't power-cycle a box twice).
+- **Release safety:** the PyPI publish path now runs the full test suite
+  (ruff/mypy/pytest) and verifies the built artifact version matches the release
+  tag before publishing — a release cut from a red commit, or a tag that
+  disagrees with `__about__.py`, fails instead of silently shipping
+  ([#57](https://github.com/DustinTrap/kvm-pilot/issues/57)).
 - **Supply chain:** every GitHub Action is pinned by full commit SHA (with a
   version comment) — including the OIDC-privileged `pypa/gh-action-pypi-publish`
   on the release path — so an upstream tag compromise can't run arbitrary code
