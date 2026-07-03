@@ -6,6 +6,31 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.0a2] — 2026-07-03
+
+Second **alpha**, and the **first build exercised against real hardware** (a
+GL-RM1PE). Still alpha, still loud about it — the flash path is a proven no-op on
+that unit and much of the driver surface remains mock-only.
+
+### Added — first real-hardware validation + community hardware-compatibility list (2026-07-03, #105/#106/#107)
+- **First real-hardware runs** against a GL-RM1PE (10.0.1.20). Read paths (`info`,
+  `snapshot`, `healthcheck`, `logs`, `power_state`) verified live on firmware
+  V1.5.1 release2 and V1.9.1 release1; `firmware-update`'s remote flash confirmed a
+  **live no-op** on this model (start POST accepted, nothing flashed —
+  [#94](https://github.com/DustinTrap/kvm-pilot/issues/94)/[#95](https://github.com/DustinTrap/kvm-pilot/issues/95)).
+  This retires the repo's blanket "never run on real hardware" caveat for the
+  glkvm read/snapshot surface.
+- **Community Hardware-Compatibility list.** A git-native run ledger
+  (`data/test_runs.jsonl`) feeds an auto-generated
+  [Hardware-Compatibility](https://github.com/DustinTrap/kvm-pilot/wiki/Hardware-Compatibility)
+  wiki page — pass-rate × sample-count per (vendor, product, firmware) × capability,
+  gated at n≥3 before a cell shows a verdict.
+- **Field finding [#107](https://github.com/DustinTrap/kvm-pilot/issues/107):** on
+  RM1PE the `snapshot` endpoint returned an H.264 frame (not JPEG) above 1080p on
+  V1.5.1 — **fixed by the V1.9.1 firmware** (now serves a cached JPEG). The RV1126
+  encoder still wedges (D-state, load ~10) above 1080p regardless; keep RM1PE
+  guests at a true 1080p.
+
 ### Added — MCP interface parity + skill interface-selection guidance (2026-07-03, #93)
 - **`logs` MCP tool** (read-only, `Capability.LOGS`) — exposes the device/host
   event log over MCP with a `seek` lookback (tail-follow omitted; it blocks over
@@ -359,4 +384,5 @@ user feedback. **Not validated on real hardware** — see Notes.
   feedback are the explicit goals of this alpha. Reports welcome in the issue
   tracker.
 
+[0.1.0a2]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a2
 [0.1.0a1]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a1
