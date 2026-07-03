@@ -1,6 +1,6 @@
 {
   "schema_version": 2,
-  "updated": "2026-07-02",
+  "updated": "2026-07-03",
   "firmware": [
     {
       "vendor": "gl.inet",
@@ -9,7 +9,10 @@
         "mouse": "absolute",
         "video": "h264/1080p60",
         "power_state_trusted": false
-      }
+      },
+      "latest": "V1.9.1 release1",
+      "source": "https://dl.gl-inet.com/kvm/rm1/stable",
+      "date": "2026-07-02"
     }
   ]
 }
