@@ -2,7 +2,8 @@
 """Build a GitHub-wiki-formatted mirror of the project documentation.
 
 The canonical docs live in ``docs/`` (plus two guides that must stay next to the
-code they document: ``skill/SKILL.md`` and ``mcp_server/README.md``). A GitHub
+code they document: ``src/kvm_pilot/skill/SKILL.md`` and
+``src/kvm_pilot/mcp/README.md``). A GitHub
 wiki is a flat namespace of pages with no subfolders, so this script copies each
 source page to a flat output directory, rewrites intra-doc links for that flat
 namespace (``architecture.md`` -> ``architecture``, ``docs/README.md`` -> the
@@ -38,8 +39,8 @@ PAGES: list[tuple[str, str, str | None]] = [
     ("docs/configuration.md", "configuration.md", "Configuration"),
     ("docs/decisions.md", "decisions.md", "Design decisions"),
     ("docs/redfish.md", "redfish.md", "Redfish reference"),
-    ("skill/SKILL.md", "skill.md", "Claude skill"),
-    ("mcp_server/README.md", "mcp-server.md", "MCP server"),
+    ("src/kvm_pilot/skill/SKILL.md", "skill.md", "Claude skill"),
+    ("src/kvm_pilot/mcp/README.md", "mcp-server.md", "MCP server"),
     ("docs/CONTRIBUTING.md", "CONTRIBUTING.md", "Contributing"),
     ("docs/SECURITY.md", "SECURITY.md", "Security policy"),
     # Analysis output: session-level review narratives (docs/analysis/).
@@ -184,7 +185,8 @@ def _rewrite_target(target: str, src_dir: str) -> str:
     """Map a link target as written in the repo to its flat-wiki equivalent.
 
     ``src_dir`` is the repo-relative directory of the source page (``docs``,
-    ``skill``, ``mcp_server``) so remaining relative targets can be resolved.
+    ``src/kvm_pilot/skill``, ``src/kvm_pilot/mcp``) so remaining relative targets
+    can be resolved.
     """
     if re.match(r"^(https?:|#|mailto:|/)", target):
         return target  # external, in-page anchor, or absolute — leave untouched
@@ -197,7 +199,7 @@ def _rewrite_target(target: str, src_dir: str) -> str:
     # The two co-located guides map to their renamed wiki pages.
     if lower in ("skill.md",) or name == "SKILL.md":
         return "skill" + anchor
-    if "mcp_server" in path or lower == "mcp-server.md":
+    if "mcp_server" in path or "kvm_pilot/mcp/" in path or lower == "mcp-server.md":
         return "mcp-server" + anchor
     if name == "README.md":  # the docs index is the wiki landing page
         return "Home" + anchor

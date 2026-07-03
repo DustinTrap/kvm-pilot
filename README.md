@@ -2,7 +2,7 @@
 
 **AI-driven bare-metal control for IP-KVMs (PiKVM, the GL.iNet GLKVM fork GL-RM1 / GL-RM1PE, BliKVM) and Redfish BMCs (iDRAC, iLO, OpenBMC).**
 
-`kvm-pilot` is a stdlib-only Python client for the PiKVM REST API, a safety layer
+`kvm-pilot` is a stdlib-only-at-its-core Python client for the PiKVM REST API, a safety layer
 that gates destructive power/media operations, and a pluggable vision subsystem
 that reads a KVM screenshot and tells you what boot phase the machine is in —
 `bios_menu`, `grub_menu`, `installer_progress`, `login_prompt`, `crash_screen`,
@@ -79,16 +79,19 @@ firmware, the bootloader, and an OS install.
 ## Install
 
 ```bash
-pip install --pre kvm-pilot                    # core, zero runtime dependencies
+pip install --pre kvm-pilot                    # CLI + skill + MCP server, batteries included
 pip install --pre "kvm-pilot[totp]"            # + 2FA / TOTP support (pyotp)
 pip install --pre "kvm-pilot[ws]"              # + WebSocket event streaming
 ```
 
-The current release (`0.1.0a2`) is a **pre-release**, so `--pre` (or pinning
-`==0.1.0a2`) is required — a plain `pip install kvm-pilot` deliberately picks up
-no alpha. The core has **no third-party runtime dependencies** — it is pure
-standard library; extras are opt-in. (`0.1.0a1` is yanked and much older than this
-README — don't use it.) For the latest unreleased tree, install from git:
+One install gives you the whole product: the **`kvm-pilot` CLI**, the **`kvm-pilot-mcp`
+MCP server** (for Claude Desktop / Claude Code and other agent hosts), and the
+bundled **Claude skill** — nothing to clone. The current release (`0.1.0a4`) is a
+**pre-release**, so `--pre` (or pinning `==0.1.0a4`) is required — a plain
+`pip install kvm-pilot` deliberately picks up no alpha. The client/driver code
+imports only the standard library; the one runtime dependency is the `mcp` SDK
+(for the bundled server), and `totp`/`ws` are opt-in extras. (`0.1.0a1` is yanked
+and much older than this README — don't use it.) For the latest unreleased tree:
 
 ```bash
 pip install "kvm-pilot[totp,ws] @ git+https://github.com/DustinTrap/kvm-pilot"
@@ -216,7 +219,8 @@ PiKVM client. `kvm-pilot` is aimed at a different job:
 - **A safety layer** around destructive operations (dry-run + confirmation).
 - **GLKVM-fork awareness** — documents the API-enable prerequisite and GL
   hardware quirks that bite GL-RM1PE users.
-- **Zero runtime dependencies** in the core.
+- **Stdlib-only client core** — the driver/vision code imports only the standard
+  library (the bundled MCP server pulls the `mcp` SDK; feature extras are opt-in).
 
 If you just want to script power and HID against a stock PiKVM and don't need
 the vision layer, `pikvm-lib` may be the simpler choice.

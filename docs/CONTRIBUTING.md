@@ -34,8 +34,11 @@ driver or CLI dispatch, run what CI runs:
 
 ## Principles
 
-- **Core stays stdlib-only.** Anything needing a third-party package goes behind
-  an optional extra (see `totp` / `ws` in `pyproject.toml`), imported lazily.
+- **Client/driver code stays stdlib-only at import time**, but `pip install
+  kvm-pilot` ships everything a user needs — CLI, skill, and MCP server. A
+  user-facing surface lives under `src/kvm_pilot/` and its runtime dep is a **base**
+  dependency (`mcp` for the server); feature deps like `totp` / `ws` stay optional
+  extras, imported lazily. Don't hide a user-facing surface behind an extra.
 - **No hard-coded model versions.** The vision backends resolve or accept a
   model at runtime; don't bake a version string into the code.
 - **Destructive operations are gated.** If you add a method that can change a

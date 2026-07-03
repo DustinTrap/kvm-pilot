@@ -2,10 +2,12 @@
 Experimental MCP server for kvm-pilot.
 
 Exposes a KVM device to MCP-capable agents (Claude Desktop, etc.) over stdio.
-This is a SEPARATE component from the stdlib-only core library and depends on
-the `mcp` SDK — install from ``mcp_server/requirements.txt``, not the core.
+It ships in the wheel (``pip install kvm-pilot``) and is launched via the
+``kvm-pilot-mcp`` console script or ``python -m kvm_pilot.mcp.server``. It depends
+on the `mcp` SDK, which is a base dependency (the client/driver code itself stays
+stdlib-only, importing ``mcp`` only here).
 
-SAFETY MODEL (see mcp_server/README.md for the operator-facing version):
+SAFETY MODEL (see the co-located README.md for the operator-facing version):
   * The read-only tools (``info``, ``healthcheck``, ``capabilities``,
     ``power_state``, ``logs``, ``snapshot``, ``classify_screen``) run with a
     deny-all confirm callback and carry a ``readOnlyHint`` tool annotation.
@@ -31,7 +33,7 @@ import os
 import threading
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from typing import Literal
+from typing import TYPE_CHECKING, Literal, cast
 
 from mcp.server.fastmcp import FastMCP, Image
 from mcp.server.fastmcp.exceptions import ToolError
@@ -42,6 +44,12 @@ from kvm_pilot.config import HostConfig
 from kvm_pilot.drivers import Capability, KVMDriver, make_driver_from_config
 from kvm_pilot.safety import allow_all, deny_all
 from kvm_pilot.vision import ScreenAnalyzer, VisionBackend, make_backend
+
+if TYPE_CHECKING:
+    # ``_driver(capability=…)`` guarantees the driver supports the capability at
+    # runtime; narrow to the owning protocol for the capability-specific calls
+    # (mirrors the ``cast`` pattern in cli.py).
+    from kvm_pilot.drivers.base import Logs, Power, SystemInfo, Video
 
 mcp = FastMCP("kvm-pilot")
 _log = logging.getLogger("kvm_pilot.mcp")
@@ -191,7 +199,7 @@ def _vision_backend() -> VisionBackend:
 def info(profile: str | None = None) -> dict:
     """Return device / system info (read-only)."""
     with _driver(profile, confirm=deny_all, capability=Capability.SYSTEM_INFO) as (cfg, kvm):
-        return {**_provenance(cfg), "info": kvm.get_info()}
+        return {**_provenance(cfg), "info": cast("SystemInfo", kvm).get_info()}
 
 
 @mcp.tool(annotations=_READ_ONLY)
@@ -228,7 +236,7 @@ def power_state(profile: str | None = None) -> dict:
     """Return whether the host is powered on, plus ATX detail where the driver has it
     (read-only)."""
     with _driver(profile, confirm=deny_all, capability=Capability.POWER) as (cfg, kvm):
-        state = {**_provenance(cfg), "powered_on": kvm.is_powered_on()}
+        state = {**_provenance(cfg), "powered_on": cast("Power", kvm).is_powered_on()}
         # ATX detail is PiKVM-family only; Redfish/fake answer via is_powered_on().
         if hasattr(kvm, "get_atx_state"):
             state["atx"] = kvm.get_atx_state()
@@ -246,7 +254,7 @@ def logs(seek: int = 0, profile: str | None = None) -> dict:
     over the server's synchronous transport.
     """
     with _driver(profile, confirm=deny_all, capability=Capability.LOGS) as (cfg, kvm):
-        return {**_provenance(cfg), "log": kvm.get_logs(seek=seek)}
+        return {**_provenance(cfg), "log": cast("Logs", kvm).get_logs(seek=seek)}
 
 
 @mcp.tool(annotations=_READ_ONLY)
@@ -256,7 +264,7 @@ def snapshot(profile: str | None = None):
         note = f"screen of host '{cfg.host}' via the '{cfg.driver}' driver"
         if _dry_run():
             note += " (dry-run session)"
-        return [note, Image(data=kvm.snapshot(), format="jpeg")]
+        return [note, Image(data=cast("Video", kvm).snapshot(), format="jpeg")]
 
 
 @mcp.tool(annotations=_READ_ONLY)
@@ -276,8 +284,8 @@ def power(
     """Change host power state. DESTRUCTIVE.
 
     Disabled unless the server operator has enabled power control in the server's
-    own environment (see mcp_server/README.md). ``confirm=true`` is required as a
-    second factor.
+    own environment (see the co-located README.md). ``confirm=true`` is required as
+    a second factor.
     """
     if not _env_flag("KVM_PILOT_MCP_ALLOW_POWER"):
         # Deliberately no copy-pasteable variable assignment here: the gate must be
@@ -286,7 +294,7 @@ def power(
         raise ToolError(
             "power control is disabled on this server. Only the human operator can "
             "enable it, by setting the power-enable environment variable (documented "
-            "in mcp_server/README.md) in the MCP server's own environment before "
+            "in the server's README.md) in the MCP server's own environment before "
             "starting it. It cannot be enabled from within an agent session."
         )
     if not confirm:

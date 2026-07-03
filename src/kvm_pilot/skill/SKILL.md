@@ -8,7 +8,7 @@ description: >-
   (POST, GRUB, installer, login, crash). Backed by the `kvm-pilot` Python
   package; vision runs on Claude or a local OpenAI-compatible VLM. **No single
   interface is best for everything — pick per action: the bundled MCP server
-  (`mcp_server/`) for the visual loop (snapshot/classify) and gated power, the
+  (`kvm-pilot-mcp`) for the visual loop (snapshot/classify) and gated power, the
   CLI for logs/capabilities/firmware/events/HID/media, the Python library for
   mouse and MSD switching, and SSH for appliance maintenance the tool can't do.
   See the interface matrix in the skill body.** Early alpha, never validated on real hardware
@@ -74,10 +74,10 @@ absent, register the server and tell the user to restart the session so the
 tools load:
 
 ```bash
-# server deps: pip install -r mcp_server/requirements.txt
+# pip install --pre kvm-pilot   installs the CLI, the MCP server, and its deps
 claude mcp add kvm-pilot -s user \
     -e KVM_PILOT_PROFILE=<profile> -e KVM_PILOT_MCP_DRY_RUN=1 -- \
-    /path/to/.venv/bin/python /path/to/mcp_server/server.py
+    kvm-pilot-mcp
 claude mcp list          # expect: kvm-pilot ... ✔ Connected
 ```
 
@@ -92,7 +92,7 @@ untested alpha — destructive calls are logged, not sent. The `power` tool is
 **disabled** unless the operator sets `KVM_PILOT_MCP_ALLOW_POWER=1` in the
 server's own `env`, and even then MCP hosts should require per-call human
 approval (never "always allow"). Full operator guide:
-[`mcp_server/README.md`](https://github.com/DustinTrap/kvm-pilot/blob/main/mcp_server/README.md).
+[MCP server README](https://github.com/DustinTrap/kvm-pilot/blob/main/src/kvm_pilot/mcp/README.md).
 
 ## Multitasking — use interfaces in parallel
 
@@ -113,15 +113,14 @@ and cross-check signals:
 ## Setup
 
 ```bash
-pip install kvm-pilot==0.1.0a1            # core, stdlib-only
-pip install "kvm-pilot[totp]==0.1.0a1"    # if the device has 2FA enabled
+pip install --pre kvm-pilot               # CLI + this skill + the MCP server
+pip install --pre "kvm-pilot[totp]"       # add if the device has 2FA enabled
 ```
 
-`0.1.0a1` is an untested early alpha and is **yanked** on PyPI (opt-in only),
-so pin the exact version — a bare `pip install kvm-pilot` installs nothing.
-It also predates the newer drivers and CLI (`make_driver`, the
-GLKVM/BliKVM/Redfish/fake drivers, `capabilities`/`events`/`eject`); for those,
-install the current tree instead:
+It's a pre-release, so `--pre` (or pinning `==0.1.0a4`) is required — a bare
+`pip install kvm-pilot` deliberately picks up no alpha. A single install brings
+the `kvm-pilot` CLI, the `kvm-pilot-mcp` server, and this skill file. For the
+latest unreleased tree, install from git:
 
 ```bash
 pip install "kvm-pilot[totp,ws] @ git+https://github.com/DustinTrap/kvm-pilot"

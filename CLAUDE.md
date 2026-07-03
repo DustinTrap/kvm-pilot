@@ -24,10 +24,20 @@ to it for current truth.
   one describing the problem, the decision, and the plan; reference it in the
   commit/PR and post material findings or scope changes back to the issue. Do not
   make meaningful changes with no tracked issue.
-- **Core is stdlib-only / zero runtime deps.** Anything needing a third-party
-  package goes behind an optional extra in `pyproject.toml` (`totp`, `ws`, …) and
-  is imported lazily inside the function that uses it (see `http.py:_totp_now`
-  and `client.py:watch_events`).
+- **`pip install kvm-pilot` ships everything the user needs.** Every user-facing
+  surface — the CLI, the bundled Claude skill, the MCP server, and anything added
+  going forward — must live under `src/kvm_pilot/` so it lands in the wheel, and a
+  surface's runtime dependency is a **base** dependency in `pyproject`
+  `[project].dependencies` with a console script (`kvm-pilot`, `kvm-pilot-mcp`).
+  Don't hide a user-facing surface behind an opt-in extra. (`dev` tooling stays an
+  extra.)
+- **Client/driver code is stdlib-only at import time.** The library modules
+  (`client.py`, `drivers/`, `http.py`, `vision/`) import only the standard library;
+  a third-party need (`mcp` for the server, `pyotp`/`ws` for a feature) is imported
+  lazily inside its own subpackage/function (see `http.py:_totp_now`,
+  `client.py:watch_events`), never at core import. The *distribution* still depends
+  on `mcp` (the bundled server) — that's deliberate; see [batteries-included rule
+  above and issue #109]. `totp`/`ws` remain opt-in extras for now.
 - **No hard-coded model versions.** The Anthropic vision backend resolves the
   newest model at runtime (`src/kvm_pilot/vision/anthropic.py`); never bake a
   `claude-*` version string into the code.
@@ -43,7 +53,7 @@ to it for current truth.
   auto-runs *on first connection*, not only before destructive ops. Today only
   the destructive-subcommand path auto-gates (`cli.py` `_preflight_gate`) and the
   MCP server does not auto-run it at all — until that gap is closed, the operating
-  procedure (`skill/SKILL.md`, `mcp_server/README.md`) requires running it
+  procedure (`src/kvm_pilot/skill/SKILL.md`, `src/kvm_pilot/mcp/README.md`) requires running it
   explicitly on first contact. Don't treat a bare `info`/`snapshot` as vetting.
 - **Capabilities, not a monolith.** New device support = a driver implementing the
   relevant capability protocols in `src/kvm_pilot/drivers/base.py` (`Power`,
@@ -76,8 +86,12 @@ Optimize for the next person reading this, not for cleverness.
   fake servers `emulator.py` (kvmd) and `redfish_emulator.py` exercised over the real transport.
 - `docs/` — the docs hub (`README.md` index): `architecture.md` (driver-plugin design +
   diagrams), `redfish.md` (Redfish reference), `decisions.md` (design-decision records),
-  `CONTRIBUTING.md`, `SECURITY.md`. `skill/SKILL.md` (bundled Claude skill) and
-  `mcp_server/README.md` stay next to their code but are mirrored into the docs too.
+  `CONTRIBUTING.md`, `SECURITY.md`. `src/kvm_pilot/skill/SKILL.md` (bundled Claude
+  skill, shipped as package data) and `src/kvm_pilot/mcp/README.md` stay next to
+  their code but are mirrored into the docs too.
+- `src/kvm_pilot/mcp/` — the bundled FastMCP stdio server (`server.py`, entry point
+  `kvm-pilot-mcp`); `src/kvm_pilot/skill/SKILL.md` — the bundled Claude skill. Both
+  ship in the wheel (see the batteries-included rule above).
 - The GitHub wiki is auto-generated from `docs/` by `.github/workflows/wiki-sync.yml`
   (via `.github/scripts/build_wiki.py`) — edit the docs, never the wiki.
 

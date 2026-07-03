@@ -6,6 +6,28 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.0a4] — 2026-07-03
+
+Batteries-included packaging: `pip install kvm-pilot` now installs the whole
+product — CLI, the bundled Claude skill, and the MCP server (#109, part of #7).
+
+### Added
+- **`kvm-pilot-mcp` console script** — the MCP server now ships in the wheel and
+  launches via `kvm-pilot-mcp` (or `python -m kvm_pilot.mcp.server`); no separate
+  clone or `requirements.txt` step.
+- The **bundled Claude skill** (`SKILL.md`) ships as package data under the
+  installed package.
+
+### Changed
+- **New packaging rule:** `pip install kvm-pilot` installs every user-facing
+  surface. The MCP server moved to `src/kvm_pilot/mcp/`, the skill to
+  `src/kvm_pilot/skill/`, and **`mcp>=1.10` is now a base dependency** (the
+  client/driver code still imports only the stdlib — `mcp` is imported only in the
+  server subpackage). `totp` / `ws` remain opt-in extras. The prior "core = zero
+  runtime dependencies" framing is updated accordingly across the docs.
+- Removed `mcp_server/requirements.txt` (its deps are declared in `pyproject`; it
+  also still pinned the yanked `0.1.0a1`).
+
 ## [0.1.0a3] — 2026-07-03
 
 Docs-only release: corrects stale honesty claims now that the project has touched
@@ -401,6 +423,7 @@ user feedback. **Not validated on real hardware** — see Notes.
   feedback are the explicit goals of this alpha. Reports welcome in the issue
   tracker.
 
+[0.1.0a4]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a4
 [0.1.0a3]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a3
 [0.1.0a2]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a2
 [0.1.0a1]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a1

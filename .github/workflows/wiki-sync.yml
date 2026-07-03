@@ -13,8 +13,8 @@ on:
     paths:
       - "docs/**"
       - "data/test_runs.jsonl"
-      - "skill/SKILL.md"
-      - "mcp_server/README.md"
+      - "src/kvm_pilot/skill/SKILL.md"
+      - "src/kvm_pilot/mcp/README.md"
       - ".github/scripts/build_wiki.py"
       - ".github/workflows/wiki-sync.yml"
   workflow_dispatch:

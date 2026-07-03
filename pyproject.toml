@@ -31,8 +31,10 @@ classifiers = [
     "Topic :: Utilities",
     "Typing :: Typed",
 ]
-# Core has ZERO runtime dependencies (stdlib only). Extras are opt-in.
-dependencies = []
+# The client/driver code is stdlib-only at import time; `mcp` is a base dependency
+# because the bundled MCP server ships in the wheel and must run from a plain
+# `pip install kvm-pilot` (see the batteries-included rule in CLAUDE.md, #109).
+dependencies = ["mcp>=1.10"]
 
 [project.optional-dependencies]
 totp = ["pyotp>=2.10.0"]
@@ -48,6 +50,7 @@ dev = [
 
 [project.scripts]
 kvm-pilot = "kvm_pilot.cli:main"
+kvm-pilot-mcp = "kvm_pilot.mcp.server:main"
 
 [project.urls]
 Homepage = "https://github.com/DustinTrap/kvm-pilot"
