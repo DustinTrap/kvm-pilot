@@ -79,8 +79,8 @@ All of the per-field vars in the table above, plus:
 | `KVM_PILOT_VISION_MODEL` | Anthropic vision backend | Pin a vision model id; unset = auto-resolve the newest vision-capable model at runtime. |
 | `ANTHROPIC_API_KEY` | Anthropic vision backend | Required for `classify`/`watch` with the default backend (validated lazily, at first network use). |
 | `OPENAI_API_KEY` | local/OpenAI-compatible vision backend | Optional; most local servers ignore it (defaults to `not-needed`). |
-| `KVM_PILOT_MCP_ALLOW_POWER` | MCP server only | Gates the destructive `power` tool — see [`mcp_server/README.md`](https://github.com/DustinTrap/kvm-pilot/blob/main/mcp_server/README.md). |
-| `KVM_PILOT_MCP_DRY_RUN` | MCP server only | Forces dry-run: destructive tool calls are logged, not sent — see [`mcp_server/README.md`](https://github.com/DustinTrap/kvm-pilot/blob/main/mcp_server/README.md). |
+| `KVM_PILOT_MCP_ALLOW_POWER` | MCP server only | Gates the destructive `power` tool — see [`the MCP server README`](https://github.com/DustinTrap/kvm-pilot/blob/main/src/kvm_pilot/mcp/README.md). |
+| `KVM_PILOT_MCP_DRY_RUN` | MCP server only | Forces dry-run: destructive tool calls are logged, not sent — see [`the MCP server README`](https://github.com/DustinTrap/kvm-pilot/blob/main/src/kvm_pilot/mcp/README.md). |
 | `KVM_PILOT_REDFISH_URL` | test suite only | Points the opt-in Redfish integration tests (`pytest tests/integration -m integration`) at an external emulator; not read by the library or CLI. |
 
 A ready-to-copy env template ships as

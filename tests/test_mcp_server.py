@@ -1,12 +1,12 @@
-"""Integration tests for the experimental MCP server (mcp_server/server.py).
+"""Integration tests for the bundled MCP server (``kvm_pilot.mcp.server``).
 
 These spawn the real server over stdio with the ``mcp`` SDK's client — the same
 transport an MCP host uses — so they exercise the initialize handshake, tool
 listing/annotations, and the safety gates end to end. The device is always the
 in-process FakeDriver (selected via a temp config file); no network, no hardware.
 
-Skipped entirely when the ``mcp`` SDK is not installed (it is not a core
-dependency — see mcp_server/requirements.txt).
+The ``mcp`` SDK is a base dependency (it ships with the wheel), so this normally
+runs; ``importorskip`` only guards a stripped-down install.
 """
 
 from __future__ import annotations
@@ -23,9 +23,6 @@ pytest.importorskip("mcp")
 
 from mcp import ClientSession, StdioServerParameters  # noqa: E402
 from mcp.client.stdio import stdio_client  # noqa: E402
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-SERVER = REPO_ROOT / "mcp_server" / "server.py"
 
 EXPECTED_TOOLS = {
     "info",
@@ -67,7 +64,9 @@ def run_session(env: dict[str, str], interact):
     """Spawn the server over stdio, initialize, run ``interact(session)``."""
 
     async def runner():
-        params = StdioServerParameters(command=sys.executable, args=[str(SERVER)], env=env)
+        params = StdioServerParameters(
+            command=sys.executable, args=["-m", "kvm_pilot.mcp.server"], env=env
+        )
         async with stdio_client(params) as (read, write):
             async with ClientSession(read, write) as session:
                 init = await session.initialize()

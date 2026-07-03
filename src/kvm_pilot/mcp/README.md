@@ -1,10 +1,10 @@
 # kvm-pilot MCP server (experimental)
 
 A local **stdio MCP server** that exposes a KVM device to MCP-capable agents
-(Claude Desktop, Claude Code, other agent hosts). It is a *separate component*
-from the stdlib-only core library — it depends on the
-[`mcp`](https://pypi.org/project/mcp/) SDK (`mcp>=1.10`, see
-`requirements.txt`).
+(Claude Desktop, Claude Code, other agent hosts). It **ships in the wheel** —
+`pip install kvm-pilot` installs it and the `kvm-pilot-mcp` launcher, pulling the
+[`mcp`](https://pypi.org/project/mcp/) SDK (`mcp>=1.10`) as a base dependency. The
+client/driver code stays stdlib-only; `mcp` is imported only in this subpackage.
 
 > ⚠️ **Experimental alpha.** The core library is **largely unverified** — mostly
 > unit-tested against mocks and emulators, with only a handful of device+capability
@@ -109,10 +109,8 @@ visible in transcripts.
 ## Run
 
 ```bash
-# from the repo root
-pip install -e ".[totp,ws]"                  # the core library
-pip install -r mcp_server/requirements.txt   # the MCP SDK
-python mcp_server/server.py
+pip install --pre kvm-pilot     # installs the CLI, the MCP server, and the `mcp` SDK
+kvm-pilot-mcp                    # start the stdio server (or: python -m kvm_pilot.mcp.server)
 ```
 
 ## Environment variables
@@ -139,8 +137,7 @@ on purpose — remove it only once you accept the alpha status, and add
 {
   "mcpServers": {
     "kvm-pilot": {
-      "command": "python",
-      "args": ["/abs/path/to/kvm-pilot/mcp_server/server.py"],
+      "command": "kvm-pilot-mcp",
       "env": {
         "KVM_PILOT_PROFILE": "homelab",
         "KVM_PILOT_MCP_DRY_RUN": "1",
