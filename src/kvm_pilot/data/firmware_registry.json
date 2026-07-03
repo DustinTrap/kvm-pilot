@@ -8,7 +8,15 @@
       "profile": {
         "mouse": "absolute",
         "video": "h264/1080p60",
-        "power_state_trusted": false
+        "power_state_trusted": false,
+        "remote_update": {
+          "supported": true,
+          "method": "gl-api",
+          "risk": "high",
+          "recovery_required": true,
+          "self_flash_blind": true,
+          "notes": "GL flashes a monolithic image to onboard storage (no A/B rollback) and reboots; recovery is physical-only (U-Boot failsafe at 192.168.1.1). A firmware update can revert /etc/kvmd/nginx-kvmd.conf and re-disable the REST API, and may start with virtual media still mounted (gl-inet/glkvm#120)."
+        }
       },
       "latest": "V1.9.1 release1",
       "source": "https://dl.gl-inet.com/kvm/rm1/stable",

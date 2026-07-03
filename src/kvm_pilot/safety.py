@@ -64,6 +64,10 @@ DESTRUCTIVE_OPS: set[str] = {
     "hid.send_shortcut",
     "hid.key_event",
     "hid.mouse_click",
+    # Flashing the KVM/BMC's own firmware — the most destructive op we expose: the
+    # device reboots into a new image (dropping this control channel) and a failed
+    # flash may need physical recovery. See FirmwareUpdate in drivers/base.py.
+    "firmware.flash",
 }
 
 # Callback signature: (op_name, human_description) -> bool

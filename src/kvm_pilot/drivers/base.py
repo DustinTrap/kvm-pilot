@@ -40,6 +40,7 @@ class Capability(StrEnum):
     SENSORS = "sensors"
     SERIAL_CONSOLE = "serial_console"
     WATCHDOG = "watchdog"
+    FIRMWARE_UPDATE = "firmware_update"
 
 
 @runtime_checkable
@@ -174,6 +175,24 @@ class Watchdog(Protocol):
     def watchdog_pet(self) -> None: ...
 
 
+@runtime_checkable
+class FirmwareUpdate(Protocol):
+    """Flash the **KVM/BMC's own firmware** over the network (GL ``/api/upgrade/*``,
+    Redfish ``UpdateService``).
+
+    This is the most destructive op a driver can expose: the device flashes itself
+    and reboots, dropping the very control channel used to observe it, and a failed
+    flash may need physical recovery. ``get_upgrade_status`` is a read-only probe;
+    ``apply_firmware_update`` performs the flash and MUST route through
+    ``safety.guard("firmware.flash", …)`` and default to ``dry_run=True``. The
+    per-model reliability (risk, recovery-required) lives in the firmware registry
+    ``profile.remote_update``, not here — see ``docs/firmware-update.md``.
+    """
+
+    def get_upgrade_status(self) -> dict: ...
+    def apply_firmware_update(self, *, image: str | None = None, dry_run: bool = True) -> dict: ...
+
+
 # Maps each capability to the protocol that defines it, so support can be
 # detected structurally rather than declared by hand.
 CAPABILITY_PROTOCOLS: dict[Capability, type] = {
@@ -189,6 +208,7 @@ CAPABILITY_PROTOCOLS: dict[Capability, type] = {
     Capability.SENSORS: Sensors,
     Capability.SERIAL_CONSOLE: SerialConsole,
     Capability.WATCHDOG: Watchdog,
+    Capability.FIRMWARE_UPDATE: FirmwareUpdate,
 }
 
 
@@ -274,6 +294,7 @@ __all__ = [
     "Sensors",
     "SerialConsole",
     "Watchdog",
+    "FirmwareUpdate",
     "KVMDriver",
     "CapabilityMixin",
     "PowerMixin",

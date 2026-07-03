@@ -550,6 +550,26 @@ def _match_firmware(entries: list[dict], vendor: str, product: str) -> dict | No
     return None
 
 
+def _firmware_remediation(entry: dict, source: str) -> str:
+    """Remediation text for a stale-firmware finding.
+
+    When the registry entry's ``profile.remote_update`` says this model can be
+    flashed over the network, offer the actionable ``firmware-update`` command with
+    its risk up front; otherwise fall back to the vendor download pointer. The
+    healthcheck never flashes — it only surfaces the option (see docs/firmware-update.md).
+    """
+    ru = (entry.get("profile") or {}).get("remote_update") or {}
+    if not ru.get("supported"):
+        return f"Update the firmware. Source: {source}."
+    risk = (ru.get("risk") or "unknown").upper()
+    recovery = " A failed flash needs physical access to recover." if ru.get("recovery_required") else ""
+    return (
+        f"Update the firmware. This model supports remote update: run "
+        f"`kvm-pilot firmware-update` (RISK: {risk} — review its assessment before "
+        f"proceeding).{recovery} Or flash via the vendor UI: {source}."
+    )
+
+
 def check_firmware_currency(driver: Any) -> CheckResult | None:
     """Flag known-bad firmware or an available update, via the firmware registry."""
     fn = getattr(driver, "get_firmware_info", None)
@@ -578,7 +598,7 @@ def check_firmware_currency(driver: Any) -> CheckResult | None:
                 severity=Severity.CRITICAL if bad.get("severity") == "critical" else Severity.WARNING,
                 title="Known-bad firmware",
                 detail=f"{product} {version} matches a known-bad range ({bad['affected']}): {bad['issue']}.{fixed}",
-                remediation=f"Update the firmware. Source: {bad.get('source', 'n/a')}.",
+                remediation=_firmware_remediation(entry, bad.get("source", "n/a")),
             )
 
     # 2) Out of date: strictly behind the latest known release.
@@ -590,7 +610,7 @@ def check_firmware_currency(driver: Any) -> CheckResult | None:
             severity=Severity.WARNING,
             title="Firmware update available",
             detail=f"{product} is on {version}; latest known is {latest} (as of {entry.get('date', '?')}).",
-            remediation=f"Update the firmware. Source: {entry.get('source', 'the vendor download page')}.",
+            remediation=_firmware_remediation(entry, entry.get("source", "the vendor download page")),
         )
     return None  # current (or ahead) -> the pillar stays quiet
 

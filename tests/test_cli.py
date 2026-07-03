@@ -1,5 +1,7 @@
 """Tests for the CLI parser and dispatch wiring."""
 
+import types
+
 import pytest
 
 from kvm_pilot.cli import build_parser, main
@@ -424,3 +426,101 @@ def test_inform_on_connect_swallows_audit_errors(monkeypatch, capsys):
     monkeypatch.setattr("kvm_pilot.health.preflight_once", boom)
     cli._inform_on_connect(object(), skip=False)  # must not raise
     assert capsys.readouterr().err == ""
+
+
+# -- firmware-update command -----------------------------------------------
+
+
+class _FakeFwu:
+    """A driver stub exposing just the surface cmd_firmware_update touches."""
+
+    def __init__(self, *, enabled=True):
+        self._status = {"enabled": enabled, "current": "V1.5.1 release2",
+                        "image_size": 307581578}
+        self.calls: list[tuple] = []
+
+    def supports(self, cap):
+        from kvm_pilot.drivers.base import Capability
+
+        return cap == Capability.FIRMWARE_UPDATE  # VIRTUAL_MEDIA False -> eject skipped
+
+    def get_upgrade_status(self):
+        return self._status
+
+    def get_firmware_info(self):
+        return {"vendor": "gl.inet", "product": "RM1PE", "version": "V1.5.1 release2"}
+
+    def apply_firmware_update(self, *, image=None, dry_run=True):
+        self.calls.append(("apply", dry_run, image))
+        return {"sent": not dry_run, "dry_run": dry_run,
+                "plan": [{"method": "POST", "path": "/api/upgrade/start", "note": "flash"}]}
+
+    def close(self):
+        pass
+
+
+def _recovery_report(severity):
+    r = types.SimpleNamespace(id="recovery-path", severity=severity)
+    return types.SimpleNamespace(results=[r])
+
+
+def _patch_fwu(monkeypatch, driver, severity):
+    from kvm_pilot import cli, health
+
+    monkeypatch.setattr(cli, "_build_client", lambda args: driver)
+    monkeypatch.setattr(health, "run_healthcheck", lambda kvm: _recovery_report(severity))
+
+
+def test_firmware_update_dry_run_is_default_and_sends_nothing(monkeypatch, capsys):
+    from kvm_pilot.health import Severity
+
+    d = _FakeFwu()
+    _patch_fwu(monkeypatch, d, Severity.CRITICAL)
+    rc = main(["firmware-update", "--host", "h"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "DRY RUN" in out and "RISK HIGH" in out
+    assert d.calls == [("apply", True, None)]  # dry-run plan only, never executed
+
+
+def test_firmware_update_execute_refuses_without_recovery_or_override(monkeypatch, capsys):
+    from kvm_pilot.health import Severity
+
+    d = _FakeFwu()
+    _patch_fwu(monkeypatch, d, Severity.CRITICAL)
+    rc = main(["firmware-update", "--host", "h", "--execute"])
+    assert rc == 1
+    assert "Refusing to flash" in capsys.readouterr().err
+    assert d.calls == []  # the real flash was never attempted
+
+
+def test_firmware_update_execute_with_override_flashes(monkeypatch, capsys):
+    from kvm_pilot.health import Severity
+
+    d = _FakeFwu()
+    _patch_fwu(monkeypatch, d, Severity.CRITICAL)
+    rc = main(["firmware-update", "--host", "h", "--execute",
+               "--i-have-physical-access", "--yes"])
+    assert rc == 0
+    assert ("apply", False, None) in d.calls
+    assert "flash started" in capsys.readouterr().out.lower()
+
+
+def test_firmware_update_execute_allowed_when_recovery_present(monkeypatch, capsys):
+    from kvm_pilot.health import Severity
+
+    d = _FakeFwu()
+    _patch_fwu(monkeypatch, d, Severity.OK)  # recovery-path OK, not CRITICAL
+    rc = main(["firmware-update", "--host", "h", "--execute", "--yes"])
+    assert rc == 0
+    assert ("apply", False, None) in d.calls
+
+
+def test_firmware_update_reports_when_subsystem_disabled(monkeypatch, capsys):
+    from kvm_pilot.health import Severity
+
+    d = _FakeFwu(enabled=False)
+    _patch_fwu(monkeypatch, d, Severity.OK)
+    rc = main(["firmware-update", "--host", "h"])
+    assert rc == 1
+    assert "not available" in capsys.readouterr().err

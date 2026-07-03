@@ -29,6 +29,7 @@ _VALID_POST_PATHS = frozenset({
     "/api/msd/write", "/api/msd/write_remote", "/api/msd/set_params",
     "/api/msd/set_connected", "/api/msd/remove", "/api/msd/reset",
     "/api/gpio/switch", "/api/gpio/pulse",
+    "/api/upgrade/start", "/api/upgrade/upload",
 })
 
 
@@ -45,6 +46,14 @@ class FakeKVMState:
         self.atx_enabled = True
         self.gpio_outputs: dict[str, object] = {}
         self.msd: dict[str, object] = {"online": False, "drive": {"image": None}}
+        # GL /api/upgrade/* remote-firmware surface. Absent by default (older
+        # firmware / fallback path) so get_firmware_info keeps returning the base
+        # kvmd version; a test flips upgrade_present to exercise the flash path.
+        self.upgrade_present = False
+        self.upgrade_enabled = True
+        self.upgrade_version: dict[str, object] = {
+            "model": "GL-RM1PE", "version": "V1.5.1 release2"}
+        self.upgrade_image_size = 307581578
         # Real kvmd 401s /api/* without valid X-KVMD-User/Passwd (or auth_token
         # cookie). Enforced by default so a dropped-credential regression fails.
         self.expected_user = "admin"
@@ -148,6 +157,16 @@ class _Handler(BaseHTTPRequestHandler):
         elif path == "/api/log":
             # kvmd streams plain-text journal lines (non-follow returns the buffer).
             self._send(b"[boot] kvmd started\n[atx] power on\n", ctype="text/plain")
+        elif path.startswith("/api/upgrade/") and self._state.upgrade_present:
+            # GL's proprietary remote-firmware surface (read-only endpoints).
+            if path == "/api/upgrade/status":
+                self._json({"enabled": self._state.upgrade_enabled})
+            elif path == "/api/upgrade/version":
+                self._json(self._state.upgrade_version)
+            elif path == "/api/upgrade/download":
+                self._json({"size": self._state.upgrade_image_size})
+            else:
+                self._json({}, ok=False, status=404)
         else:
             self._json({}, ok=False, status=404)
 

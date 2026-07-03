@@ -47,7 +47,11 @@ upgradeable one.)
         "mouse": "absolute",            // absolute | relative | none  → GUI usability
         "vmedia": "reports-only",       // reliable | reports-only | none → boot-from-ISO fidelity (#77)
         "power_state_trusted": false,   // are ATX/LED readings truthful → safe to automate reboots?
-        "video": "h264/1080p60"         // rated transport + ceiling (fallback when unreadable live)
+        "video": "h264/1080p60",        // rated transport + ceiling (fallback when unreadable live)
+        "remote_update": {              // can a driver flash this model, and how risky? (firmware-update.md)
+          "supported": true, "method": "gl-api", "risk": "high",
+          "recovery_required": true, "self_flash_blind": true, "notes": "…"
+        }
       }
     }
   ]
@@ -68,6 +72,11 @@ store **only the differentiators a live probe can't safely determine**:
 - **power_state_trusted** — whether power/LED readings can be believed (the GL
   quirk behind the `.18` no-recovery incident); a stored fact, not observable.
 - **video** — a fallback ceiling for devices whose stream API won't report it.
+- **remote_update** — whether a driver can flash this model over the network and how
+  reliable that is (`risk`, `recovery_required`, `self_flash_blind`). Drives the
+  healthcheck's actionable update offer and the `firmware-update` command's risk
+  assessment; see [firmware-update.md](firmware-update.md). A stored judgment, not a
+  live probe.
 
 Everything else on the report is computed live and combined. `get_firmware_info()`
 can auto-populate the observable half, so humans only supply these few facts —

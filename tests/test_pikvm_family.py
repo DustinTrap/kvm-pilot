@@ -7,7 +7,9 @@ import pytest
 
 from emulator import EmulatorServer
 from kvm_pilot import ApiDisabledError, BliKVMDriver, GLKVMDriver, KVMClient, PiKVMDriver
-from kvm_pilot.errors import KVMPilotError
+from kvm_pilot.drivers.base import Capability
+from kvm_pilot.errors import KVMPilotError, SafetyError
+from kvm_pilot.safety import deny_all
 
 
 @pytest.fixture
@@ -29,9 +31,12 @@ def test_family_are_pikvmdriver_subclasses():
     assert KVMClient is PiKVMDriver
 
 
-def test_glkvm_capabilities_match_the_base(emu):
-    # A fork advertises the same capabilities — it's the same kvmd API.
-    assert gl(emu).capabilities() == PiKVMDriver("placeholder-host").capabilities()
+def test_glkvm_adds_firmware_update_over_the_base(emu):
+    # The fork speaks the same kvmd API PLUS GL's /api/upgrade/* remote-flash
+    # surface, so it advertises exactly one extra capability: FIRMWARE_UPDATE.
+    base = PiKVMDriver("placeholder-host").capabilities()
+    assert Capability.FIRMWARE_UPDATE not in base
+    assert gl(emu).capabilities() == base | {Capability.FIRMWARE_UPDATE}
 
 
 # -- firmware tracking -----------------------------------------------------
@@ -155,3 +160,57 @@ def test_glkvm_get_available_update_none_without_endpoint():
     d = GLKVMDriver("h")
     d._http = _FakeHTTP({})  # /api/upgrade/compare -> 404
     assert d.get_available_update() is None
+
+
+# -- remote firmware update (FirmwareUpdate capability) --------------------
+
+
+def test_get_upgrade_status_aggregates_the_read_endpoints():
+    d = GLKVMDriver("h")
+    d._http = _FakeHTTP({
+        "/api/upgrade/status": {"enabled": True},
+        "/api/upgrade/version": {"model": "RM1PE", "version": "V1.5.1 release2"},
+        "/api/upgrade/download": {"size": 307581578},
+    })
+    assert d.get_upgrade_status() == {
+        "enabled": True, "current": "V1.5.1 release2",
+        "model": "RM1PE", "image_size": 307581578}
+
+
+def test_get_upgrade_status_disabled_when_subsystem_absent():
+    d = GLKVMDriver("h")
+    d._http = _FakeHTTP({})  # every /api/upgrade/* -> 404 (older firmware)
+    assert d.get_upgrade_status() == {"enabled": False}
+
+
+def test_apply_firmware_update_dry_run_sends_nothing(emu):
+    emu.state.upgrade_present = True
+    res = gl(emu).apply_firmware_update(dry_run=True)
+    assert res["sent"] is False and res["dry_run"] is True
+    # The whole point: no POST reached the device.
+    assert ("POST", "/api/upgrade/start") not in emu.state.calls
+
+
+def test_apply_firmware_update_executes_start_when_confirmed(emu):
+    emu.state.upgrade_present = True
+    res = gl(emu).apply_firmware_update(dry_run=False)  # default confirm = allow_all
+    assert res["sent"] is True
+    assert ("POST", "/api/upgrade/start") in emu.state.calls
+
+
+def test_apply_firmware_update_denied_raises_and_sends_nothing(emu):
+    emu.state.upgrade_present = True
+    with pytest.raises(SafetyError):
+        gl(emu, confirm=deny_all).apply_firmware_update(dry_run=False)
+    assert ("POST", "/api/upgrade/start") not in emu.state.calls
+
+
+def test_apply_firmware_update_uploads_local_image_before_flashing(emu, tmp_path):
+    emu.state.upgrade_present = True
+    img = tmp_path / "rm1pe.img"
+    img.write_bytes(b"\x00" * 4096)
+    res = gl(emu).apply_firmware_update(image=str(img), dry_run=False)
+    assert res["sent"] is True
+    posts = [p for (m, p) in emu.state.calls if m == "POST"]
+    # Upload must precede the flash trigger.
+    assert posts.index("/api/upgrade/upload") < posts.index("/api/upgrade/start")
