@@ -27,7 +27,15 @@ from mcp.client.stdio import stdio_client  # noqa: E402
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SERVER = REPO_ROOT / "mcp_server" / "server.py"
 
-EXPECTED_TOOLS = {"info", "power_state", "snapshot", "classify_screen", "power", "healthcheck"}
+EXPECTED_TOOLS = {
+    "info",
+    "power_state",
+    "logs",
+    "snapshot",
+    "classify_screen",
+    "power",
+    "healthcheck",
+}
 
 
 @pytest.fixture()
@@ -164,6 +172,21 @@ def test_read_only_tools_report_provenance(config_file):
     # a driver without PiKVM's ATX detail endpoint.
     assert state.isError is False
     assert result_json(state)["powered_on"] is False
+
+
+def test_logs_tool_returns_text_with_provenance(config_file):
+    """The logs tool wires get_logs() through, gated on Capability.LOGS, and
+    carries provenance — it is the text diagnostic the image tools can't give."""
+
+    async def interact(session):
+        return await session.call_tool("logs", {"seek": 60})
+
+    result = run_session(server_env(config_file), interact)
+    assert result.isError is False
+    parsed = result_json(result)
+    assert parsed["host"] == "fakebox.local"
+    assert parsed["driver"] == "fake"
+    assert isinstance(parsed["log"], str)
 
 
 def test_snapshot_returns_a_real_image(config_file):

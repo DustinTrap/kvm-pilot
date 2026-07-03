@@ -6,9 +6,9 @@ This is a SEPARATE component from the stdlib-only core library and depends on
 the `mcp` SDK — install from ``mcp_server/requirements.txt``, not the core.
 
 SAFETY MODEL (see mcp_server/README.md for the operator-facing version):
-  * The read-only tools (``info``, ``power_state``, ``snapshot``,
-    ``classify_screen``) run with a deny-all confirm callback and carry a
-    ``readOnlyHint`` tool annotation.
+  * The read-only tools (``info``, ``healthcheck``, ``power_state``, ``logs``,
+    ``snapshot``, ``classify_screen``) run with a deny-all confirm callback and
+    carry a ``readOnlyHint`` tool annotation.
   * The one destructive tool (``power``) carries ``destructiveHint`` and is
     DISABLED until the human operator sets ``KVM_PILOT_MCP_ALLOW_POWER`` in the
     server's own environment. The model-supplied ``confirm`` flag is only a
@@ -215,6 +215,20 @@ def power_state(profile: str | None = None) -> dict:
         if hasattr(kvm, "get_atx_state"):
             state["atx"] = kvm.get_atx_state()
         return state
+
+
+@mcp.tool(annotations=_READ_ONLY)
+def logs(seek: int = 0, profile: str | None = None) -> dict:
+    """Return the device/host event log as text (read-only).
+
+    ``seek`` is seconds of lookback (0 = the whole buffer). This is the go-to
+    diagnostic when video/streamer/encoder or power behaviour looks wrong: the
+    text log names a fault (e.g. a stuck encoder behind a ``snapshot`` 503) that
+    a screenshot cannot. Tail-follow is intentionally not exposed — it blocks
+    over the server's synchronous transport.
+    """
+    with _driver(profile, confirm=deny_all, capability=Capability.LOGS) as (cfg, kvm):
+        return {**_provenance(cfg), "log": kvm.get_logs(seek=seek)}
 
 
 @mcp.tool(annotations=_READ_ONLY)
