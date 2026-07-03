@@ -17,6 +17,7 @@ on every push to `main` — edit the files here, never the wiki directly).
 - [Configuration](configuration.md) — the config file, every `KVM_PILOT_*` env var, and precedence.
 - [Design decisions](decisions.md) — the "looks wrong but is intentional" record, newest first.
 - [Redfish reference](redfish.md) — the BMC driver: hypermedia navigation, auth, and firmware quirks.
+- [Firmware registry](firmware-registry.md) — the firmware-currency check, the community registry data model, and the GitHub-based single-source-of-truth + ingestion design (#80 follow-up).
 - [Claude skill](../skill/SKILL.md) — the bundled skill for driving `kvm-pilot` from Claude.
 - [MCP server](../mcp_server/README.md) — the experimental Model Context Protocol server.
 
