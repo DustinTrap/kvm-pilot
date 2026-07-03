@@ -18,12 +18,14 @@ description: >-
 
 # kvm-pilot skill
 
-> ⚠️ **Untested alpha.** `kvm-pilot` has **never been run against real
-> hardware** — it is unit-tested with mocks only. Treat every result as
-> unverified, expect bugs, and never point a destructive operation (power,
-> reset, media, keystrokes) at a machine the user can't afford to have
-> power-cycled unexpectedly. Surface each destructive step to the user before
-> executing it.
+> ⚠️ **Alpha — largely unverified.** Most of `kvm-pilot` is unit-tested with
+> mocks only; only a handful of device+capability combos have been exercised on
+> real hardware (see the
+> [Hardware-Compatibility list](https://github.com/DustinTrap/kvm-pilot/wiki/Hardware-Compatibility)
+> for what actually has). Treat every result as unverified, expect bugs, and
+> never point a destructive operation (power, reset, media, keystrokes) at a
+> machine the user can't afford to have power-cycled unexpectedly. Surface each
+> destructive step to the user before executing it.
 
 This skill is a thin wrapper over the installable `kvm-pilot` package. The code
 lives in the package, not here — install it and import it rather than copying
