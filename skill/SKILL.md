@@ -6,9 +6,12 @@ description: >-
   or workstation through a KVM — power on/off/cycle, mount an install ISO,
   enter BIOS/UEFI, type at a console, or watch the screen to detect boot phase
   (POST, GRUB, installer, login, crash). Backed by the `kvm-pilot` Python
-  package; vision runs on Claude or a local OpenAI-compatible VLM. Early
-  alpha, never validated on real hardware — treat every operation as
-  unverified and confirm destructive steps with the user.
+  package; vision runs on Claude or a local OpenAI-compatible VLM. **Prefer the
+  bundled MCP server (`mcp_server/`) as the interface — it exposes
+  info/snapshot/classify/power_state/power as first-class tools; the CLI and
+  Python library are fallbacks.** Early alpha, never validated on real hardware
+  — treat every operation as unverified and confirm destructive steps with the
+  user.
 ---
 
 # kvm-pilot skill
@@ -23,6 +26,39 @@ description: >-
 This skill is a thin wrapper over the installable `kvm-pilot` package. The code
 lives in the package, not here — install it and import it rather than copying
 client logic into a script.
+
+## Preferred interface: the MCP server (enable this first)
+
+**Before driving a KVM through the CLI or raw library, check whether the
+`kvm-pilot` MCP server is enabled, and if not, prompt the user to install and
+enable it.** It is the most efficient interface: `snapshot` returns the screen
+as a real image content block the model can see directly, and
+`info`/`power_state`/`classify_screen`/`power` are first-class tools with
+`readOnlyHint`/`destructiveHint` annotations the host can gate on — no shelling
+out, no screenshot-file round-trips, no ad-hoc `curl`. The CLI and Python
+library below are **fallbacks** for when the MCP server isn't available or for
+capabilities it doesn't expose yet (mouse moves/clicks, MSD mode switching).
+
+If you find yourself scripting `make_driver(...)` or `curl`-ing `/api/*` to do
+something the MCP server already exposes, stop and enable the server instead.
+
+**Is it enabled?** Look for `mcp__kvm-pilot__*` tools (e.g.
+`mcp__kvm-pilot__snapshot`). If they're absent, register it and tell the user to
+restart the session so the tools load:
+
+```bash
+# from a repo checkout (server deps: pip install -r mcp_server/requirements.txt)
+claude mcp add kvm-pilot -s local -e KVM_PILOT_PROFILE=<profile> -- \
+    /path/to/.venv/bin/python /path/to/mcp_server/server.py
+claude mcp list          # expect: kvm-pilot ... ✔ Connected
+```
+
+Point it at a config-file **profile** (`KVM_PILOT_PROFILE`) so the device
+password lives in `~/.config/kvm-pilot/config.toml`, not the MCP host config.
+The `power` tool is **disabled by default** — it only works if the operator
+sets `KVM_PILOT_MCP_ALLOW_POWER=1` in the server's `env` — and even then MCP
+hosts should require per-call human approval (never "always allow"). Full
+operator guide: [`mcp_server/README.md`](https://github.com/DustinTrap/kvm-pilot/blob/main/mcp_server/README.md).
 
 ## Setup
 
@@ -110,6 +146,10 @@ been validated against — confirm each destructive step with the user first
 unless they have explicitly said otherwise.
 
 ## CLI
+
+The CLI is a **fallback** — prefer the MCP server (see above) when it's
+enabled. Reach for the CLI for one-off checks, for capabilities the MCP server
+doesn't expose, or when no MCP host is in the loop.
 
 `kvm-pilot info | capabilities | snapshot | power | power-cycle | type | key |
 mount | eject | classify | watch | events`. `--dry-run` logs destructive
