@@ -87,8 +87,14 @@ jobs:
           git add src/kvm_pilot/data/firmware_registry.json
           git commit -m "data(firmware): batched registry update $(date +%F' '%H:00)"
           git push -f origin "$branch"
-          gh pr create \
-            --title "data(firmware): batched update $(date +%F' '%H:00)" \
-            --body "Automated hourly batch of \`firmware-report\` issues, validated by \`kvm_pilot.firmware_registry\`." \
-            --head "$branch" --base main \
-            || gh pr edit "$branch" --body "Updated $(date +%F' '%H:00)."
+          # PR creation needs "Allow GitHub Actions to create and approve pull
+          # requests" (Settings > Actions > General). If it's off, don't fail the
+          # run — the branch is pushed; just warn so a human can open the PR.
+          if gh pr create \
+              --title "data(firmware): batched update $(date +%F' '%H:00)" \
+              --body "Automated hourly batch of \`firmware-report\` issues, validated by \`kvm_pilot.firmware_registry\`." \
+              --head "$branch" --base main 2>pr_err.txt; then
+            echo "opened PR for $branch"
+          else
+            echo "::warning::Could not open PR automatically ($(cat pr_err.txt)). Branch '$branch' is pushed — open the PR by hand, or enable 'Allow GitHub Actions to create and approve pull requests' in Settings > Actions > General."
+          fi
