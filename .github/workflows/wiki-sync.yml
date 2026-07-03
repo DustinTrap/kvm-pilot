@@ -12,6 +12,7 @@ on:
     branches: [main]
     paths:
       - "docs/**"
+      - "data/test_runs.jsonl"
       - "skill/SKILL.md"
       - "mcp_server/README.md"
       - ".github/scripts/build_wiki.py"
