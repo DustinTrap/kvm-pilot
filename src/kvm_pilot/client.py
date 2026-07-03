@@ -80,6 +80,9 @@ class PiKVMDriver(PowerMixin, CapabilityMixin):
     # clear ApiDisabledError with device-specific guidance. None for stock PiKVM.
     _NOT_FOUND_HINT: str | None = None
 
+    # Vendor identity for the firmware registry; subclasses override (GL/BliKVM).
+    _vendor: str = "pikvm"
+
     # ATX power ops don't block on the state change, so hard_cycle (from
     # PowerMixin) settles between the off and on. Overridable per call.
     _hard_cycle_off_delay: float = 5.0
@@ -165,13 +168,20 @@ class PiKVMDriver(PowerMixin, CapabilityMixin):
 
         system = _sub(info, "system")
         kvmd = _sub(system, "kvmd")
-        platform = _sub(_sub(info, "hw"), "platform")
+        # GLKVM exposes platform under system.platform; stock PiKVM under hw.platform.
+        platform = _sub(system, "platform") or _sub(_sub(info, "hw"), "platform")
         version = kvmd.get("version")
+        product = platform.get("base") or platform.get("type")
         return {
             "version": version,
             "kvmd_version": version,
-            "platform": platform.get("base") or platform.get("type"),
+            "platform": product,
             "model": platform.get("model"),
+            # Normalized identity for the firmware registry (health.check_firmware_currency).
+            # The comparable version on the PiKVM family is kvmd's; a device does not
+            # report its GL/vendor product-firmware version, so kvmd is the currency proxy.
+            "vendor": self._vendor,
+            "product": product,
         }
 
     def check_api_enabled(self) -> dict:

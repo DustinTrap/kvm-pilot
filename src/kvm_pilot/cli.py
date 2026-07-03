@@ -125,6 +125,33 @@ def _preflight_gate(kvm, confirm, *, skip: bool) -> None:
     preflight(kvm, confirm=confirm, cache=HealthCache(), skip=skip)
 
 
+def _inform_on_connect(kvm, *, skip: bool) -> None:
+    """Audit a device once on first connection and print any findings (#80).
+
+    Non-blocking: read-only intake informs and proceeds (the destructive gate is
+    the blocker). Runs at most once per device per process; findings go to stderr
+    so JSON on stdout stays clean.
+    """
+    from .health import HealthCache, Severity, preflight_once
+
+    try:
+        report = preflight_once(kvm, cache=HealthCache(), enforce=False, skip=skip)
+    except Exception:  # noqa: BLE001 - an informational audit must never break the read
+        return
+    if report is None:
+        return
+    notable = [r for r in report.results if r.severity >= Severity.WARNING]
+    if not notable:
+        return
+    print(
+        f"preflight {report.driver_kind}@{report.host}: worst {report.worst}, "
+        f"{len(notable)} finding(s) — run `kvm-pilot healthcheck` for detail:",
+        file=sys.stderr,
+    )
+    for r in notable:
+        print(f"  [{r.severity}] {r.pillar}: {r.title} — {r.detail}", file=sys.stderr)
+
+
 def _make_analyzer(kvm: KVMClient | FakeDriver, args):
     from .vision import ScreenAnalyzer, make_backend
 
@@ -166,14 +193,20 @@ def _client(args, capability: Capability) -> AnyDriver:
             f"'{args.command}' needs the {capability.value} capability, which the "
             f"{_driver_label(kvm)} driver does not provide"
         )
-    # Destructive subcommands set _preflight=True: gate them on the device
-    # healthcheck (#80), but only AFTER the capability check so a command the
+    # Preflight healthcheck (#80), run AFTER the capability check so a command the
     # driver cannot serve still fails cleanly without any network probe. Dry-run
-    # and --skip-healthcheck bypass; --yes means the operator pre-approved, so a
-    # critical informs-and-proceeds rather than blocking.
-    if getattr(args, "_preflight", False) and not getattr(args, "dry_run", False):
-        confirm = allow_all if getattr(args, "yes", False) else interactive_confirm
-        _preflight_gate(kvm, confirm, skip=_skip_healthcheck(args))
+    # and --skip-healthcheck bypass both paths.
+    if not getattr(args, "dry_run", False):
+        if getattr(args, "_preflight", False):
+            # Destructive subcommands: enforce the gate. --yes means the operator
+            # pre-approved, so a critical informs-and-proceeds rather than blocking.
+            confirm = allow_all if getattr(args, "yes", False) else interactive_confirm
+            _preflight_gate(kvm, confirm, skip=_skip_healthcheck(args))
+        else:
+            # Read-only intake: audit the device on first connection and surface
+            # findings, but never block — a standing CRITICAL (e.g. no out-of-band
+            # recovery path) must not make a plain `info`/`snapshot` impossible.
+            _inform_on_connect(kvm, skip=_skip_healthcheck(args))
     return kvm
 
 

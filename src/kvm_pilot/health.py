@@ -32,6 +32,7 @@ from __future__ import annotations
 import enum
 import json
 import os
+import re
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
@@ -51,6 +52,8 @@ __all__ = [
     "run_healthcheck",
     "enforce_gate",
     "preflight",
+    "preflight_once",
+    "reset_session_audit",
     "HealthCache",
     "CHECKS",
 ]
@@ -476,12 +479,16 @@ def check_firmware_report(driver: Any) -> CheckResult | None:
         return None
     version = fw.get("version")
     model = fw.get("model")
+    kvmd = fw.get("kvmd_version")
+    # `version` is the product firmware the UI shows (e.g. GL "V1.9.1 release1");
+    # note the kvmd component version too when it differs.
+    kvmd_note = f" (kvmd {kvmd})" if kvmd and kvmd != version else ""
     return CheckResult(
         id="firmware-report",
         pillar=Pillar.FIRMWARE,
         severity=Severity.INFO,
         title="Firmware",
-        detail=f"model={model or '?'} kvmd/firmware={version or '?'}.",
+        detail=f"model={model or '?'} firmware={version or '?'}{kvmd_note}.",
     )
 
 
@@ -507,6 +514,170 @@ def check_firmware_quirks(driver: Any) -> CheckResult | None:
     )
 
 
+# -- firmware currency (registry-backed) ------------------------------------- #
+#
+# The registry is the single source of truth for "is this firmware current /
+# known-bad" (see docs/firmware-registry.md). It ships bundled (offline default);
+# entries are contributed via the firmware-report ingestion pipeline. A device is
+# identified by the (vendor, product, version) its driver's get_firmware_info()
+# normalizes — so one generic mechanism serves every family (PiKVM, GLKVM, Redfish
+# iDRAC/iLO/XCC, and future IPMI/AMT drivers): the vendor-specific bit is only
+# "how do I read the version off this box", which lives in the driver.
+
+
+def _ver_tuple(v: str | None) -> tuple[int, ...]:
+    """A version string as a tuple of its integer segments (``4.82`` -> ``(4, 82)``)."""
+    return tuple(int(x) for x in re.findall(r"\d+", v)) if v else ()
+
+
+def _vercmp(a: str | None, b: str | None) -> int:
+    """Compare two dotted-numeric versions: -1 / 0 / 1. Missing segments pad as 0.
+
+    Each dot/dash-separated segment is compared numerically — correct for kvmd
+    (``4.82``), iDRAC (``7.10.30.00``), iLO (``2.78``) and the like. Genuinely
+    non-numeric schemes collapse to () and only ever compare equal, so they fall
+    through to exact ``known_bad`` matches rather than a bogus ordering.
+    """
+    ta, tb = _ver_tuple(a), _ver_tuple(b)
+    n = max(len(ta), len(tb))
+    ta += (0,) * (n - len(ta))
+    tb += (0,) * (n - len(tb))
+    return (ta > tb) - (ta < tb)
+
+
+def _affected(spec: str, version: str) -> bool:
+    """Does ``version`` satisfy a known-bad ``affected`` spec (``<=X`` / ``<X`` /
+    ``>=X`` / ``>X`` / ``==X`` / bare ``X`` for exact)?"""
+    spec = (spec or "").strip()
+    for op in ("<=", ">=", "==", "<", ">"):
+        if spec.startswith(op):
+            c = _vercmp(version, spec[len(op):].strip())
+            return {"<=": c <= 0, "<": c < 0, ">=": c >= 0, ">": c > 0, "==": c == 0}[op]
+    return _vercmp(version, spec) == 0
+
+
+_REGISTRY_CACHE: dict[str, Any] | None = None
+
+
+def _load_firmware_registry() -> dict[str, Any]:
+    global _REGISTRY_CACHE
+    if _REGISTRY_CACHE is None:
+        from .firmware_registry import load_registry
+
+        _REGISTRY_CACHE = load_registry()
+    return _REGISTRY_CACHE
+
+
+def _match_firmware(entries: list[dict], vendor: str, product: str) -> dict | None:
+    """First registry entry whose vendor equals and whose product is a substring
+    of the device's reported product (so ``RV1126B`` matches the messy board
+    string, and ``iDRAC9`` matches exactly)."""
+    pl = product.lower()
+    for e in entries:
+        if e.get("vendor", "").strip().lower() == vendor and e.get("product", "").strip().lower() in pl:
+            return e
+    return None
+
+
+def check_firmware_currency(driver: Any) -> CheckResult | None:
+    """Flag known-bad firmware or an available update, via the firmware registry."""
+    fn = getattr(driver, "get_firmware_info", None)
+    if fn is None:
+        return None
+    try:
+        fw = fn()
+    except KVMPilotError:
+        return None
+    vendor = (fw.get("vendor") or "").strip().lower()
+    product = fw.get("product") or ""
+    version = fw.get("version")
+    if not (vendor and product and version):
+        return None
+    entry = _match_firmware(_load_firmware_registry().get("firmware", []), vendor, product)
+    if entry is None:
+        return None
+
+    # 1) Known-bad: the installed version falls in an affected range.
+    for bad in entry.get("known_bad", []):
+        if _affected(bad.get("affected", ""), version):
+            fixed = f" Fixed in {bad['fixed_in']}." if bad.get("fixed_in") else ""
+            return CheckResult(
+                id="firmware-currency",
+                pillar=Pillar.FIRMWARE,
+                severity=Severity.CRITICAL if bad.get("severity") == "critical" else Severity.WARNING,
+                title="Known-bad firmware",
+                detail=f"{product} {version} matches a known-bad range ({bad['affected']}): {bad['issue']}.{fixed}",
+                remediation=f"Update the firmware. Source: {bad.get('source', 'n/a')}.",
+            )
+
+    # 2) Out of date: strictly behind the latest known release.
+    latest = entry.get("latest")
+    if latest and _vercmp(version, latest) < 0:
+        return CheckResult(
+            id="firmware-currency",
+            pillar=Pillar.FIRMWARE,
+            severity=Severity.WARNING,
+            title="Firmware update available",
+            detail=f"{product} is on {version}; latest known is {latest} (as of {entry.get('date', '?')}).",
+            remediation=f"Update the firmware. Source: {entry.get('source', 'the vendor download page')}.",
+        )
+    return None  # current (or ahead) -> the pillar stays quiet
+
+
+def check_capability_profile(driver: Any) -> CheckResult | None:
+    """Report the stored capability / expected-UX profile for this device.
+
+    These are the differentiators a live probe can't safely determine (absolute
+    vs relative mouse, whether virtual media actually presents to the host,
+    whether power readings are truthful, the video ceiling). INFO when the profile
+    is all-good; WARNING when any axis is degraded, since those directly shape
+    what the operator can expect (and whether it's safe to automate).
+    """
+    fn = getattr(driver, "get_firmware_info", None)
+    if fn is None:
+        return None
+    try:
+        fw = fn()
+    except KVMPilotError:
+        return None
+    vendor = (fw.get("vendor") or "").strip().lower()
+    product = fw.get("product") or ""
+    if not (vendor and product):
+        return None
+    entry = _match_firmware(_load_firmware_registry().get("firmware", []), vendor, product)
+    prof = (entry or {}).get("profile")
+    if not prof:
+        return None
+
+    parts: list[str] = []
+    degraded: list[str] = []
+    if prof.get("video"):
+        parts.append(f"video {prof['video']}")
+    if "mouse" in prof:
+        parts.append(f"mouse={prof['mouse']}")
+        if prof["mouse"] != "absolute":
+            degraded.append("no absolute mouse — GUI pointer control is degraded")
+    if "vmedia" in prof:
+        parts.append(f"vmedia={prof['vmedia']}")
+        if prof["vmedia"] != "reliable":
+            degraded.append(f"virtual media is {prof['vmedia']} — boot-from-ISO may not reach the host")
+    if "power_state_trusted" in prof:
+        trusted = bool(prof["power_state_trusted"])
+        parts.append(f"power readings {'trusted' if trusted else 'NOT trusted'}")
+        if not trusted:
+            degraded.append("power/LED readings are not trustworthy — verify state visually, don't automate blind reboots")
+    if not parts:
+        return None
+    return CheckResult(
+        id="capability-profile",
+        pillar=Pillar.READINESS,
+        severity=Severity.WARNING if degraded else Severity.INFO,
+        title="Capability / expected UX",
+        detail=f"Expected experience on {product}: " + ", ".join(parts) + ".",
+        remediation="; ".join(degraded),
+    )
+
+
 # The registry — each check self-guards, so the same list serves every driver.
 CHECKS: list[Check] = [
     check_api_reachable,
@@ -518,6 +689,8 @@ CHECKS: list[Check] = [
     check_exposed_services,
     check_firmware_report,
     check_firmware_quirks,
+    check_firmware_currency,
+    check_capability_profile,
 ]
 
 
@@ -725,6 +898,56 @@ def preflight(
     acknowledged = cache.acknowledged(key) if cache is not None else frozenset()
     if enforce:
         enforce_gate(report, confirm=confirm, acknowledged=acknowledged)
+    return report
+
+
+# --------------------------------------------------------------------------- #
+# First-connection audit (issue #80)                                          #
+# --------------------------------------------------------------------------- #
+#
+# #80 wants the audit to run "on the first connection to any KVM, before it's
+# used for anything" — not only ahead of a destructive op. A long-lived process
+# (the MCP server builds+closes a driver per tool call) must still audit a given
+# device only once, so an in-memory guard debounces within the process. The
+# persistent HealthCache handles staleness across processes; this is orthogonal.
+
+_SESSION_AUDITED: set[str] = set()
+
+
+def _session_key(driver: Any) -> str:
+    # Host identity alone means "already connected this session" — no firmware,
+    # so the guard needs no network probe; firmware-change invalidation across
+    # processes is the persistent cache's job (keyed driver@host#firmware).
+    return f"{_driver_kind(driver)}@{getattr(driver, 'host', '?')}"
+
+
+def reset_session_audit() -> None:
+    """Forget which devices were audited this process (tests / forced re-audit)."""
+    _SESSION_AUDITED.clear()
+
+
+def preflight_once(
+    driver: Any,
+    *,
+    confirm: ConfirmCallback | None = None,
+    skip: bool = False,
+    cache: HealthCache | None = None,
+    enforce: bool = True,
+) -> HealthReport | None:
+    """Run :func:`preflight` the first time this process connects to a device.
+
+    Returns the report on the first call for a given device and ``None`` on later
+    calls (already audited this session) or when ``skip``. Gate semantics are
+    :func:`preflight`'s; when ``enforce`` raises, the device is left un-recorded
+    so the next attempt re-checks rather than silently proceeding.
+    """
+    if skip:
+        return None
+    key = _session_key(driver)
+    if key in _SESSION_AUDITED:
+        return None
+    report = preflight(driver, confirm=confirm, cache=cache, enforce=enforce)
+    _SESSION_AUDITED.add(key)
     return report
 
 

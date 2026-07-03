@@ -311,3 +311,147 @@ def test_recovery_path_critical_over_transport_when_atx_disabled(emu):
     rec = next(r for r in rep.results if r.id == "recovery-path")
     assert rec.severity is Severity.CRITICAL
     assert rep.worst is Severity.CRITICAL
+
+
+# ---- first-connection audit (issue #80) ---------------------------------- #
+
+
+def test_preflight_once_runs_then_skips_within_session():
+    from kvm_pilot.health import preflight_once, reset_session_audit
+
+    d = FakeDriver()
+    assert preflight_once(d) is not None       # first connection audits
+    assert preflight_once(d) is None           # already audited this session
+    reset_session_audit()
+    assert preflight_once(d) is not None        # reset re-enables the audit
+
+
+def test_preflight_once_skip_returns_none():
+    from kvm_pilot.health import preflight_once
+
+    assert preflight_once(FakeDriver(), skip=True) is None
+
+
+def test_preflight_once_informs_without_blocking_on_critical():
+    # enforce=False must return the report (with the CRITICAL) and never raise —
+    # a standing critical must not make a read impossible.
+    from kvm_pilot.health import preflight_once
+
+    d = stub(
+        host="crit",
+        get_atx_state=lambda: {"enabled": False, "leds": {"power": False}},
+        get_gpio_state=lambda: {"state": {"outputs": {}}},
+    )
+    rep = preflight_once(d, enforce=False)
+    assert rep is not None and rep.worst is Severity.CRITICAL
+
+
+def test_preflight_once_enforces_and_fails_closed_on_critical():
+    from kvm_pilot.health import preflight_once
+
+    d = stub(
+        host="crit",
+        get_atx_state=lambda: {"enabled": False, "leds": {"power": False}},
+        get_gpio_state=lambda: {"state": {"outputs": {}}},
+    )
+    with pytest.raises(HealthGateError):
+        preflight_once(d, confirm=None, enforce=True)  # automation -> fail closed
+
+
+# ---- firmware currency + capability profile (registry, #80 follow-up) ----- #
+
+
+def _fw(**kw):
+    base = {"vendor": "gl.inet", "product": "Rockchip RV1126B-P EVB", "version": "4.82"}
+    base.update(kw)
+    return stub(host="h", get_firmware_info=lambda: base)
+
+
+def test_vercmp_orders_numeric_segments():
+    from kvm_pilot.health import _vercmp
+
+    assert _vercmp("4.82", "4.90") < 0
+    assert _vercmp("6.10.30.00", "6.10.80.00") < 0
+    assert _vercmp("2.78", "2.78") == 0
+    assert _vercmp("7.0", "6.99") > 0
+
+
+def test_affected_specs():
+    from kvm_pilot.health import _affected
+
+    assert _affected("<=4.82", "4.82") and not _affected("<=4.80", "4.82")
+    assert _affected("4.82", "4.82") and not _affected("4.82", "4.83")
+    assert _affected("<4.83", "4.82") and _affected(">=4.80", "4.82")
+
+
+def test_currency_update_available(monkeypatch):
+    from kvm_pilot import health
+
+    monkeypatch.setattr(health, "_REGISTRY_CACHE", {"firmware": [
+        {"vendor": "gl.inet", "product": "RV1126B", "latest": "4.90",
+         "source": "https://x", "date": "2026-05-29"}]})
+    r = health.check_firmware_currency(_fw())
+    assert r.severity is Severity.WARNING and "latest known is 4.90" in r.detail
+
+
+def test_currency_known_bad_range_is_critical(monkeypatch):
+    from kvm_pilot import health
+
+    monkeypatch.setattr(health, "_REGISTRY_CACHE", {"firmware": [
+        {"vendor": "gl.inet", "product": "RV1126B", "known_bad": [
+            {"affected": "<=4.82", "severity": "critical", "issue": "ATX unwired", "source": "https://x"}]}]})
+    assert health.check_firmware_currency(_fw()).severity is Severity.CRITICAL
+
+
+def test_currency_quiet_when_current(monkeypatch):
+    from kvm_pilot import health
+
+    monkeypatch.setattr(health, "_REGISTRY_CACHE", {"firmware": [
+        {"vendor": "gl.inet", "product": "RV1126B", "latest": "4.82",
+         "source": "https://x", "date": "2026-01-01"}]})
+    assert health.check_firmware_currency(_fw()) is None
+
+
+def test_currency_none_when_unmatched(monkeypatch):
+    from kvm_pilot import health
+
+    monkeypatch.setattr(health, "_REGISTRY_CACHE", {"firmware": []})
+    assert health.check_firmware_currency(_fw()) is None
+
+
+def test_capability_profile_warns_on_degraded_axis(monkeypatch):
+    from kvm_pilot import health
+
+    monkeypatch.setattr(health, "_REGISTRY_CACHE", {"firmware": [
+        {"vendor": "gl.inet", "product": "RV1126B", "profile": {
+            "mouse": "absolute", "vmedia": "reports-only",
+            "power_state_trusted": False, "video": "h264/1080p60"}}]})
+    r = health.check_capability_profile(_fw())
+    assert r.severity is Severity.WARNING
+    assert "vmedia=reports-only" in r.detail and "NOT trusted" in r.detail
+    assert "boot-from-ISO" in r.remediation
+
+
+def test_capability_profile_info_when_all_good(monkeypatch):
+    from kvm_pilot import health
+
+    monkeypatch.setattr(health, "_REGISTRY_CACHE", {"firmware": [
+        {"vendor": "gl.inet", "product": "RV1126B", "profile": {
+            "mouse": "absolute", "vmedia": "reliable", "power_state_trusted": True}}]})
+    r = health.check_capability_profile(_fw())
+    assert r.severity is Severity.INFO and r.remediation == ""
+
+
+def test_capability_profile_none_without_profile(monkeypatch):
+    from kvm_pilot import health
+
+    monkeypatch.setattr(health, "_REGISTRY_CACHE", {"firmware": [
+        {"vendor": "gl.inet", "product": "RV1126B", "latest": "4.90",
+         "source": "https://x", "date": "2026-01-01"}]})
+    assert health.check_capability_profile(_fw()) is None
+
+
+def test_glkvm_firmware_identity(emu):
+    fw = gl(emu).get_firmware_info()
+    assert fw["vendor"] == "gl.inet"
+    assert "product" in fw and "version" in fw

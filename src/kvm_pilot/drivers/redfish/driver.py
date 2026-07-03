@@ -552,6 +552,27 @@ class RedfishDriver(PowerMixin, CapabilityMixin):
             info = {k: v for k, v in info.items() if k in fields}
         return info
 
+    def get_firmware_info(self) -> dict:
+        """Normalized firmware identity for the registry (health.check_firmware_currency).
+
+        The BMC firmware version (iDRAC/iLO/XCC) lives on the Manager resource's
+        ``FirmwareVersion`` — the real upgradeable version — not the System's
+        ``BiosVersion``. ``product`` prefers the Manager's model (e.g. "iDRAC 9",
+        "iLO 5"), falling back to the System model.
+        """
+        stable = self._system()
+        try:
+            mgr = self._http.get_json(self._manager_uri_resolved()) or {}
+        except KVMPilotError:
+            mgr = {}
+        return {
+            "vendor": stable.get("Manufacturer") or mgr.get("Manufacturer"),
+            "product": mgr.get("Model") or stable.get("Model"),
+            "version": mgr.get("FirmwareVersion"),
+            "manufacturer": stable.get("Manufacturer"),
+            "model": stable.get("Model"),
+        }
+
     # -- Power -----------------------------------------------------------
 
     def is_powered_on(self) -> bool:

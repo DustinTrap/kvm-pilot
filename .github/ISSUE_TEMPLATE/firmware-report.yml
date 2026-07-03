@@ -1,0 +1,121 @@
+name: Firmware report
+description: Report the latest firmware for a device, or a known-bad firmware version, for the kvm-pilot firmware registry.
+title: "[firmware] "
+labels: ["firmware-report"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for helping keep the firmware registry current! This feeds
+        `health.check_firmware_currency`. On submit, a bot validates your entry and
+        opens a pull request automatically — no manual editing needed.
+
+        Use the **vendor** and **product** as `kvm-pilot healthcheck` / the device
+        reports them (run `kvm-pilot healthcheck --json` and read `firmware`). Versions
+        must use the same scheme the device reports (e.g. `4.82`, `7.10.30.00`, `2.78`).
+  - type: input
+    id: vendor
+    attributes:
+      label: Vendor
+      description: e.g. gl.inet, pikvm, dell, hpe, lenovo
+      placeholder: gl.inet
+    validations:
+      required: true
+  - type: input
+    id: product
+    attributes:
+      label: Product
+      description: A distinctive substring of the reported product/board (e.g. RV1126B, iDRAC9, iLO 5).
+      placeholder: RV1126B
+    validations:
+      required: true
+  - type: dropdown
+    id: kind
+    attributes:
+      label: Submission type
+      options:
+        - Latest known release
+        - Known-bad firmware
+        - Capability profile
+    validations:
+      required: true
+  - type: input
+    id: latest
+    attributes:
+      label: Latest version (latest-known only)
+      description: The newest known release, in the device's own version scheme.
+      placeholder: "4.90"
+  - type: input
+    id: date
+    attributes:
+      label: Release date (latest-known only, YYYY-MM-DD)
+      placeholder: "2026-05-29"
+  - type: input
+    id: affected
+    attributes:
+      label: Affected versions (known-bad only)
+      description: A version spec — exact (4.82) or a range (<=4.82, <4.83, >=4.80, ==4.82).
+      placeholder: "<=4.82"
+  - type: dropdown
+    id: severity
+    attributes:
+      label: Severity (known-bad only)
+      options:
+        - warning
+        - critical
+  - type: textarea
+    id: issue
+    attributes:
+      label: Issue / notes (known-bad only)
+      description: What is wrong with the affected firmware, and its impact.
+      placeholder: ATX sensing is unwired; no out-of-band reset path.
+  - type: input
+    id: fixed_in
+    attributes:
+      label: Fixed in (optional, known-bad)
+      placeholder: "4.83"
+  - type: markdown
+    attributes:
+      value: |
+        **Capability profile** (only for a "Capability profile" submission) — the
+        expected-UX differentiators a healthcheck can't safely detect live. Fill in
+        what you know now; you can file a follow-up report later to enrich it (e.g.
+        add virtual-media fidelity once you've actually booted an ISO).
+  - type: dropdown
+    id: mouse
+    attributes:
+      label: Mouse mode (profile only)
+      description: absolute = usable GUI pointer; relative = painful; none = keyboard only.
+      options:
+        - absolute
+        - relative
+        - none
+  - type: dropdown
+    id: vmedia
+    attributes:
+      label: Virtual-media fidelity (profile only)
+      description: reliable = ISO reaches the host; reports-only = API says mounted but host sees nothing; none = unsupported.
+      options:
+        - reliable
+        - reports-only
+        - none
+  - type: dropdown
+    id: power_state_trusted
+    attributes:
+      label: Power-state readings trusted (profile only)
+      description: Are ATX/LED power readings truthful? (false = don't automate blind reboots.)
+      options:
+        - "true"
+        - "false"
+  - type: input
+    id: video
+    attributes:
+      label: Video ceiling (profile only)
+      description: Transport + max mode, e.g. h264/1080p60, mjpeg/1080p30.
+      placeholder: h264/1080p60
+  - type: input
+    id: source
+    attributes:
+      label: Source URL
+      description: An authoritative link (vendor changelog, release notes, advisory). Required for latest-known and known-bad reports; optional for a capability profile.
+      placeholder: https://dl.gl-inet.com/kvm/rm1/stable
