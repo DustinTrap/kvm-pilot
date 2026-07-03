@@ -183,3 +183,26 @@ def test_main_batch_mode_writes_registry_and_results(tmp_path):
     assert rc == 0
     assert json.loads(reg.read_text())["firmware"][0]["latest"] == "4.90"
     assert json.loads(res.read_text())[0]["status"] == "ingested"
+
+
+# ---- reconcile (device-reported latest vs the SSoT) ---------------------- #
+
+
+def test_reconcile_flags_when_registry_missing_latest():
+    from kvm_pilot.firmware_registry import reconcile
+
+    reg = {"schema_version": 2, "updated": "2026-01-01",
+           "firmware": [{"vendor": "gl.inet", "product": "RM1PE"}]}  # profile only, no latest
+    sub = reconcile("gl.inet", "RM1PE", "V1.9.1 release1", registry=reg)
+    assert sub == {"vendor": "gl.inet", "product": "RM1PE",
+                   "kind": "Latest known release", "latest": "V1.9.1 release1"}
+
+
+def test_reconcile_none_when_ssot_current_or_ahead():
+    from kvm_pilot.firmware_registry import reconcile
+
+    reg = {"schema_version": 2, "updated": "2026-01-01",
+           "firmware": [{"vendor": "gl.inet", "product": "RM1PE", "latest": "V1.9.1 release1"}]}
+    assert reconcile("gl.inet", "RM1PE", "V1.9.1 release1", registry=reg) is None      # equal
+    assert reconcile("gl.inet", "RM1PE", "V1.9.0 release1", registry=reg) is None      # device older
+    assert reconcile("gl.inet", "RM1PE", "V1.9.2 release1", registry=reg) is not None  # newer -> drift

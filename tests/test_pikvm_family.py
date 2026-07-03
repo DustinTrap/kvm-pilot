@@ -140,3 +140,18 @@ def test_glkvm_falls_back_to_kvmd_when_upgrade_endpoint_absent():
     })
     fw = d.get_firmware_info()
     assert fw["version"] == "4.82" and fw["product"] == "some-board"  # base identity
+
+
+def test_glkvm_get_available_update_reports_drift():
+    d = GLKVMDriver("h")
+    d._http = _FakeHTTP({"/api/upgrade/compare": {
+        "local_version": "V1.9.1 release1", "server_version": "V1.9.2 release1", "beta_version": ""}})
+    assert d.get_available_update() == {
+        "current": "V1.9.1 release1", "latest": "V1.9.2 release1",
+        "beta": None, "update_available": True}
+
+
+def test_glkvm_get_available_update_none_without_endpoint():
+    d = GLKVMDriver("h")
+    d._http = _FakeHTTP({})  # /api/upgrade/compare -> 404
+    assert d.get_available_update() is None

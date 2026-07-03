@@ -74,6 +74,41 @@ _NO_RESPONSE = "_no response_"
 
 
 # --------------------------------------------------------------------------- #
+# Version compare (shared with health.check_firmware_currency)                #
+# --------------------------------------------------------------------------- #
+
+
+def _ver_tuple(v: str | None) -> tuple[int, ...]:
+    """A version string as its integer segments (``V1.9.1 release1`` -> ``(1, 9, 1, 1)``)."""
+    return tuple(int(x) for x in re.findall(r"\d+", v)) if v else ()
+
+
+def _vercmp(a: str | None, b: str | None) -> int:
+    """Compare two dotted-numeric versions: -1 / 0 / 1 (missing segments pad as 0).
+
+    Each numeric segment is compared numerically — correct for kvmd (``4.82``),
+    iDRAC (``7.10.30.00``), iLO (``2.78``), and GL (``V1.9.1 release1``). Purely
+    non-numeric schemes collapse to () and only ever compare equal.
+    """
+    ta, tb = _ver_tuple(a), _ver_tuple(b)
+    n = max(len(ta), len(tb))
+    ta += (0,) * (n - len(ta))
+    tb += (0,) * (n - len(tb))
+    return (ta > tb) - (ta < tb)
+
+
+def _affected(spec: str, version: str) -> bool:
+    """Does ``version`` satisfy a known-bad ``affected`` spec (``<=X`` / ``<X`` /
+    ``>=X`` / ``>X`` / ``==X`` / bare ``X`` for exact)?"""
+    spec = (spec or "").strip()
+    for op in ("<=", ">=", "==", "<", ">"):
+        if spec.startswith(op):
+            c = _vercmp(version, spec[len(op):].strip())
+            return {"<=": c <= 0, "<": c < 0, ">=": c >= 0, ">": c > 0, "==": c == 0}[op]
+    return _vercmp(version, spec) == 0
+
+
+# --------------------------------------------------------------------------- #
 # Load                                                                        #
 # --------------------------------------------------------------------------- #
 
@@ -321,6 +356,27 @@ def merge_submission(registry: dict, sub: dict[str, str], *, today: str) -> dict
 
     reg["updated"] = today
     return reg
+
+
+def reconcile(vendor: str, product: str, latest: str, *, registry: dict) -> dict | None:
+    """Diff a device-reported latest release against the SSoT.
+
+    Returns a ready-to-file "Latest known release" submission when the registry
+    has no ``latest`` for ``(vendor, product)`` or its ``latest`` is older than the
+    device-reported one; ``None`` when the SSoT already reflects it. This is the
+    fleet-feeds-the-registry step: a device that knows its vendor's newest release
+    (e.g. GL's ``server_version``) can contribute it upstream.
+    """
+    entry = _find_entry(registry, vendor, product)
+    have = (entry or {}).get("latest")
+    if have and _vercmp(latest, have) <= 0:
+        return None
+    return {
+        "vendor": vendor,
+        "product": product,
+        "kind": "Latest known release",
+        "latest": latest,
+    }
 
 
 def ingest_batch(registry: dict, items: list[dict], *, today: str) -> tuple[dict, list[dict]]:
