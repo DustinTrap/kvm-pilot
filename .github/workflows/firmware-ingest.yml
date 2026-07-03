@@ -33,9 +33,10 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           gh label create ingested --description "firmware report folded into the registry" --color ededed 2>/dev/null || true
+          # Write outside the workspace so the later checkout doesn't wipe it.
           gh issue list --search "label:firmware-report -label:ingested is:open" \
-            --json number,body --limit 200 > items.json
-          echo "count=$(jq length items.json)" >> "$GITHUB_OUTPUT"
+            --json number,body --limit 200 > "$RUNNER_TEMP/items.json"
+          echo "count=$(jq length "$RUNNER_TEMP/items.json")" >> "$GITHUB_OUTPUT"
 
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         if: steps.collect.outputs.count != '0'
@@ -50,9 +51,8 @@ jobs:
       - name: Ingest the batch
         if: steps.collect.outputs.count != '0'
         run: |
-          mv items.json items_in.json  # checkout replaced the workspace; keep the collected list
           python -m kvm_pilot.firmware_registry \
-            --batch items_in.json \
+            --batch "$RUNNER_TEMP/items.json" \
             --registry src/kvm_pilot/data/firmware_registry.json \
             --today "$(date +%F)" \
             --results results.json || true

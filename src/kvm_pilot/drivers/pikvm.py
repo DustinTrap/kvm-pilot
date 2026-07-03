@@ -117,6 +117,30 @@ class GLKVMDriver(PiKVMDriver):
                 info["model"] = up["model"]
         return info
 
+    def get_available_update(self) -> dict | None:
+        """GL's own update check (``/api/upgrade/compare``): the installed version vs
+        the latest GL publishes for this model. Returns
+        ``{current, latest, beta, update_available}`` or ``None`` if unavailable.
+
+        This is the telemetry that feeds firmware_registry.reconcile — a device
+        that knows its vendor's newest release can contribute it to the SSoT.
+        """
+        try:
+            c = self._http.get("/api/upgrade/compare")
+        except KVMPilotError:
+            return None
+        if not isinstance(c, dict):
+            return None
+        local, server = c.get("local_version"), c.get("server_version")
+        if not (local and server):
+            return None
+        return {
+            "current": local,
+            "latest": server,
+            "beta": c.get("beta_version") or None,
+            "update_available": local != server,
+        }
+
     def known_quirks(self, firmware: str | None = None) -> list[Quirk]:
         """Quirks that apply to ``firmware`` (auto-detected from the device if omitted)."""
         if firmware is None:
