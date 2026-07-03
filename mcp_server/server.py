@@ -26,6 +26,7 @@ hardware). Treat every result as unverified. See issue #7.
 
 from __future__ import annotations
 
+import logging
 import os
 import threading
 from collections.abc import Callable, Iterator
@@ -43,6 +44,7 @@ from kvm_pilot.safety import allow_all, deny_all
 from kvm_pilot.vision import ScreenAnalyzer, VisionBackend, make_backend
 
 mcp = FastMCP("kvm-pilot")
+_log = logging.getLogger("kvm_pilot.mcp")
 
 _READ_ONLY = ToolAnnotations(readOnlyHint=True)
 _DESTRUCTIVE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False)
@@ -65,13 +67,21 @@ def _dry_run() -> bool:
 
 @contextmanager
 def _driver(
-    profile: str | None, *, confirm: Callable[[str, str], bool], capability: Capability
+    profile: str | None,
+    *,
+    confirm: Callable[[str, str], bool],
+    capability: Capability,
+    enforce_health: bool = False,
 ) -> Iterator[tuple[HostConfig, KVMDriver]]:
     """Resolve the profile, build its driver, and always close it afterwards.
 
     The capability gate is checked structurally (``supports()``, no network) so a
     tool the driver cannot serve fails with a clear MCP tool error instead of an
     ``AttributeError`` — e.g. a Redfish BMC has no video capture.
+
+    Runs the device preflight healthcheck (#80) on first connection: read-only
+    tools inform (once per device, non-blocking); ``enforce_health`` (the ``power``
+    tool) fails closed on an unacknowledged CRITICAL.
     """
     cfg = resolve_host(profile or os.environ.get("KVM_PILOT_PROFILE"))
     kvm = make_driver_from_config(cfg, confirm=confirm, dry_run=_dry_run())
@@ -81,11 +91,56 @@ def _driver(
                 f"the '{cfg.driver}' driver for host '{cfg.host}' does not provide the "
                 f"'{capability.value}' capability this tool needs"
             )
+        _preflight(kvm, enforce=enforce_health)
         yield cfg, kvm
     finally:
         close = getattr(kvm, "close", None)
         if close is not None:
             close()
+
+
+def _preflight(kvm: KVMDriver, *, enforce: bool) -> None:
+    """Audit the device on first connection (#80).
+
+    Skipped under dry-run or ``KVM_PILOT_SKIP_HEALTHCHECK``. When ``enforce``, a
+    CRITICAL fails closed (automation has no operator to prompt) and surfaces as a
+    tool error; otherwise findings are audited once per device and logged, never
+    blocking a read.
+    """
+    if _dry_run() or _env_flag("KVM_PILOT_SKIP_HEALTHCHECK"):
+        return
+    from kvm_pilot.health import (
+        HealthCache,
+        HealthGateError,
+        Severity,
+        preflight,
+        preflight_once,
+    )
+
+    cache = HealthCache()
+    if enforce:
+        try:
+            # confirm=None -> automation fails closed on an unacknowledged critical.
+            preflight(kvm, confirm=None, cache=cache, enforce=True)
+        except HealthGateError as exc:
+            raise ToolError(f"device preflight blocked this operation: {exc}") from exc
+        return
+    try:
+        report = preflight_once(kvm, cache=cache, enforce=False)
+    except Exception:  # noqa: BLE001 - an informational audit must never break a read
+        return
+    if report is None:
+        return
+    notable = [r for r in report.results if r.severity >= Severity.WARNING]
+    if notable:
+        _log.warning(
+            "preflight %s@%s: worst %s, %d finding(s): %s",
+            report.driver_kind,
+            report.host,
+            report.worst,
+            len(notable),
+            "; ".join(f"{r.title}: {r.detail}" for r in notable),
+        )
 
 
 def _provenance(cfg: HostConfig) -> dict:
@@ -204,7 +259,9 @@ def power(
         )
     if not confirm:
         raise ToolError(f"power {action!r} was not confirmed")
-    with _driver(profile, confirm=allow_all, capability=Capability.POWER) as (cfg, kvm):
+    with _driver(
+        profile, confirm=allow_all, capability=Capability.POWER, enforce_health=True
+    ) as (cfg, kvm):
         getattr(kvm, _POWER_ACTIONS[action])()
         if _dry_run():
             return (

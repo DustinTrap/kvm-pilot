@@ -34,8 +34,16 @@ def _no_external_network(monkeypatch):
 
 @pytest.fixture(autouse=True)
 def _isolated_health_cache(tmp_path, monkeypatch):
-    """Redirect the healthcheck cache to a per-test tmp file (never touch ~/.cache)."""
+    """Redirect the healthcheck cache to a per-test tmp file (never touch ~/.cache),
+    and clear the per-process first-connection audit guard so tests stay independent."""
     monkeypatch.setenv("KVM_PILOT_HEALTH_CACHE", str(tmp_path / "health-cache.json"))
+    # Isolate the firmware-registry cache/override so tests never read a real
+    # ~/.cache copy (loader falls back to the bundled registry).
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
+    monkeypatch.delenv("KVM_PILOT_FIRMWARE_DB", raising=False)
+    from kvm_pilot.health import reset_session_audit
+
+    reset_session_audit()
 
 
 class FakeHTTP:

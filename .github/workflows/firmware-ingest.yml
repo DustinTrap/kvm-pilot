@@ -1,0 +1,94 @@
+name: Firmware registry ingest
+
+# Runs at most once per hour (the cron is the rate cap), and does real work only
+# when there are pending `firmware-report` issues — an empty hour costs one cheap
+# `gh issue list` and stops. This is a courteous use of free public CI: a
+# per-open/edit trigger would run an obnoxious number of jobs. Dedup: issues
+# labelled `ingested` are skipped and the merge is idempotent, so a re-run never
+# churns. Free on public repos.
+
+on:
+  schedule:
+    - cron: "7 * * * *"      # at most once/hour (offset to dodge top-of-hour load)
+  workflow_dispatch: {}       # manual on-demand run
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+concurrency:
+  group: firmware-ingest
+  cancel-in-progress: false
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    steps:
+      # Cheap gate first — no checkout / no Python / no install on an empty hour.
+      - name: Collect pending firmware-report issues (skip already-ingested)
+        id: collect
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          gh label create ingested --description "firmware report folded into the registry" --color ededed 2>/dev/null || true
+          gh issue list --search "label:firmware-report -label:ingested is:open" \
+            --json number,body --limit 200 > items.json
+          echo "count=$(jq length items.json)" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        if: steps.collect.outputs.count != '0'
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        if: steps.collect.outputs.count != '0'
+        with:
+          python-version: "3.12"
+      - name: Install package
+        if: steps.collect.outputs.count != '0'
+        run: pip install -e .
+
+      - name: Ingest the batch
+        if: steps.collect.outputs.count != '0'
+        run: |
+          mv items.json items_in.json  # checkout replaced the workspace; keep the collected list
+          python -m kvm_pilot.firmware_registry \
+            --batch items_in.json \
+            --registry src/kvm_pilot/data/firmware_registry.json \
+            --today "$(date +%F)" \
+            --results results.json || true
+
+      - name: Comment each issue, label the ingested ones
+        if: steps.collect.outputs.count != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          jq -c '.[]' results.json | while read -r r; do
+            num=$(jq -r .number <<<"$r"); status=$(jq -r .status <<<"$r"); msg=$(jq -r .message <<<"$r")
+            case "$status" in
+              ingested) gh issue comment "$num" --body "✅ Queued in this hour's registry PR: $msg"; gh issue edit "$num" --add-label ingested ;;
+              noop)     gh issue comment "$num" --body "ℹ️ Already in the registry — nothing to change."; gh issue edit "$num" --add-label ingested ;;
+              invalid)  gh issue comment "$num" --body "❌ Couldn't ingest: $msg. Fix the issue and it retries next hour." ;;
+            esac
+          done
+
+      - name: Open one PR for the batch (only if the registry changed)
+        if: steps.collect.outputs.count != '0'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if git diff --quiet src/kvm_pilot/data/firmware_registry.json; then
+            echo "no registry change this run"; exit 0
+          fi
+          branch="firmware-ingest/$(date +%Y%m%d-%H)"
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$branch"
+          git add src/kvm_pilot/data/firmware_registry.json
+          git commit -m "data(firmware): batched registry update $(date +%F' '%H:00)"
+          git push -f origin "$branch"
+          gh pr create \
+            --title "data(firmware): batched update $(date +%F' '%H:00)" \
+            --body "Automated hourly batch of \`firmware-report\` issues, validated by \`kvm_pilot.firmware_registry\`." \
+            --head "$branch" --base main \
+            || gh pr edit "$branch" --body "Updated $(date +%F' '%H:00)."
