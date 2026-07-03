@@ -67,6 +67,23 @@ GLKVM_QUIRKS: list[Quirk] = [
         firmware="all",
         source="documented",
     ),
+    Quirk(
+        id="atx-power-state-always-off",
+        summary=(
+            "GL-RM1PE ATX sensing is not wired like a stock PiKVM: /api/atx "
+            "reports power='off', enabled=false, and both power/hdd LEDs false "
+            "even while the host is fully powered on and booted. ATX power state "
+            "and LEDs are therefore unreliable on this hardware."
+        ),
+        workaround=(
+            "Do not trust ATX power/LED readings on GLKVM; infer host state from "
+            "the video stream (a screenshot / vision classification) instead. "
+            "This also means power on/off/cycle cannot be confirmed via ATX — "
+            "verify the result visually."
+        ),
+        firmware="4.82",
+        source="observed",
+    ),
 ]
 
 
