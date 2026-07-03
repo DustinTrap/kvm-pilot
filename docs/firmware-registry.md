@@ -85,10 +85,32 @@ report adding `vmedia` once an ISO has actually been booted).
   mouse, non-`reliable` vmedia, untrusted power).
 
 `_vercmp` compares each dot/dash segment numerically (correct for `4.82`,
-`7.10.30.00`, `2.78`); genuinely non-numeric schemes only ever compare equal and
-fall through to exact `known_bad` matches rather than a bogus ordering. Version
-strings in the registry must use the device's own scheme (write `4.90`, not `4.9`,
-if you mean build 90).
+`7.10.30.00`, `2.78`, `V1.9.1 release1`); genuinely non-numeric schemes only ever
+compare equal and fall through to exact `known_bad` matches rather than a bogus
+ordering. Version strings in the registry must use the device's own scheme (write
+`4.90`, not `4.9`, if you mean build 90).
+
+## Reconcile: the fleet feeds the registry
+
+Some devices report not just their installed version but their vendor's **latest**
+release — GLKVM exposes both at `/api/upgrade/compare` (`local_version` vs
+`server_version`). That telemetry lets a device keep the SSoT current:
+
+- `driver.get_available_update()` → `{current, latest, beta, update_available}`
+  (GLKVM via `/api/upgrade/compare`; other drivers return `None` until they wire
+  their own update check — e.g. Redfish `UpdateService`).
+- `firmware_registry.reconcile(vendor, product, latest, registry=…)` returns a
+  ready-to-file "Latest known release" submission when the SSoT has no `latest`
+  for that `(vendor, product)` or its `latest` is older than the device-reported
+  one; `None` when the SSoT already reflects it.
+- `kvm-pilot firmware-check --profile <name>` runs detection + reconcile and
+  prints the currency verdict plus the contribution to file (or `--json`). File
+  it through the Issue Form and the ingest workflow folds it in — so a device in
+  the field that sees a newer `server_version` than the SSoT contributes the bump.
+
+`get_firmware_info()` reports the **product** firmware the operator sees (GLKVM
+uses `/api/upgrade/version` → `V1.9.1 release1 (RM1PE)`), not just the kvmd
+component version, so the report and the registry key match the UI.
 
 ## Distribution & refresh
 
