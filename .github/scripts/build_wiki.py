@@ -46,6 +46,9 @@ PAGES: list[tuple[str, str, str | None]] = [
     # NB: the wiki filename must keep the source stem (link rewriting maps by stem).
     ("docs/analysis/2026-07-01-deep-review.md", "2026-07-01-deep-review.md",
      "Analysis: 2026-07-01 deep review"),
+    ("docs/analysis/2026-07-03-rm1pe-firmware-and-encoder.md",
+     "2026-07-03-rm1pe-firmware-and-encoder.md",
+     "Analysis: 2026-07-03 RM1PE firmware + encoder"),
 ]
 
 # Link/image markdown: capture the ``[label]`` and the ``(target)`` separately.
