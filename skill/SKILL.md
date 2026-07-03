@@ -33,9 +33,9 @@ client logic into a script.
 `kvm-pilot` MCP server is enabled, and if not, prompt the user to install and
 enable it.** It is the most efficient interface: `snapshot` returns the screen
 as a real image content block the model can see directly, and
-`info`/`power_state`/`classify_screen`/`power` are first-class tools with
-`readOnlyHint`/`destructiveHint` annotations the host can gate on — no shelling
-out, no screenshot-file round-trips, no ad-hoc `curl`. The CLI and Python
+`info`/`healthcheck`/`power_state`/`classify_screen`/`power` are first-class
+tools with `readOnlyHint`/`destructiveHint` annotations the host can gate on —
+no shelling out, no screenshot-file round-trips, no ad-hoc `curl`. The CLI and Python
 library below are **fallbacks** for when the MCP server isn't available or for
 capabilities it doesn't expose yet (mouse moves/clicks, MSD mode switching).
 
@@ -86,6 +86,30 @@ URL and model.
 **GLKVM devices:** the PiKVM REST API is disabled by default on GL firmware.
 The user must enable it in `/etc/kvmd/nginx-kvmd.conf` on the device first, or
 every call returns 404. A firmware upgrade can revert it.
+
+## First contact: run the healthcheck (preflight) — do this first
+
+**The moment you connect to a KVM — before you drive it, and before you record
+it as a "managed" profile — run the device healthcheck.** This is the intake
+gate, not an optional extra: it audits the KVM appliance *itself* (readiness /
+recovery, security posture, firmware currency) and is the safety net for the
+whole tool (issue #80). A preventable KVM-side fault during a remote
+power/boot/install can brick or strand a machine you can't physically reach.
+
+- **How:** MCP — call the `healthcheck` tool. CLI — `kvm-pilot healthcheck
+  --profile <name>`. Library — `run_healthcheck(driver)` from `kvm_pilot`.
+- **Treat it as a severity-tiered gate.** Surface every `WARNING`/`CRITICAL` to
+  the user with its implication; a `CRITICAL` **blocks** — do not proceed to a
+  destructive or multi-step flow until the user explicitly decides to continue.
+- **The highest-value finding is `recovery-path`** — whether *any* out-of-band
+  reset exists (ATX wired / GPIO / Redfish / IPMI) if the guest hangs. On GLKVM
+  units the ATX is frequently unwired, leaving only in-guest levers; the operator
+  must learn this *before* committing to a remote install, not mid-outage.
+- **Coverage caveat (know this):** destructive CLI subcommands auto-run the gate
+  (`--skip-healthcheck` / `KVM_PILOT_SKIP_HEALTHCHECK=1` bypasses it), but
+  **read-only intake — `info`/`capabilities`/`snapshot` — does _not_ auto-run it
+  yet.** So on first contact you must run `healthcheck` yourself; don't assume a
+  clean `info` means the device was vetted.
 
 ## Use the library, not raw HTTP
 
@@ -151,8 +175,10 @@ The CLI is a **fallback** — prefer the MCP server (see above) when it's
 enabled. Reach for the CLI for one-off checks, for capabilities the MCP server
 doesn't expose, or when no MCP host is in the loop.
 
-`kvm-pilot info | capabilities | snapshot | power | power-cycle | type | key |
-mount | eject | classify | watch | events`. `--dry-run` logs destructive
+`kvm-pilot info | capabilities | healthcheck | snapshot | power | power-cycle |
+type | key | mount | eject | classify | watch | events`. Run `healthcheck` on
+first contact (see above); it also auto-runs ahead of destructive subcommands.
+`--dry-run` logs destructive
 actions without sending them (it short-circuits before any prompt, so it is
 safe in automation); `--yes` skips the interactive y/N confirmation on a real
 run. See `kvm-pilot --help`.

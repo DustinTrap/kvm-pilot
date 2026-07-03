@@ -22,6 +22,15 @@ any docs or messaging; do not claim features are "tested" or "beta".
   `DESTRUCTIVE_OPS` in `src/kvm_pilot/safety.py` and routed through
   `self.safety.guard(op, description)`. A vision classification must never trigger
   a destructive action on its own.
+- **Preflight before trust (issue #80).** Bringing a device into use — first
+  connection, adding a managed profile, or ahead of any destructive/multi-step
+  flow — runs through the device `healthcheck` (`src/kvm_pilot/health.py`;
+  `run_healthcheck`). It is the intake gate, and `#80`'s intent is that it
+  auto-runs *on first connection*, not only before destructive ops. Today only
+  the destructive-subcommand path auto-gates (`cli.py` `_preflight_gate`) and the
+  MCP server does not auto-run it at all — until that gap is closed, the operating
+  procedure (`skill/SKILL.md`, `mcp_server/README.md`) requires running it
+  explicitly on first contact. Don't treat a bare `info`/`snapshot` as vetting.
 - **Capabilities, not a monolith.** New device support = a driver implementing the
   relevant capability protocols in `src/kvm_pilot/drivers/base.py` (`Power`,
   `HID`, `Video`, `VirtualMedia`, `GPIO`, `Events`, `SystemInfo`). See
