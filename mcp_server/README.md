@@ -16,6 +16,7 @@ from the stdlib-only core library — it depends on the
 | Tool | Annotations | What it does |
 |---|---|---|
 | `info` | `readOnlyHint` | Device / system info |
+| `healthcheck` | `readOnlyHint` | **Preflight audit** of the KVM itself — readiness/recovery, security posture, firmware currency (issue #80). Run this **first, on connecting to any device**, before trusting it for real work; a `CRITICAL` (e.g. no out-of-band recovery path) should gate any subsequent destructive op |
 | `power_state` | `readOnlyHint` | `powered_on` plus ATX detail where the driver has it |
 | `snapshot` | `readOnlyHint` | Current screen, returned as a real JPEG **image** content block the model can see |
 | `classify_screen` | `readOnlyHint` | Boot/run phase via the vision backend (Anthropic or a local VLM, see below) |
@@ -29,18 +30,25 @@ device-side (a leaked session can lock operators out of the BMC).
 
 ### Which tools work with which driver
 
-| Driver kind | `info` | `power_state` | `snapshot` | `classify_screen` | `power` |
-|---|---|---|---|---|---|
-| `pikvm` / `glkvm` / `blikvm` | ✅ | ✅ (with ATX detail) | ✅ | ✅ | ✅ |
-| `redfish` (iDRAC, iLO, XCC, OpenBMC, …) | ✅ | ✅ | ❌ no video capability | ❌ no video capability | ✅ |
-| `fake` (in-process test double) | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Driver kind | `info` | `healthcheck` | `power_state` | `snapshot` | `classify_screen` | `power` |
+|---|---|---|---|---|---|---|
+| `pikvm` / `glkvm` / `blikvm` | ✅ | ✅ | ✅ (with ATX detail) | ✅ | ✅ | ✅ |
+| `redfish` (iDRAC, iLO, XCC, OpenBMC, …) | ✅ | ✅ (checks it can't serve are omitted) | ✅ | ❌ no video capability | ❌ no video capability | ✅ |
+| `fake` (in-process test double) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 A tool the active driver cannot serve returns a clean MCP tool error naming
 the driver kind and the missing capability (it never `AttributeError`s).
 
 ## Safety model
 
-The gate is layered; no single layer is trusted on its own:
+**Preflight first.** On connecting to any device, call `healthcheck` before you
+trust it for real work (issue #80) — it surfaces readiness/recovery, security,
+and firmware risks up front (most importantly, whether there is *any* out-of-band
+recovery path if the guest hangs). A `CRITICAL` finding should gate the
+destructive `power` tool below. Note: the server does not yet auto-run this on
+connect, so the agent must call it as the first step.
+
+The `power` gate is layered; no single layer is trusted on its own:
 
 1. **Operator opt-in (the real gate).** The `power` tool is *disabled by
    default*. It only works when the human operator sets
