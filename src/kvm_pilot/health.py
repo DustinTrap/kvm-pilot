@@ -479,12 +479,16 @@ def check_firmware_report(driver: Any) -> CheckResult | None:
         return None
     version = fw.get("version")
     model = fw.get("model")
+    kvmd = fw.get("kvmd_version")
+    # `version` is the product firmware the UI shows (e.g. GL "V1.9.1 release1");
+    # note the kvmd component version too when it differs.
+    kvmd_note = f" (kvmd {kvmd})" if kvmd and kvmd != version else ""
     return CheckResult(
         id="firmware-report",
         pillar=Pillar.FIRMWARE,
         severity=Severity.INFO,
         title="Firmware",
-        detail=f"model={model or '?'} kvmd/firmware={version or '?'}.",
+        detail=f"model={model or '?'} firmware={version or '?'}{kvmd_note}.",
     )
 
 

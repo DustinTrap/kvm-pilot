@@ -1,5 +1,15 @@
 {
   "schema_version": 2,
   "updated": "2026-07-02",
-  "firmware": []
+  "firmware": [
+    {
+      "vendor": "gl.inet",
+      "product": "RM1PE",
+      "profile": {
+        "mouse": "absolute",
+        "video": "h264/1080p60",
+        "power_state_trusted": false
+      }
+    }
+  ]
 }
