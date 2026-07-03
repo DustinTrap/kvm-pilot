@@ -18,9 +18,12 @@ output without touching the wiki::
 from __future__ import annotations
 
 import argparse
+import json
 import posixpath
 import re
 import shutil
+import sqlite3
+from datetime import UTC, datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -48,6 +51,130 @@ PAGES: list[tuple[str, str, str | None]] = [
 # Link/image markdown: capture the ``[label]`` and the ``(target)`` separately.
 _LINK = re.compile(r"(!?\[[^\]]*\])\(([^)]+)\)")
 _IMAGE_EXTS = (".svg", ".png", ".jpg", ".jpeg", ".gif")
+
+# --- Community hardware-compatibility (HCL) page -----------------------------
+# Generated (not mirrored from a doc) from the lossless run ledger. The ledger is
+# the git-friendly source of truth; we load it into an ephemeral in-memory SQLite
+# purely to aggregate, then render. See issue #96 / #105.
+HCL_LEDGER = ROOT / "data" / "test_runs.jsonl"
+HCL_PAGE = "Hardware-Compatibility.md"
+HCL_MIN_SAMPLES = 3  # a cell below this shows "insufficient data", not a verdict
+# capability -> is it destructive (safety-relevant verdict)? Column order preserved.
+HCL_CAPS: list[tuple[str, bool]] = [
+    ("info", False), ("snapshot", False), ("healthcheck", False),
+    ("logs", False), ("power_state", False),
+    ("virtual_media", True), ("power", True), ("firmware_update", True),
+]
+
+
+def _hcl_load(ledger: Path) -> sqlite3.Connection:
+    """Load the JSONL run ledger into an ephemeral in-memory SQLite DB.
+
+    Mirrors the #104 ``runs`` / ``run_capabilities`` schema so the same
+    aggregation SQL serves a future managed-Postgres import unchanged. Idempotent
+    on ``run_id`` (``INSERT OR IGNORE``), matching the ingestion contract.
+    """
+    db = sqlite3.connect(":memory:")
+    db.executescript(
+        "CREATE TABLE runs (run_id TEXT PRIMARY KEY, source TEXT, vendor TEXT, "
+        "product TEXT, firmware_version TEXT, kvm_pilot_version TEXT, driver TEXT, "
+        "os_family TEXT, python_version TEXT, utc_date TEXT);"
+        "CREATE TABLE run_capabilities (run_id TEXT, capability TEXT, passed INTEGER, "
+        "outcome TEXT, PRIMARY KEY (run_id, capability));"
+    )
+    for line in ledger.read_text(encoding="utf-8").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        r = json.loads(line)
+        db.execute(
+            "INSERT OR IGNORE INTO runs VALUES (?,?,?,?,?,?,?,?,?,?)",
+            (r["run_id"], r.get("source", "unknown"), r["vendor"], r["product"],
+             r.get("firmware_version"), r.get("kvm_pilot_version"), r.get("driver"),
+             r.get("os_family"), r.get("python_version"), r["utc_date"]),
+        )
+        for c in r.get("capabilities", []):
+            db.execute(
+                "INSERT OR IGNORE INTO run_capabilities VALUES (?,?,?,?)",
+                (r["run_id"], c["capability"], 1 if c["passed"] else 0, c.get("outcome", "")),
+            )
+    return db
+
+
+def _hcl_cell(agg: dict[str, tuple[int, int]], cap: str, destructive: bool) -> str:
+    """Render one matrix cell: pass-rate + sample count, gated by min samples."""
+    if cap not in agg:
+        return "·"  # never exercised on this combo
+    passes, n = agg[cap]
+    if n < HCL_MIN_SAMPLES:
+        return f"…&nbsp;n={n}"  # insufficient data — not yet a verdict
+    rate = round(100 * passes / n)
+    mark = "✅" if rate == 100 else ("❌" if rate == 0 else "⚠️")
+    flag = "†" if destructive else ""
+    return f"{mark}&nbsp;{rate}%{flag}<br><sub>n={n}</sub>"
+
+
+def render_hcl(ledger: Path = HCL_LEDGER) -> str:
+    """Render the community compatibility matrix as a wiki markdown page."""
+    db = _hcl_load(ledger)
+    total, real, synthetic = db.execute(
+        "SELECT COUNT(*), "
+        "SUM(source='real'), SUM(source='synthetic') FROM runs"
+    ).fetchone()
+    rows = db.execute(
+        "SELECT r.vendor, r.product, r.firmware_version, rc.capability, "
+        "SUM(rc.passed), COUNT(*) FROM runs r JOIN run_capabilities rc "
+        "ON r.run_id = rc.run_id "
+        "GROUP BY r.vendor, r.product, r.firmware_version, rc.capability"
+    ).fetchall()
+    combos: dict[tuple[str, str, str], dict[str, tuple[int, int]]] = {}
+    for vendor, product, fw, cap, passes, n in rows:
+        combos.setdefault((vendor, product, fw or ""), {})[cap] = (passes, n)
+
+    cap_order = [c for c, _ in HCL_CAPS]
+    destructive = {c for c, d in HCL_CAPS if d}
+    now = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
+    out = [
+        "# Hardware Compatibility (community-reported)",
+        "",
+    ]
+    if synthetic:
+        out += [
+            "> ⚠️ **PREVIEW — not yet real community data.** This page is seeded "
+            f"with **{synthetic} synthetic** demo run(s) and **{real} real** run(s) "
+            "to exercise the reporting pipeline. Cells marked with synthetic data "
+            "are illustrative only; do **not** rely on them. Synthetic rows are "
+            "purged once genuine submissions arrive.",
+            "",
+        ]
+    out += [
+        f"_Auto-generated from {total} test run(s) · last updated {now}_",
+        "",
+        "Each cell shows the **pass rate** and sample count **n** for a capability "
+        f"on a device+firmware combo. Cells with fewer than {HCL_MIN_SAMPLES} runs "
+        "show `…` (insufficient data); `·` = never exercised.",
+        "",
+        "> **†  destructive capability.** `power`, `virtual_media` and "
+        "`firmware_update` verdicts are safety-relevant — a green cell means "
+        "*reported working*, not a guarantee. Read the device caveats before "
+        "relying on a remote flash.",
+        "",
+    ]
+    header = "| Device | Firmware | " + " | ".join(
+        f"{c}{'†' if c in destructive else ''}" for c in cap_order
+    ) + " |"
+    out += [header, "|" + "---|" * (len(cap_order) + 2)]
+    for vendor, product, fw in sorted(combos):
+        agg = combos[(vendor, product, fw)]
+        cells = " | ".join(_hcl_cell(agg, c, c in destructive) for c in cap_order)
+        out.append(f"| **{vendor} {product}** | {fw} | {cells} |")
+    out += [
+        "",
+        f"Legend: ✅ all-pass · ⚠️ mixed · ❌ all-fail · … insufficient (n<{HCL_MIN_SAMPLES}) "
+        "· · not tested",
+        "",
+    ]
+    return "\n".join(out)
 
 
 def _rewrite_target(target: str, src_dir: str) -> str:
@@ -103,15 +230,24 @@ def build(out: Path) -> None:
     for svg in sorted((ROOT / "docs").glob("*.svg")):
         shutil.copy2(svg, out / svg.name)
 
+    # Generated (not mirrored) page: the community compatibility matrix, rendered
+    # from the run ledger. Skipped cleanly if the ledger has not been seeded yet.
+    hcl_built = False
+    if HCL_LEDGER.exists():
+        (out / HCL_PAGE).write_text(render_hcl(), encoding="utf-8")
+        hcl_built = True
+
     # Sidebar navigation, in PAGES order (Home first, then the guides).
     lines = ["### kvm-pilot docs", "", "- [[Home]]"]
     for _, wiki_name, title in PAGES:
         if title is None:
             continue
         lines.append(f"- [[{title}|{Path(wiki_name).stem}]]")
+    if hcl_built:
+        lines.append(f"- [[Hardware compatibility|{Path(HCL_PAGE).stem}]]")
     (out / "_Sidebar.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
-    print(f"built {len(PAGES)} pages + sidebar into {out}")
+    print(f"built {len(PAGES)} pages{' + HCL' if hcl_built else ''} + sidebar into {out}")
 
 
 def main() -> None:
