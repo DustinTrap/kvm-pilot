@@ -6,10 +6,12 @@ description: >-
   or workstation through a KVM — power on/off/cycle, mount an install ISO,
   enter BIOS/UEFI, type at a console, or watch the screen to detect boot phase
   (POST, GRUB, installer, login, crash). Backed by the `kvm-pilot` Python
-  package; vision runs on Claude or a local OpenAI-compatible VLM. **Prefer the
-  bundled MCP server (`mcp_server/`) as the interface — it exposes
-  info/snapshot/classify/power_state/power as first-class tools; the CLI and
-  Python library are fallbacks.** Early alpha, never validated on real hardware
+  package; vision runs on Claude or a local OpenAI-compatible VLM. **No single
+  interface is best for everything — pick per action: the bundled MCP server
+  (`mcp_server/`) for the visual loop (snapshot/classify) and gated power, the
+  CLI for logs/capabilities/firmware/events/HID/media, the Python library for
+  mouse and MSD switching, and SSH for appliance maintenance the tool can't do.
+  See the interface matrix in the skill body.** Early alpha, never validated on real hardware
   — treat every operation as unverified and confirm destructive steps with the
   user.
 ---
@@ -27,38 +29,83 @@ This skill is a thin wrapper over the installable `kvm-pilot` package. The code
 lives in the package, not here — install it and import it rather than copying
 client logic into a script.
 
-## Preferred interface: the MCP server (enable this first)
+## Choosing an interface — best tool per action
 
-**Before driving a KVM through the CLI or raw library, check whether the
-`kvm-pilot` MCP server is enabled, and if not, prompt the user to install and
-enable it.** It is the most efficient interface: `snapshot` returns the screen
-as a real image content block the model can see directly, and
-`info`/`healthcheck`/`power_state`/`classify_screen`/`power` are first-class
-tools with `readOnlyHint`/`destructiveHint` annotations the host can gate on —
-no shelling out, no screenshot-file round-trips, no ad-hoc `curl`. The CLI and Python
-library below are **fallbacks** for when the MCP server isn't available or for
-capabilities it doesn't expose yet (mouse moves/clicks, MSD mode switching).
+kvm-pilot is reachable through several interfaces, and **no single one is best
+for everything.** Pick per action, and run more than one at once when the work
+is independent (see [Multitasking](#multitasking--use-interfaces-in-parallel)).
+This is the operator-side complement to the sensing hierarchy (#13, prefer
+structured/text over vision) and the actuation-channel hierarchy (#81, hand off
+KVM HID+vision → SSH once the target OS is reachable).
 
-If you find yourself scripting `make_driver(...)` or `curl`-ing `/api/*` to do
-something the MCP server already exposes, stop and enable the server instead.
+| Action | Best interface | Notes / fallback |
+|---|---|---|
+| See the screen as a model-visible image | **MCP** `snapshot` | Returns a real image content block — no screenshot-file round-trip. CLI `snapshot` writes a file. |
+| Classify boot/run phase | **MCP** `classify_screen` | Needs a vision backend (Anthropic key or local VLM). CLI: `classify` / `watch`. |
+| Preflight audit (run first) | **MCP** `healthcheck` or CLI `healthcheck` | The intake gate — see below. |
+| Device info / host power state | **MCP** `info` / `power_state`, or CLI | Either works. |
+| **Read the device/host event log** | **MCP** `logs` or **CLI `logs`** | The text diagnostic when video/streamer/power looks wrong — it names a fault (e.g. a stuck encoder behind a `snapshot` 503) a screenshot can't. |
+| capabilities, firmware-check/update, events, watch, type/key, mount/eject | **CLI only** | The MCP server does not expose these. |
+| Mouse move/click, MSD mode switching | **Python library only** | Not in MCP or CLI. |
+| Change **host** power (on/off/cycle/reset) | **MCP `power`** (gated) or CLI `power` / `power-cycle` | Destructive — confirm each step. MCP `power` is operator-enabled + per-call approval. |
+| Reboot the **KVM appliance** / restart `kvmd` / inspect `/etc/kvmd` | **SSH to the appliance** | No kvm-pilot interface does this — out-of-band only. |
+| View the screen when `snapshot` fails | **WebRTC/Janus stream or the vendor web UI** | The only way to see a unit that streams H.264 at its native resolution. |
 
-**Is it enabled?** Look for `mcp__kvm-pilot__*` tools (e.g.
-`mcp__kvm-pilot__snapshot`). If they're absent, register it and tell the user to
-restart the session so the tools load:
+**Host vs. appliance — keep these straight.** The `power` tool/CLI acts on the
+**managed host** (the machine the KVM controls). Rebooting the **KVM appliance
+itself** — e.g. to clear a stuck video encoder — is **out-of-band**: SSH in and
+`reboot`, or restart `kvmd`. Nothing in kvm-pilot reboots the appliance.
+
+**Reading a failed `snapshot`:**
+- **HTTP 503 / "Service Unavailable"** → the video subsystem is down. Pull `logs`
+  and look for encoder errors; a stuck encoder often clears with an **appliance
+  reboot** (SSH).
+- **A tiny/empty frame while `has_video_signal` is True** → the JPEG path can't
+  encode the current mode, typically **H.264 at the panel's native resolution**.
+  Use the WebRTC stream, or drop the host to 1080p, to see the screen.
+
+### Enabling the MCP server
+
+Look for `mcp__kvm-pilot__*` tools (e.g. `mcp__kvm-pilot__snapshot`). If they're
+absent, register the server and tell the user to restart the session so the
+tools load:
 
 ```bash
-# from a repo checkout (server deps: pip install -r mcp_server/requirements.txt)
-claude mcp add kvm-pilot -s local -e KVM_PILOT_PROFILE=<profile> -- \
+# server deps: pip install -r mcp_server/requirements.txt
+claude mcp add kvm-pilot -s user \
+    -e KVM_PILOT_PROFILE=<profile> -e KVM_PILOT_MCP_DRY_RUN=1 -- \
     /path/to/.venv/bin/python /path/to/mcp_server/server.py
 claude mcp list          # expect: kvm-pilot ... ✔ Connected
 ```
 
-Point it at a config-file **profile** (`KVM_PILOT_PROFILE`) so the device
-password lives in `~/.config/kvm-pilot/config.toml`, not the MCP host config.
-The `power` tool is **disabled by default** — it only works if the operator
-sets `KVM_PILOT_MCP_ALLOW_POWER=1` in the server's `env` — and even then MCP
-hosts should require per-call human approval (never "always allow"). Full
-operator guide: [`mcp_server/README.md`](https://github.com/DustinTrap/kvm-pilot/blob/main/mcp_server/README.md).
+**Scope gotcha:** `-s local` registers the server under the **current
+directory's** project scope — launch the agent from a different directory and
+the tools silently don't load. Use `-s user` (or a committed repo `.mcp.json`)
+so it's available wherever you start. Point it at a config-file **profile**
+(`KVM_PILOT_PROFILE`) so the device password lives in
+`~/.config/kvm-pilot/config.toml`, not the MCP host config; every tool also
+takes a `profile` argument to retarget. Keep `KVM_PILOT_MCP_DRY_RUN=1` for this
+untested alpha — destructive calls are logged, not sent. The `power` tool is
+**disabled** unless the operator sets `KVM_PILOT_MCP_ALLOW_POWER=1` in the
+server's own `env`, and even then MCP hosts should require per-call human
+approval (never "always allow"). Full operator guide:
+[`mcp_server/README.md`](https://github.com/DustinTrap/kvm-pilot/blob/main/mcp_server/README.md).
+
+## Multitasking — use interfaces in parallel
+
+The interfaces don't contend; run independent work concurrently to cut latency
+and cross-check signals:
+
+- **Parallel intake.** Gather `healthcheck` + `info` + `capabilities` + `logs`
+  (+ `firmware-check`) at once rather than serially.
+- **Cross-signal during long waits.** While a vision `watch` waits for a boot
+  phase, tail `logs`/`events` alongside it, so a text signal can confirm or
+  contradict the pixel read (the operator-side of #13's sensing hierarchy).
+- **Mix channels.** The in-session MCP image path and a CLI `events`/`logs`
+  stream can run together — different transports, no conflict.
+- **Never parallelize state changes.** Serialize anything destructive (power,
+  media, keystrokes) behind a single confirm gate; concurrency is for read-only
+  observation only.
 
 ## Setup
 
@@ -171,9 +218,12 @@ unless they have explicitly said otherwise.
 
 ## CLI
 
-The CLI is a **fallback** — prefer the MCP server (see above) when it's
-enabled. Reach for the CLI for one-off checks, for capabilities the MCP server
-doesn't expose, or when no MCP host is in the loop.
+The CLI is the **primary (often only) interface** for a large part of the
+surface — `logs`, `capabilities`, `firmware-check`/`firmware-update`, `events`,
+`watch`, `type`/`key`, `mount`/`eject` have no MCP tool (see the interface
+matrix above). Use the MCP server for the visual loop (`snapshot`/`classify`)
+and gated `power`; use the CLI for everything else and for one-off checks when
+no MCP host is in the loop.
 
 `kvm-pilot info | capabilities | healthcheck | firmware-check | snapshot | power |
 power-cycle | type | key | mount | eject | classify | watch | events`. Run

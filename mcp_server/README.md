@@ -18,6 +18,7 @@ from the stdlib-only core library — it depends on the
 | `info` | `readOnlyHint` | Device / system info |
 | `healthcheck` | `readOnlyHint` | **Preflight audit** of the KVM itself — readiness/recovery, security posture, firmware currency (issue #80). Run this **first, on connecting to any device**, before trusting it for real work; a `CRITICAL` (e.g. no out-of-band recovery path) should gate any subsequent destructive op |
 | `power_state` | `readOnlyHint` | `powered_on` plus ATX detail where the driver has it |
+| `logs` | `readOnlyHint` | Device/host event log as text (`seek` = seconds of lookback). The text diagnostic when video/streamer/power looks wrong — it names a fault (e.g. a stuck encoder behind a `snapshot` 503) a screenshot can't |
 | `snapshot` | `readOnlyHint` | Current screen, returned as a real JPEG **image** content block the model can see |
 | `classify_screen` | `readOnlyHint` | Boot/run phase via the vision backend (Anthropic or a local VLM, see below) |
 | `power` | `destructiveHint` | `on` / `off` / `off-hard` / `reset` — **disabled unless the operator opts in** |
@@ -30,14 +31,29 @@ device-side (a leaked session can lock operators out of the BMC).
 
 ### Which tools work with which driver
 
-| Driver kind | `info` | `healthcheck` | `power_state` | `snapshot` | `classify_screen` | `power` |
-|---|---|---|---|---|---|---|
-| `pikvm` / `glkvm` / `blikvm` | ✅ | ✅ | ✅ (with ATX detail) | ✅ | ✅ | ✅ |
-| `redfish` (iDRAC, iLO, XCC, OpenBMC, …) | ✅ | ✅ (checks it can't serve are omitted) | ✅ | ❌ no video capability | ❌ no video capability | ✅ |
-| `fake` (in-process test double) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
+| Driver kind | `info` | `healthcheck` | `power_state` | `logs` | `snapshot` | `classify_screen` | `power` |
+|---|---|---|---|---|---|---|---|
+| `pikvm` / `glkvm` / `blikvm` | ✅ | ✅ | ✅ (with ATX detail) | ✅ | ✅ | ✅ | ✅ |
+| `redfish` (iDRAC, iLO, XCC, OpenBMC, …) | ✅ | ✅ (checks it can't serve are omitted) | ✅ | ✅ | ❌ no video capability | ❌ no video capability | ✅ |
+| `fake` (in-process test double) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 A tool the active driver cannot serve returns a clean MCP tool error naming
 the driver kind and the missing capability (it never `AttributeError`s).
+
+### What this server does *not* expose — use another interface
+
+The MCP surface is deliberately small. For anything outside the table, pick the
+right interface (the skill's *Choosing an interface* matrix is the full guide):
+
+- **`capabilities`, `firmware-check`/`firmware-update`, `events`, `watch`,
+  `type`/`key`, `mount`/`eject`** → the **CLI** (`kvm-pilot <cmd>`); no MCP tool.
+- **Mouse move/click, MSD mode switching** → the **Python library**.
+- **Reboot the KVM appliance / restart `kvmd`** → **out-of-band SSH** to the
+  appliance. No kvm-pilot interface reboots the box; `power` acts on the
+  *managed host*, not the appliance.
+- **View the screen when `snapshot` fails** (503, or a tiny frame while a signal
+  is present — typically H.264 at the panel's native resolution) → the
+  **WebRTC/Janus stream or the vendor web UI**.
 
 ## Safety model
 
