@@ -6,6 +6,23 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.0a3] — 2026-07-03
+
+Docs-only release: corrects stale honesty claims now that the project has touched
+real hardware, and refreshes the PyPI long description (a2's page was immutable).
+
+### Changed
+- **Corrected the "never run on real hardware" claim** across `CLAUDE.md`,
+  `skill/SKILL.md`, and `mcp_server/README.md` — now stating the honest posture
+  (largely mock-only; a few combos exercised live on the RM1PE; remote flash a
+  known no-op #94/#95) with the
+  [Hardware-Compatibility list](https://github.com/DustinTrap/kvm-pilot/wiki/Hardware-Compatibility)
+  as the source of truth (docs half of #103).
+- **Refreshed `README.md`** (PyPI's long description), which still described a1:
+  updated status to a2's real-hardware reality, `--pre` install instructions,
+  Redfish/BMC in the tagline, and a Compatibility table reflecting the live
+  RM1PE runs (#107) instead of "nothing verified."
+
 ## [0.1.0a2] — 2026-07-03
 
 Second **alpha**, and the **first build exercised against real hardware** (a
@@ -384,5 +401,6 @@ user feedback. **Not validated on real hardware** — see Notes.
   feedback are the explicit goals of this alpha. Reports welcome in the issue
   tracker.
 
+[0.1.0a3]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a3
 [0.1.0a2]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a2
 [0.1.0a1]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a1
