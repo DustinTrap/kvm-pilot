@@ -41,6 +41,10 @@ class FakeKVMState:
         self.fail_times = 0
         self.echo_password = False
         self.api_disabled = False  # GL firmware: every /api/* returns 404
+        # Healthcheck knobs: ATX wiring, GPIO outputs, MSD state.
+        self.atx_enabled = True
+        self.gpio_outputs: dict[str, object] = {}
+        self.msd: dict[str, object] = {"online": False, "drive": {"image": None}}
         # Real kvmd 401s /api/* without valid X-KVMD-User/Passwd (or auth_token
         # cookie). Enforced by default so a dropped-credential regression fails.
         self.expected_user = "admin"
@@ -129,7 +133,16 @@ class _Handler(BaseHTTPRequestHandler):
                 "system": {"kvmd": {"version": "4.2-gl-test"}},
             })
         elif path == "/api/atx":
-            self._json({"leds": {"power": self._state.powered_on}})
+            self._json({
+                "enabled": self._state.atx_enabled,
+                "leds": {"power": self._state.powered_on},
+            })
+        elif path == "/api/gpio":
+            self._json({"state": {"outputs": self._state.gpio_outputs}})
+        elif path == "/api/msd":
+            self._json(self._state.msd)
+        elif path == "/api/streamer":
+            self._json({"source": {"online": True, "resolution": {"width": 1920, "height": 1080}}})
         elif path == "/api/streamer/snapshot":
             self._send(_FAKE_JPEG, ctype="image/jpeg")
         elif path == "/api/log":

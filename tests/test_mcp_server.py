@@ -27,7 +27,7 @@ from mcp.client.stdio import stdio_client  # noqa: E402
 REPO_ROOT = Path(__file__).resolve().parents[1]
 SERVER = REPO_ROOT / "mcp_server" / "server.py"
 
-EXPECTED_TOOLS = {"info", "power_state", "snapshot", "classify_screen", "power"}
+EXPECTED_TOOLS = {"info", "power_state", "snapshot", "classify_screen", "power", "healthcheck"}
 
 
 @pytest.fixture()
@@ -74,7 +74,7 @@ def result_json(result) -> dict:
     return json.loads(result.content[0].text)
 
 
-def test_handshake_lists_five_annotated_tools(config_file):
+def test_handshake_lists_annotated_tools(config_file):
     async def interact(session):
         return (await session.list_tools()).tools
 
@@ -86,6 +86,17 @@ def test_handshake_lists_five_annotated_tools(config_file):
     power = by_name["power"].annotations
     assert power.readOnlyHint is False
     assert power.destructiveHint is True
+
+
+def test_healthcheck_tool_returns_report(config_file):
+    async def interact(session):
+        return await session.call_tool("healthcheck", {})
+
+    result = run_session(server_env(config_file), interact)
+    parsed = result_json(result)
+    assert parsed["driver"] == "fake"
+    assert parsed["worst"] in {"OK", "INFO", "WARNING", "CRITICAL"}
+    assert any(r["id"] == "recovery-path" for r in parsed["results"])
 
 
 def test_power_errors_without_operator_gate(config_file):
