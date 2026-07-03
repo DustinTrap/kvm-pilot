@@ -368,6 +368,57 @@ def cmd_healthcheck(args) -> int:
     return 0
 
 
+def cmd_firmware_check(args) -> int:
+    """Detect the device's firmware currency and reconcile it against the registry SSoT.
+
+    Prints the installed version, the latest the device knows about (if it self-reports,
+    e.g. GL's /api/upgrade/compare), and — when the bundled/loaded registry is behind or
+    missing this device — a ready-to-file "Latest known release" report to contribute.
+    """
+    from .firmware_registry import load_registry, reconcile
+
+    kvm = _build_client(args)
+    info_fn = getattr(kvm, "get_firmware_info", None)
+    fw = info_fn() if info_fn is not None else {}
+    vendor = (fw.get("vendor") or "").strip()
+    product = fw.get("product") or ""
+    upd = None
+    fn = getattr(kvm, "get_available_update", None)
+    if fn is not None:
+        upd = fn()
+
+    submission = None
+    if upd and upd.get("latest"):
+        submission = reconcile(vendor, product, upd["latest"], registry=load_registry())
+
+    if args.json:
+        out: dict = {"vendor": vendor, "product": product, "installed": fw.get("version"),
+                     "kvmd": fw.get("kvmd_version")}
+        if upd:
+            out.update(latest_available=upd["latest"], update_available=upd["update_available"],
+                       beta=upd.get("beta"))
+        out["registry_behind"] = submission is not None
+        if submission:
+            out["submission"] = submission
+        print(json.dumps(out, indent=2, default=str))
+        return 0
+
+    print(f"{vendor} {product}: installed {fw.get('version')} (kvmd {fw.get('kvmd_version')})")
+    if upd:
+        verdict = "UPDATE AVAILABLE" if upd["update_available"] else "up to date"
+        print(f"  vendor's latest: {upd['latest']} — {verdict}"
+              + (f" (beta {upd['beta']})" if upd.get("beta") else ""))
+    else:
+        print("  device does not self-report an available-update check")
+    if submission:
+        print("\nRegistry SSoT is behind for this device — contribute this to keep it current:")
+        print(f"  Latest known release: vendor={vendor} product={product} latest={submission['latest']}")
+        print("  File it via the 'Firmware report' issue form (the hourly workflow ingests it).")
+    elif upd:
+        print("\nRegistry SSoT already reflects this latest — nothing to contribute.")
+    return 0
+
+
 def _apply_auto_fixes(kvm, report, args) -> None:
     confirm = allow_all if getattr(args, "yes", False) else interactive_confirm
     for r in report.results:
@@ -484,6 +535,12 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Offer to apply safe, reversible auto-fixes (with confirmation)")
     _add_common(p)
     p.set_defaults(func=cmd_healthcheck)
+
+    p = sub.add_parser("firmware-check",
+                       help="Detect firmware currency and reconcile it against the registry")
+    p.add_argument("--json", action="store_true", help="Emit the result as JSON")
+    _add_common(p)
+    p.set_defaults(func=cmd_firmware_check)
 
     p = sub.add_parser("snapshot", help="Save a screenshot")
     p.add_argument("output")

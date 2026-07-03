@@ -32,7 +32,6 @@ from __future__ import annotations
 import enum
 import json
 import os
-import re
 import time
 from collections.abc import Callable, Iterable
 from dataclasses import dataclass, field
@@ -40,6 +39,9 @@ from pathlib import Path
 from typing import Any
 
 from .errors import KVMPilotError
+
+# Version compare + known-bad range matching live in firmware_registry (shared with reconcile).
+from .firmware_registry import _affected, _vercmp
 from .safety import ConfirmCallback
 
 __all__ = [
@@ -523,37 +525,6 @@ def check_firmware_quirks(driver: Any) -> CheckResult | None:
 # normalizes — so one generic mechanism serves every family (PiKVM, GLKVM, Redfish
 # iDRAC/iLO/XCC, and future IPMI/AMT drivers): the vendor-specific bit is only
 # "how do I read the version off this box", which lives in the driver.
-
-
-def _ver_tuple(v: str | None) -> tuple[int, ...]:
-    """A version string as a tuple of its integer segments (``4.82`` -> ``(4, 82)``)."""
-    return tuple(int(x) for x in re.findall(r"\d+", v)) if v else ()
-
-
-def _vercmp(a: str | None, b: str | None) -> int:
-    """Compare two dotted-numeric versions: -1 / 0 / 1. Missing segments pad as 0.
-
-    Each dot/dash-separated segment is compared numerically — correct for kvmd
-    (``4.82``), iDRAC (``7.10.30.00``), iLO (``2.78``) and the like. Genuinely
-    non-numeric schemes collapse to () and only ever compare equal, so they fall
-    through to exact ``known_bad`` matches rather than a bogus ordering.
-    """
-    ta, tb = _ver_tuple(a), _ver_tuple(b)
-    n = max(len(ta), len(tb))
-    ta += (0,) * (n - len(ta))
-    tb += (0,) * (n - len(tb))
-    return (ta > tb) - (ta < tb)
-
-
-def _affected(spec: str, version: str) -> bool:
-    """Does ``version`` satisfy a known-bad ``affected`` spec (``<=X`` / ``<X`` /
-    ``>=X`` / ``>X`` / ``==X`` / bare ``X`` for exact)?"""
-    spec = (spec or "").strip()
-    for op in ("<=", ">=", "==", "<", ">"):
-        if spec.startswith(op):
-            c = _vercmp(version, spec[len(op):].strip())
-            return {"<=": c <= 0, "<": c < 0, ">=": c >= 0, ">": c > 0, "==": c == 0}[op]
-    return _vercmp(version, spec) == 0
 
 
 _REGISTRY_CACHE: dict[str, Any] | None = None
