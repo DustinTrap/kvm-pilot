@@ -6,6 +6,36 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added — preflight on first connection + firmware registry (2026-07-02 batch, #80)
+- **Preflight healthcheck runs on first connection**, not only ahead of a
+  destructive op. Read-only intake (CLI reads, MCP read tools) audits the device
+  and surfaces findings without blocking; destructive paths still enforce the
+  gate (`health.preflight_once`). The operating docs (`skill/SKILL.md`,
+  `mcp_server/README.md`, `CLAUDE.md`) now require it as the first-contact step.
+- **Firmware registry** (`src/kvm_pilot/data/firmware_registry.json`, schema v2)
+  — the single source of truth for firmware currency and a device's capability /
+  UX profile, keyed by `(vendor, product)` from each driver's normalized
+  `get_firmware_info()`. Generic across PiKVM/GLKVM/Redfish (iDRAC/iLO/XCC) and
+  future IPMI/AMT. New checks `check_firmware_currency` (ordered `_vercmp`:
+  update-available / known-bad ranges / quiet when current) and
+  `check_capability_profile` (mouse / vmedia / power-trust / video).
+- **GLKVM reports the GL product firmware** the UI shows (`V1.9.1 release1
+  (RM1PE)` via `/api/upgrade/version`), not just the kvmd component version.
+  `get_firmware_info()` now returns `{vendor, product, version}` for the PiKVM
+  family and Redfish; fixes the GLKVM `system.platform` path that returned
+  `model=null`.
+- **Reconcile loop** — `GLKVMDriver.get_available_update()` (GL's
+  `/api/upgrade/compare`) + `firmware_registry.reconcile()` diff a device-reported
+  latest against the SSoT; `kvm-pilot firmware-check` prints the currency verdict
+  and a ready-to-contribute report. The fleet keeps the registry current.
+- **Automated ingestion** — a `firmware-report` GitHub Issue Form and an
+  hourly-capped workflow that no-ops cheaply when idle, dedups via the `ingested`
+  label + idempotent merge, validates untrusted issue bodies as data, and opens
+  one batched PR (degrading gracefully when Actions can't open PRs).
+- **Distribution** — the registry ships bundled (offline default); loader
+  precedence `KVM_PILOT_FIRMWARE_DB` > user cache > bundled for an opt-in refresh.
+- New CLI subcommands: `healthcheck`, `firmware-check`.
+
 ### Changed — safety & transport (2026-07-01 deep-review batch)
 - **Breaking:** `snapshot()` / `snapshot_save()` / `snapshot_base64()` lost the
   `quality` parameter — kvmd silently ignored `preview_quality` without
