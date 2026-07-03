@@ -5,9 +5,17 @@ Guidance for AI agents (and humans) working in this repo.
 ## What this is
 `kvm-pilot` — a stdlib-only Python client + CLI for IP-KVM devices (PiKVM, the
 GL.iNet GLKVM fork, BliKVM) with a pluggable LLM **vision** subsystem that
-classifies a KVM screenshot into a boot/run phase. Early **alpha**, and **never
-run on real hardware** (unit-tested with mocks only) — be honest about that in
-any docs or messaging; do not claim features are "tested" or "beta".
+classifies a KVM screenshot into a boot/run phase. Early **alpha**. Hardware
+validation is tracked **per device + firmware + capability** in the support
+matrix (#96) and the community
+[Hardware-Compatibility list](https://github.com/DustinTrap/kvm-pilot/wiki/Hardware-Compatibility) —
+that page is the source of truth for what has actually been exercised. As of
+2026-07-03 a GL-RM1PE has been run live (read/`snapshot`/`healthcheck`/`logs`
+paths on firmware V1.5.1 release2 and V1.9.1 release1; the remote firmware-flash
+is a known no-op there, #94/#95), but **most device+capability combos remain
+unverified / mock-only** — be honest about that in any docs or messaging: don't
+claim a feature is "tested" or "beta" beyond what the matrix shows; point readers
+to it for current truth.
 
 ## Non-negotiable conventions
 - **Consult + update GitHub issues before any meaningful change.** This repo is

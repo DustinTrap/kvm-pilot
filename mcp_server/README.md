@@ -6,10 +6,12 @@ from the stdlib-only core library — it depends on the
 [`mcp`](https://pypi.org/project/mcp/) SDK (`mcp>=1.10`, see
 `requirements.txt`).
 
-> ⚠️ **Experimental alpha.** The core library has **never been run on real
-> hardware** — it is unit-tested against mocks and emulators only (see issue
-> #7). Treat every result as unverified, and strongly consider running with
-> dry-run enabled (below).
+> ⚠️ **Experimental alpha.** The core library is **largely unverified** — mostly
+> unit-tested against mocks and emulators, with only a handful of device+capability
+> combos exercised on real hardware (see the
+> [Hardware-Compatibility list](https://github.com/DustinTrap/kvm-pilot/wiki/Hardware-Compatibility)
+> for what actually has; issue #7). Treat every result as unverified, and strongly
+> consider running with dry-run enabled (below).
 
 ## Tools
 
@@ -85,7 +87,7 @@ The `power` gate is layered; no single layer is trusted on its own:
 4. **Dry-run.** With `KVM_PILOT_MCP_DRY_RUN=1` every driver is built with
    `dry_run=True`: destructive commands are logged and *skipped*, and every
    tool result says it ran in dry-run mode. **Recommended default for this
-   untested alpha.**
+   largely-unverified alpha.**
 5. **Untrusted screen content.** `snapshot` and `classify_screen` feed
    *target-controlled* console output into the agent's context. A compromised
    or hostile host can render text designed to steer the agent (prompt
