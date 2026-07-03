@@ -35,6 +35,13 @@ from .errors import (
     UnavailableError,
     VisionError,
 )
+from .health import (
+    HealthGateError,
+    HealthReport,
+    Severity,
+    preflight,
+    run_healthcheck,
+)
 from .safety import SafetyPolicy, deny_all, interactive_confirm
 
 __all__ = [
@@ -62,4 +69,9 @@ __all__ = [
     "Capability",
     "KVMDriver",
     "make_driver",
+    "run_healthcheck",
+    "preflight",
+    "HealthReport",
+    "HealthGateError",
+    "Severity",
 ]

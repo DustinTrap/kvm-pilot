@@ -136,6 +136,21 @@ def info(profile: str | None = None) -> dict:
 
 
 @mcp.tool(annotations=_READ_ONLY)
+def healthcheck(profile: str | None = None) -> dict:
+    """Audit the device's readiness/recovery, security posture, and firmware (#80).
+
+    Read-only. Returns per-check findings with a tiered severity; a ``CRITICAL``
+    (e.g. no out-of-band reset path) is what should gate a subsequent destructive
+    op. The most valuable finding is ``recovery-path`` — whether a hung guest can
+    be reset at all when the KVM is remote.
+    """
+    with _driver(profile, confirm=deny_all, capability=Capability.SYSTEM_INFO) as (cfg, kvm):
+        from kvm_pilot.health import run_healthcheck
+
+        return {**_provenance(cfg), **run_healthcheck(kvm).to_dict()}
+
+
+@mcp.tool(annotations=_READ_ONLY)
 def power_state(profile: str | None = None) -> dict:
     """Return whether the host is powered on, plus ATX detail where the driver has it
     (read-only)."""

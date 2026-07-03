@@ -30,6 +30,7 @@ from __future__ import annotations
 import argparse
 import json
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import TYPE_CHECKING, cast
@@ -112,6 +113,18 @@ def _build_client(args) -> AnyDriver:
     return kvm
 
 
+def _skip_healthcheck(args) -> bool:
+    if getattr(args, "skip_healthcheck", False):
+        return True
+    return os.environ.get("KVM_PILOT_SKIP_HEALTHCHECK", "").lower() in ("1", "true", "yes")
+
+
+def _preflight_gate(kvm, confirm, *, skip: bool) -> None:
+    from .health import HealthCache, preflight
+
+    preflight(kvm, confirm=confirm, cache=HealthCache(), skip=skip)
+
+
 def _make_analyzer(kvm: KVMClient | FakeDriver, args):
     from .vision import ScreenAnalyzer, make_backend
 
@@ -153,6 +166,14 @@ def _client(args, capability: Capability) -> AnyDriver:
             f"'{args.command}' needs the {capability.value} capability, which the "
             f"{_driver_label(kvm)} driver does not provide"
         )
+    # Destructive subcommands set _preflight=True: gate them on the device
+    # healthcheck (#80), but only AFTER the capability check so a command the
+    # driver cannot serve still fails cleanly without any network probe. Dry-run
+    # and --skip-healthcheck bypass; --yes means the operator pre-approved, so a
+    # critical informs-and-proceeds rather than blocking.
+    if getattr(args, "_preflight", False) and not getattr(args, "dry_run", False):
+        confirm = allow_all if getattr(args, "yes", False) else interactive_confirm
+        _preflight_gate(kvm, confirm, skip=_skip_healthcheck(args))
     return kvm
 
 
@@ -288,6 +309,40 @@ def cmd_watch(args) -> int:
     return 0
 
 
+def cmd_healthcheck(args) -> int:
+    from .health import Severity, run_healthcheck
+
+    kvm = _build_client(args)
+    report = run_healthcheck(kvm)
+    if getattr(args, "fix", False):
+        _apply_auto_fixes(kvm, report, args)
+        report = run_healthcheck(kvm)  # re-audit after fixes
+    if args.json:
+        print(json.dumps(report.to_dict(), indent=2, default=str))
+    else:
+        print(f"Healthcheck: {report.driver_kind}@{report.host} "
+              f"(firmware={report.firmware or '?'}) — worst: {report.worst}")
+        for r in report.results:
+            line = f"  [{str(r.severity):<8}] {r.pillar}: {r.title} — {r.detail}"
+            print(line)
+            if r.severity >= Severity.WARNING and r.remediation:
+                print(f"             ↳ {r.remediation}")
+    # Exit code reflects the worst finding: CRITICAL=2, WARNING=1, else 0.
+    if report.worst is Severity.CRITICAL:
+        return 2
+    if report.worst is Severity.WARNING:
+        return 1
+    return 0
+
+
+def _apply_auto_fixes(kvm, report, args) -> None:
+    confirm = allow_all if getattr(args, "yes", False) else interactive_confirm
+    for r in report.results:
+        if r.auto_fix and r.auto_fix.safe_reversible:
+            if confirm("health.fix", f"Apply fix for {r.id}: {r.auto_fix.description}"):
+                r.auto_fix.apply(kvm)
+
+
 def cmd_capabilities(args) -> int:
     kvm = _build_client(args)
     caps = kvm.capabilities()  # structural; makes no network call
@@ -356,6 +411,9 @@ def _add_common(p: argparse.ArgumentParser) -> None:
                    help="Log destructive actions without sending them")
     p.add_argument("--yes", "-y", action="store_true",
                    help="Skip interactive confirmation on destructive actions")
+    p.add_argument("--skip-healthcheck", dest="skip_healthcheck", action="store_true",
+                   help="Skip the device preflight healthcheck gate before a "
+                        "destructive action (KVM_PILOT_SKIP_HEALTHCHECK=1 also works)")
 
 
 def _add_vision(p: argparse.ArgumentParser) -> None:
@@ -386,6 +444,14 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common(p)
     p.set_defaults(func=cmd_capabilities)
 
+    p = sub.add_parser("healthcheck",
+                       help="Audit device readiness/security/firmware (#80)")
+    p.add_argument("--json", action="store_true", help="Emit the report as JSON")
+    p.add_argument("--fix", action="store_true",
+                   help="Offer to apply safe, reversible auto-fixes (with confirmation)")
+    _add_common(p)
+    p.set_defaults(func=cmd_healthcheck)
+
     p = sub.add_parser("snapshot", help="Save a screenshot")
     p.add_argument("output")
     _add_common(p)
@@ -408,33 +474,33 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("power", help="Power action")
     p.add_argument("action", choices=["on", "off", "off-hard", "reset"])
     _add_common(p)
-    p.set_defaults(func=cmd_power)
+    p.set_defaults(func=cmd_power, _preflight=True)
 
     p = sub.add_parser("power-cycle", help="Hard power cycle (off-hard -> on)")
     _add_common(p)
-    p.set_defaults(func=cmd_power_cycle)
+    p.set_defaults(func=cmd_power_cycle, _preflight=True)
 
     p = sub.add_parser("type", help="Type text on the host")
     p.add_argument("text")
     p.add_argument("--slow", action="store_true")
     _add_common(p)
-    p.set_defaults(func=cmd_type)
+    p.set_defaults(func=cmd_type, _preflight=True)
 
     p = sub.add_parser("key", help="Press a single key")
     p.add_argument("key")
     _add_common(p)
-    p.set_defaults(func=cmd_key)
+    p.set_defaults(func=cmd_key, _preflight=True)
 
     p = sub.add_parser("mount", help="Mount an ISO (local path or URL)")
     p.add_argument("source")
     p.add_argument("--name")
     p.add_argument("--usb", action="store_true")
     _add_common(p)
-    p.set_defaults(func=cmd_mount)
+    p.set_defaults(func=cmd_mount, _preflight=True)
 
     p = sub.add_parser("eject", help="Detach virtual media (the inverse of mount)")
     _add_common(p)
-    p.set_defaults(func=cmd_eject)
+    p.set_defaults(func=cmd_eject, _preflight=True)
 
     p = sub.add_parser("classify", help="Classify the current screen once")
     _add_common(p)

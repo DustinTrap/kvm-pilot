@@ -32,6 +32,12 @@ def _no_external_network(monkeypatch):
     monkeypatch.setattr(socket.socket, "connect", guarded_connect)
 
 
+@pytest.fixture(autouse=True)
+def _isolated_health_cache(tmp_path, monkeypatch):
+    """Redirect the healthcheck cache to a per-test tmp file (never touch ~/.cache)."""
+    monkeypatch.setenv("KVM_PILOT_HEALTH_CACHE", str(tmp_path / "health-cache.json"))
+
+
 class FakeHTTP:
     """Records requests and returns canned results instead of hitting a network."""
 

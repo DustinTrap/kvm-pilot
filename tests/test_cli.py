@@ -285,3 +285,69 @@ def test_cli_sensors_unsupported_on_pikvm_fails_cleanly(capsys):
     rc = main(["sensors", "--host", "h"])
     assert rc == 1
     assert "sensors" in capsys.readouterr().err
+
+
+# -- healthcheck command + destructive gate (#80) -------------------------- #
+
+
+def test_healthcheck_command_on_fake_driver(capsys):
+    from kvm_pilot.cli import main
+
+    rc = main(["healthcheck", "--driver", "fake"])
+    out = capsys.readouterr().out
+    assert rc == 0
+    assert "Healthcheck: fake@" in out
+    assert "recovery-path" in out or "Out-of-band" in out
+
+
+def test_healthcheck_command_json(capsys):
+    import json as _json
+
+    from kvm_pilot.cli import main
+
+    rc = main(["healthcheck", "--driver", "fake", "--json"])
+    assert rc == 0
+    report = _json.loads(capsys.readouterr().out)
+    assert report["driver"] == "fake"
+    assert report["worst"] in {"OK", "INFO", "WARNING", "CRITICAL"}
+
+
+def test_destructive_gate_blocks_on_critical(monkeypatch, capsys):
+    # A driver whose recovery-path is CRITICAL must block a power action when
+    # unattended (no --yes -> interactive confirm, which fails closed with no TTY).
+    from kvm_pilot import cli
+
+    def fake_gate(kvm, confirm, *, skip):
+        from kvm_pilot.health import HealthGateError
+
+        if not skip:
+            raise HealthGateError("no out-of-band recovery path")
+
+    monkeypatch.setattr(cli, "_preflight_gate", fake_gate)
+    rc = cli.main(["power", "off-hard", "--driver", "fake"])
+    assert rc == 1  # HealthGateError is a KVMPilotError -> exit 1
+
+
+def test_destructive_gate_skipped_with_flag(monkeypatch):
+    from kvm_pilot import cli
+
+    calls = {"n": 0}
+
+    def fake_gate(kvm, confirm, *, skip):
+        calls["n"] += 1
+        assert skip is True  # --skip-healthcheck propagates
+
+    monkeypatch.setattr(cli, "_preflight_gate", fake_gate)
+    rc = cli.main(["power", "on", "--driver", "fake", "--yes", "--skip-healthcheck"])
+    assert rc == 0 and calls["n"] == 1
+
+
+def test_destructive_gate_not_run_in_dry_run(monkeypatch):
+    from kvm_pilot import cli
+
+    def boom(*a, **k):
+        raise AssertionError("preflight must not run under --dry-run")
+
+    monkeypatch.setattr(cli, "_preflight_gate", boom)
+    rc = cli.main(["power", "off-hard", "--driver", "fake", "--dry-run"])
+    assert rc == 0
