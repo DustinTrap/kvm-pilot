@@ -394,6 +394,34 @@ def test_currency_update_available(monkeypatch):
     assert r.severity is Severity.WARNING and "latest known is 4.90" in r.detail
 
 
+def test_currency_offers_remote_update_when_profile_supports_it(monkeypatch):
+    from kvm_pilot import health
+
+    monkeypatch.setattr(health, "_REGISTRY_CACHE", {"firmware": [
+        {"vendor": "gl.inet", "product": "RV1126B", "latest": "4.90",
+         "source": "https://x", "date": "2026-05-29",
+         "profile": {"remote_update": {"supported": True, "risk": "high",
+                                       "recovery_required": True}}}]})
+    r = health.check_firmware_currency(_fw())
+    assert r.severity is Severity.WARNING
+    # The remediation becomes actionable: it names the command and the risk.
+    assert "kvm-pilot firmware-update" in r.remediation
+    assert "RISK: HIGH" in r.remediation
+    assert "physical access" in r.remediation
+
+
+def test_currency_falls_back_to_vendor_pointer_without_remote_update(monkeypatch):
+    from kvm_pilot import health
+
+    monkeypatch.setattr(health, "_REGISTRY_CACHE", {"firmware": [
+        {"vendor": "gl.inet", "product": "RV1126B", "latest": "4.90",
+         "source": "https://vendor", "date": "2026-05-29"}]})
+    r = health.check_firmware_currency(_fw())
+    # No remote_update profile -> plain pointer, no firmware-update offer.
+    assert "firmware-update" not in r.remediation
+    assert "https://vendor" in r.remediation
+
+
 def test_currency_known_bad_range_is_critical(monkeypatch):
     from kvm_pilot import health
 

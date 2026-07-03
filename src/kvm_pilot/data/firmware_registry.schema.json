@@ -33,7 +33,22 @@
         "mouse": {"enum": ["absolute", "relative", "none"], "description": "GUI usability: absolute = usable pointer; relative = painful; none = keyboard only."},
         "vmedia": {"enum": ["reliable", "reports-only", "none"], "description": "Boot-from-ISO fidelity: reports-only = API says mounted but the host sees nothing (#77)."},
         "power_state_trusted": {"type": "boolean", "description": "Whether ATX/LED power readings are truthful — governs whether reboots can be automated safely."},
-        "video": {"type": "string", "minLength": 1, "description": "Rated video ceiling: transport + max mode, e.g. h264/1080p60."}
+        "video": {"type": "string", "minLength": 1, "description": "Rated video ceiling: transport + max mode, e.g. h264/1080p60."},
+        "remote_update": {"$ref": "#/definitions/remote_update"}
+      }
+    },
+    "remote_update": {
+      "type": "object",
+      "description": "Per-model remote firmware-update descriptor. Drives the healthcheck's actionable offer and the `firmware-update` command's reliability assessment. Absent/supported=false means the model is detect-only (guide the operator to the vendor UI).",
+      "required": ["supported"],
+      "additionalProperties": false,
+      "properties": {
+        "supported": {"type": "boolean", "description": "Whether a driver can flash this model over the network at all."},
+        "method": {"type": "string", "minLength": 1, "description": "How the flash is driven, e.g. gl-api (GL /api/upgrade/*), redfish-updateservice."},
+        "risk": {"enum": ["low", "medium", "high"], "description": "Reliability of an unattended remote flash. high = vendor recommends physical presence / no remote recovery."},
+        "recovery_required": {"type": "boolean", "description": "True when a failed flash needs physical access to recover (no out-of-band remote recovery)."},
+        "self_flash_blind": {"type": "boolean", "description": "True when the KVM flashes its own firmware and reboots, dropping the control channel used to observe it."},
+        "notes": {"type": "string", "minLength": 1, "description": "Free-text caveats (e.g. update may disable the REST API; no A/B rollback)."}
       }
     },
     "known_bad": {

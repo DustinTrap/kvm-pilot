@@ -49,7 +49,7 @@ if TYPE_CHECKING:
     # capability-partial (a BMC — strong on structured state, but no keyboard or
     # screen), so capability-specific subcommands gate on supports() before
     # dispatch instead of AttributeError-ing deep in a handler.
-    from .drivers.base import BootProgress, Logs, Sensors
+    from .drivers.base import BootProgress, FirmwareUpdate, Logs, Sensors
     from .drivers.fake import FakeDriver
     from .drivers.redfish import RedfishDriver
 
@@ -419,6 +419,127 @@ def cmd_firmware_check(args) -> int:
     return 0
 
 
+_GL_UBOOT_RECOVERY = (
+    "Physical recovery if a flash fails (GL RM1/RM1PE U-Boot failsafe): hold Reset "
+    "while powering on (blue LED flashes 5x), set your NIC to static 192.168.1.2/24, "
+    "browse to http://192.168.1.1, and upload the firmware. There is NO remote recovery."
+)
+
+
+def _print_firmware_assessment(ru: dict, no_recovery: bool) -> None:
+    """Print the reliability assessment that lets the operator make the final call."""
+    risk = (ru.get("risk") or "unknown").upper()
+    print(f"\nReliability: RISK {risk}. Vendor guidance is to update with physical access.")
+    if ru.get("self_flash_blind"):
+        print("  - The KVM flashes its own firmware and reboots; this control channel "
+              "drops mid-flash (you are blind across the reboot).")
+    if ru.get("recovery_required"):
+        print("  - A failed flash needs physical access to recover.")
+    if no_recovery:
+        print("  - THIS UNIT has no out-of-band recovery path wired (healthcheck CRITICAL) "
+              "— a bad flash strands it until someone is physically present.")
+    if ru.get("notes"):
+        print(f"  - {ru['notes']}")
+    print(f"  - {_GL_UBOOT_RECOVERY}")
+    print("  - Post-flash: a GL update can revert /etc/kvmd/nginx-kvmd.conf and disable the "
+          "REST API. If calls 404 afterward, re-enable it and re-run `kvm-pilot healthcheck`.")
+
+
+def _eject_before_flash(kvm) -> None:
+    """Detach virtual media before flashing — gl-inet/glkvm#120: a flash started with
+    media mounted risks corrupt writes / interrupted installs. Best-effort."""
+    if not kvm.supports(Capability.VIRTUAL_MEDIA):
+        return
+    try:
+        state = kvm.get_msd_state() or {}
+        drive = state.get("drive") or {}
+        connected = bool(drive.get("connected") or state.get("connected"))
+    except Exception:  # noqa: BLE001 - never let the check itself block a decided flash
+        print("Could not verify virtual-media state — ensure media is ejected before flashing "
+              "(gl-inet/glkvm#120).", file=sys.stderr)
+        return
+    if connected:
+        print("Ejecting virtual media before flashing (gl-inet/glkvm#120).")
+        kvm.msd_disconnect()
+
+
+def cmd_firmware_update(args) -> int:
+    """Offer / perform a gated remote firmware flash of the KVM itself.
+
+    Read-only by default: prints current->latest, the reliability assessment, and the
+    planned `/api/upgrade/*` steps, sending nothing. `--execute` performs the flash —
+    routed through the driver's `firmware.flash` safety gate — and refuses when the
+    device has no out-of-band recovery path unless `--i-have-physical-access` is given.
+    See docs/firmware-update.md.
+    """
+    from .firmware_registry import load_registry
+    from .health import Severity, _match_firmware, run_healthcheck
+
+    kvm = _build_client(args)
+    if not kvm.supports(Capability.FIRMWARE_UPDATE):
+        raise CapabilityError(
+            f"'firmware-update' needs the firmware_update capability, which the "
+            f"{_driver_label(kvm)} driver does not provide"
+        )
+    fwu = cast("FirmwareUpdate", kvm)
+
+    status = fwu.get_upgrade_status()
+    if not status.get("enabled"):
+        print("Remote firmware update is not available on this device (the upgrade "
+              "subsystem is disabled or absent). Flash via the vendor UI.", file=sys.stderr)
+        return 1
+
+    info_fn = getattr(kvm, "get_firmware_info", None)
+    fw = info_fn() if info_fn is not None else {}
+    entry = _match_firmware(
+        load_registry().get("firmware", []),
+        (fw.get("vendor") or "").strip().lower(), fw.get("product") or "",
+    ) or {}
+    ru = (entry.get("profile") or {}).get("remote_update") or {}
+    current = status.get("current") or fw.get("version")
+    latest = entry.get("latest")
+
+    line = f"Firmware: installed {current}"
+    if latest:
+        line += f", latest known {latest}"
+    if status.get("image_size"):
+        line += f", staged image {status['image_size'] // (1024 * 1024)} MB"
+    print(line)
+
+    # Recovery posture drives both the printed assessment and the execute gate.
+    report = run_healthcheck(kvm)
+    no_recovery = any(
+        r.id == "recovery-path" and r.severity is Severity.CRITICAL for r in report.results
+    )
+    _print_firmware_assessment(ru, no_recovery)
+
+    execute = getattr(args, "execute", False) and not getattr(args, "dry_run", False)
+    if not execute:
+        result = fwu.apply_firmware_update(image=args.image, dry_run=True)
+        print("\nDRY RUN — nothing was sent. Planned steps:")
+        for s in result["plan"]:
+            print(f"  {s['method']} {s['path']} — {s['note']}")
+        print("Re-run with --execute to flash (add --yes to skip the confirmation prompt).")
+        return 0
+
+    if no_recovery and not getattr(args, "i_have_physical_access", False):
+        print("\nRefusing to flash: this unit has no out-of-band recovery path, so a failed "
+              "flash needs a physical trip. Re-run with --i-have-physical-access to override, "
+              "or wire an ATX/GPIO reset first.", file=sys.stderr)
+        return 1
+
+    _eject_before_flash(kvm)
+    result = fwu.apply_firmware_update(image=args.image, dry_run=False)
+    if not result.get("sent"):
+        print("Flash not sent (declined at the safety prompt or dry-run policy).", file=sys.stderr)
+        return 1
+    print("Firmware flash started. The device will reboot and may be unreachable for several "
+          "minutes — do NOT interrupt power.")
+    print("When it returns: if the REST API 404s, re-enable it in /etc/kvmd/nginx-kvmd.conf, "
+          "then run `kvm-pilot healthcheck`.")
+    return 0
+
+
 def _apply_auto_fixes(kvm, report, args) -> None:
     confirm = allow_all if getattr(args, "yes", False) else interactive_confirm
     for r in report.results:
@@ -541,6 +662,19 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true", help="Emit the result as JSON")
     _add_common(p)
     p.set_defaults(func=cmd_firmware_check)
+
+    p = sub.add_parser("firmware-update",
+                       help="Assess (and optionally perform) a gated remote firmware flash")
+    p.add_argument("--image", help="Local firmware image to upload before flashing "
+                                   "(omit to flash the image the device has staged)")
+    p.add_argument("--execute", action="store_true",
+                   help="Actually flash (default is a dry-run plan that sends nothing)")
+    p.add_argument("--i-have-physical-access", dest="i_have_physical_access",
+                   action="store_true",
+                   help="Override the no-out-of-band-recovery refusal — acknowledges a "
+                        "failed flash needs physical access to this device")
+    _add_common(p)
+    p.set_defaults(func=cmd_firmware_update)
 
     p = sub.add_parser("snapshot", help="Save a screenshot")
     p.add_argument("output")

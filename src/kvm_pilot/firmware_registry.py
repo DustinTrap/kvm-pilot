@@ -47,6 +47,7 @@ DEFAULT_DB_URL = (
 SEVERITIES = {"warning", "critical"}
 MOUSE_MODES = {"absolute", "relative", "none"}
 VMEDIA_FIDELITY = {"reliable", "reports-only", "none"}
+RISK_LEVELS = {"low", "medium", "high"}
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 _URL_RE = re.compile(r"^https?://")
 _AFFECTED_RE = re.compile(r"^(<=|>=|==|<|>)?\s*\d+(?:[.\-]\d+)*$")
@@ -228,6 +229,26 @@ def _validate_profile(prof: Any) -> list[str]:
         errs.append("power_state_trusted must be a boolean")
     if "video" in prof and not str(prof["video"]).strip():
         errs.append("video must be non-empty when present")
+    if "remote_update" in prof:
+        errs.extend(f"remote_update: {m}" for m in _validate_remote_update(prof["remote_update"]))
+    return errs
+
+
+def _validate_remote_update(ru: Any) -> list[str]:
+    """The per-model remote-firmware-update descriptor (health + `firmware-update` read it)."""
+    errs: list[str] = []
+    if not isinstance(ru, dict):
+        return ["must be an object"]
+    if "supported" not in ru or not isinstance(ru["supported"], bool):
+        errs.append("supported (bool) is required")
+    for flag in ("recovery_required", "self_flash_blind"):
+        if flag in ru and not isinstance(ru[flag], bool):
+            errs.append(f"{flag} must be a boolean")
+    if "risk" in ru and ru["risk"] not in RISK_LEVELS:
+        errs.append(f"risk must be one of {sorted(RISK_LEVELS)}")
+    for text in ("method", "notes"):
+        if text in ru and not str(ru[text]).strip():
+            errs.append(f"{text} must be non-empty when present")
     return errs
 
 

@@ -5,6 +5,28 @@ are intentional**, so they don't get re-litigated. Newest first.
 
 ## Drivers
 
+### Remote firmware flash is its own gated command, not a healthcheck auto-fix ([#92](https://github.com/DustinTrap/kvm-pilot/issues/92))
+The healthcheck already carries an `AutoFix` mechanism (applied, with per-item consent,
+by `healthcheck --fix`), so attaching the firmware update there looks natural — but
+`AutoFix` is deliberately restricted to `safe_reversible` fixes that "never perturb a
+running guest," and a firmware flash is the exact opposite: it reboots the KVM into a
+new image (dropping the control channel) and can brick onboard storage with no remote
+recovery on the GL RM1 family. So the healthcheck only makes the finding *actionable*
+(its remediation names `kvm-pilot firmware-update` and states the risk), and the flash
+lives behind its own explicit command, a new `FirmwareUpdate` capability, and the
+`firmware.flash` destructive op. Per-model reliability (`risk`, `recovery_required`,
+`self_flash_blind`) is **data** in the registry `profile.remote_update`, not hard-coded
+in `health.py` — same rule as the rest of the capability profile.
+
+The command defaults to a **dry-run plan** and, on a device whose healthcheck reports no
+out-of-band recovery path (CRITICAL `recovery-path`), **refuses to execute** unless
+`--i-have-physical-access` is passed — an informed override, per the maintainer's call
+that a present-and-informed operator may still choose to flash. It also ejects virtual
+media first (`gl-inet/glkvm#120`). The GL `/api/upgrade/*` request shapes are
+reverse-engineered (no vendor spec) and the execute path is **unverified on hardware**;
+it is feature-detected via `/api/upgrade/status` and documented as provisional in
+[`firmware-update.md`](firmware-update.md).
+
 ### Capability-aware CLI dispatch: gate on `supports()`, then cast to the rich driver union ([#27](https://github.com/DustinTrap/kvm-pilot/issues/27))
 Each subcommand declares the capability it needs; `_client(args, cap)` builds the
 driver and rejects it with a clean message + exit 1 (not an `AttributeError`) when it

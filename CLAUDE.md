@@ -10,6 +10,12 @@ run on real hardware** (unit-tested with mocks only) — be honest about that in
 any docs or messaging; do not claim features are "tested" or "beta".
 
 ## Non-negotiable conventions
+- **Consult + update GitHub issues before any meaningful change.** This repo is
+  issue-per-finding — an issue is the unit of record. Before editing code for a
+  non-trivial change: search existing issues for one that covers it; if none, open
+  one describing the problem, the decision, and the plan; reference it in the
+  commit/PR and post material findings or scope changes back to the issue. Do not
+  make meaningful changes with no tracked issue.
 - **Core is stdlib-only / zero runtime deps.** Anything needing a third-party
   package goes behind an optional extra in `pyproject.toml` (`totp`, `ws`, …) and
   is imported lazily inside the function that uses it (see `http.py:_totp_now`

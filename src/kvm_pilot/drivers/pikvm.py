@@ -19,10 +19,14 @@ findings as the GL-RM1PE (the first hardware target) and others get tested.
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
+from pathlib import Path
 
 from ..client import PiKVMDriver
 from ..errors import KVMPilotError
+
+logger = logging.getLogger("kvm_pilot.glkvm")
 
 _GL_API_DISABLED_HINT = (
     "On GL.iNet (GLKVM) firmware the PiKVM REST API is disabled by default; all "
@@ -149,6 +153,101 @@ class GLKVMDriver(PiKVMDriver):
             except KVMPilotError:
                 firmware = None
         return [q for q in GLKVM_QUIRKS if q.applies_to(firmware)]
+
+    # -- FirmwareUpdate capability (GL /api/upgrade/*) ---------------------
+    #
+    # These implement the ``FirmwareUpdate`` protocol (drivers/base.py), so a
+    # GLKVMDriver advertises ``Capability.FIRMWARE_UPDATE``. GL's ``/api/upgrade/*``
+    # is a proprietary layer on top of kvmd (upstream PiKVM has no OS-update API);
+    # the endpoint set was reverse-engineered from live probing + the gl-inet/glkvm
+    # source, so request bodies are provisional. Feature-detect via
+    # ``/api/upgrade/status`` and degrade gracefully. See docs/firmware-update.md.
+
+    def get_upgrade_status(self) -> dict:
+        """Read-only view of GL's remote-upgrade subsystem — never flashes.
+
+        Aggregates GET ``/api/upgrade/{status,version,download}``:
+        ``{enabled, current, model, image_size}``. Sub-endpoints missing on older
+        firmware are skipped, so the shape degrades gracefully; ``enabled`` is
+        ``False`` when the subsystem is absent.
+        """
+        out: dict = {"enabled": False}
+        try:
+            st = self._http.get("/api/upgrade/status")
+        except KVMPilotError:
+            return out  # subsystem absent -> detect-only
+        if isinstance(st, dict):
+            out["enabled"] = bool(st.get("enabled"))
+        try:
+            ver = self._http.get("/api/upgrade/version")
+            if isinstance(ver, dict):
+                out["current"] = ver.get("version")
+                out["model"] = ver.get("model")
+        except KVMPilotError:
+            pass
+        try:
+            dl = self._http.get("/api/upgrade/download")
+            if isinstance(dl, dict) and dl.get("size"):
+                out["image_size"] = dl["size"]
+        except KVMPilotError:
+            pass
+        return out
+
+    def _firmware_plan(self, image: str | None) -> list[dict]:
+        """The ordered POSTs a flash would send (also the dry-run plan)."""
+        steps: list[dict] = []
+        if image:
+            steps.append({"method": "POST", "path": "/api/upgrade/upload",
+                          "note": f"upload local image {image}"})
+        steps.append({"method": "POST", "path": "/api/upgrade/start",
+                      "note": "flash the staged image; the device auto-reboots"})
+        return steps
+
+    def apply_firmware_update(self, *, image: str | None = None, dry_run: bool = True) -> dict:
+        """Flash the GLKVM's **own** firmware — the most destructive op we expose.
+
+        The device reboots into the new image (dropping this REST channel) and a
+        failed flash needs physical U-Boot recovery — callers must vet the reliability
+        (registry ``profile.remote_update``) and recovery path first. With ``image``,
+        a local firmware file is uploaded first (POST ``/api/upgrade/upload``); without
+        it, the already-staged image (GET ``/api/upgrade/download``) is flashed. Then
+        POST ``/api/upgrade/start``; the device auto-reboots.
+
+        Gated: routed through ``safety.guard("firmware.flash", …)``. ``dry_run=True``
+        (default) plans only and sends nothing. Returns ``{sent, dry_run, plan[, result]}``.
+        The ``/api/upgrade/*`` request bodies are provisional (not vendor-documented).
+        """
+        plan = self._firmware_plan(image)
+        desc = (
+            f"Flash firmware on {self.host} via GL /api/upgrade "
+            f"({'upload ' + image + ' then ' if image else 'staged image, then '}"
+            "reboot). The device drops this channel and a failed flash needs physical recovery."
+        )
+        if dry_run:
+            logger.warning(
+                "DRY-RUN firmware flash on %s — would run: %s",
+                self.host, "; ".join(f"{s['method']} {s['path']}" for s in plan),
+            )
+            return {"sent": False, "dry_run": True, "plan": plan}
+        if not self.safety.guard("firmware.flash", desc):
+            return {"sent": False, "dry_run": False, "plan": plan}
+        if image:
+            p = Path(image)
+            size = p.stat().st_size
+            logger.info("Uploading firmware %s (%.0f MB) to %s", p.name, size / 1024 / 1024, self.host)
+            with p.open("rb") as fh:
+                self._http.post(
+                    "/api/upgrade/upload", body=fh,
+                    content_type="application/octet-stream",
+                    extra_headers={"Content-Length": str(size)},
+                    long_timeout=1800, retry=False,
+                )
+        logger.warning(
+            "Starting firmware flash on %s — do NOT interrupt power; the device will "
+            "reboot and this REST channel will drop.", self.host,
+        )
+        result = self._http.post("/api/upgrade/start", long_timeout=1800, retry=False)
+        return {"sent": True, "dry_run": False, "plan": plan, "result": result}
 
 
 class BliKVMDriver(PiKVMDriver):

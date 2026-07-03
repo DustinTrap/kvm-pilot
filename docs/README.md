@@ -18,6 +18,7 @@ on every push to `main` — edit the files here, never the wiki directly).
 - [Design decisions](decisions.md) — the "looks wrong but is intentional" record, newest first.
 - [Redfish reference](redfish.md) — the BMC driver: hypermedia navigation, auth, and firmware quirks.
 - [Firmware registry](firmware-registry.md) — the firmware-currency check, the community registry data model, and the GitHub-based single-source-of-truth + ingestion design (#80 follow-up).
+- [Remote firmware update](firmware-update.md) — the GL `/api/upgrade/*` surface, the reliability/risk model, and the gated `firmware-update` command (#92).
 - [Claude skill](../skill/SKILL.md) — the bundled skill for driving `kvm-pilot` from Claude.
 - [MCP server](../mcp_server/README.md) — the experimental Model Context Protocol server.
 

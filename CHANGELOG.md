@@ -6,6 +6,25 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added — gated remote firmware update (2026-07-03, #92)
+- **`kvm-pilot firmware-update`** — assesses (and, with `--execute`, performs) a
+  remote flash of the KVM's own firmware. Read-only by default: prints
+  installed→latest, a per-model reliability assessment, and the planned
+  `/api/upgrade/*` steps, sending nothing. Prefers a local image (`--image` →
+  `POST /api/upgrade/upload`) over the online path, ejects virtual media first
+  (`gl-inet/glkvm#120`), and **refuses to execute on a device with no out-of-band
+  recovery path** unless `--i-have-physical-access` is given.
+- **`FirmwareUpdate` capability** (`drivers/base.py`) implemented by `GLKVMDriver`
+  (`get_upgrade_status`, `apply_firmware_update`), routed through the new
+  `firmware.flash` destructive op; defaults to `dry_run`. GL's `/api/upgrade/*`
+  shapes are reverse-engineered (no vendor spec) and the execute path is
+  **unverified on hardware**.
+- **Healthcheck now offers the update.** When firmware is stale and the registry
+  `profile.remote_update.supported` is set, the "Firmware update available" finding's
+  remediation names `kvm-pilot firmware-update` and states the risk (still a WARNING;
+  the healthcheck never flashes). Per-model risk is data in the registry profile
+  (`remote_update`), not code. See [`docs/firmware-update.md`](docs/firmware-update.md).
+
 ### Added — preflight on first connection + firmware registry (2026-07-02 batch, #80)
 - **Preflight healthcheck runs on first connection**, not only ahead of a
   destructive op. Read-only intake (CLI reads, MCP read tools) audits the device
