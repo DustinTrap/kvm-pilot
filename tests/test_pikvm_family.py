@@ -88,3 +88,14 @@ def test_known_quirks_offline_with_explicit_firmware():
     # No network: pass a firmware string directly.
     quirks = GLKVMDriver("h").known_quirks(firmware="anything")
     assert any(q.id == "api-disabled-by-default" for q in quirks)
+
+
+def test_observed_atx_power_quirk_matches_its_firmware():
+    # Observed on a GL-RM1PE running kvmd 4.82: ATX reports power='off' while the
+    # host is booted. It is firmware-scoped, so it matches 4.82 but not others.
+    on_482 = GLKVMDriver("h").known_quirks(firmware="4.82")
+    by_id = {q.id: q for q in on_482}
+    assert "atx-power-state-always-off" in by_id
+    assert by_id["atx-power-state-always-off"].source == "observed"
+    other = {q.id for q in GLKVMDriver("h").known_quirks(firmware="9.99")}
+    assert "atx-power-state-always-off" not in other
