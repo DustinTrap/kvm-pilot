@@ -51,6 +51,8 @@ __all__ = [
     "run_healthcheck",
     "enforce_gate",
     "preflight",
+    "preflight_once",
+    "reset_session_audit",
     "HealthCache",
     "CHECKS",
 ]
@@ -725,6 +727,56 @@ def preflight(
     acknowledged = cache.acknowledged(key) if cache is not None else frozenset()
     if enforce:
         enforce_gate(report, confirm=confirm, acknowledged=acknowledged)
+    return report
+
+
+# --------------------------------------------------------------------------- #
+# First-connection audit (issue #80)                                          #
+# --------------------------------------------------------------------------- #
+#
+# #80 wants the audit to run "on the first connection to any KVM, before it's
+# used for anything" — not only ahead of a destructive op. A long-lived process
+# (the MCP server builds+closes a driver per tool call) must still audit a given
+# device only once, so an in-memory guard debounces within the process. The
+# persistent HealthCache handles staleness across processes; this is orthogonal.
+
+_SESSION_AUDITED: set[str] = set()
+
+
+def _session_key(driver: Any) -> str:
+    # Host identity alone means "already connected this session" — no firmware,
+    # so the guard needs no network probe; firmware-change invalidation across
+    # processes is the persistent cache's job (keyed driver@host#firmware).
+    return f"{_driver_kind(driver)}@{getattr(driver, 'host', '?')}"
+
+
+def reset_session_audit() -> None:
+    """Forget which devices were audited this process (tests / forced re-audit)."""
+    _SESSION_AUDITED.clear()
+
+
+def preflight_once(
+    driver: Any,
+    *,
+    confirm: ConfirmCallback | None = None,
+    skip: bool = False,
+    cache: HealthCache | None = None,
+    enforce: bool = True,
+) -> HealthReport | None:
+    """Run :func:`preflight` the first time this process connects to a device.
+
+    Returns the report on the first call for a given device and ``None`` on later
+    calls (already audited this session) or when ``skip``. Gate semantics are
+    :func:`preflight`'s; when ``enforce`` raises, the device is left un-recorded
+    so the next attempt re-checks rather than silently proceeding.
+    """
+    if skip:
+        return None
+    key = _session_key(driver)
+    if key in _SESSION_AUDITED:
+        return None
+    report = preflight(driver, confirm=confirm, cache=cache, enforce=enforce)
+    _SESSION_AUDITED.add(key)
     return report
 
 

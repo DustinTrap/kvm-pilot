@@ -311,3 +311,48 @@ def test_recovery_path_critical_over_transport_when_atx_disabled(emu):
     rec = next(r for r in rep.results if r.id == "recovery-path")
     assert rec.severity is Severity.CRITICAL
     assert rep.worst is Severity.CRITICAL
+
+
+# ---- first-connection audit (issue #80) ---------------------------------- #
+
+
+def test_preflight_once_runs_then_skips_within_session():
+    from kvm_pilot.health import preflight_once, reset_session_audit
+
+    d = FakeDriver()
+    assert preflight_once(d) is not None       # first connection audits
+    assert preflight_once(d) is None           # already audited this session
+    reset_session_audit()
+    assert preflight_once(d) is not None        # reset re-enables the audit
+
+
+def test_preflight_once_skip_returns_none():
+    from kvm_pilot.health import preflight_once
+
+    assert preflight_once(FakeDriver(), skip=True) is None
+
+
+def test_preflight_once_informs_without_blocking_on_critical():
+    # enforce=False must return the report (with the CRITICAL) and never raise —
+    # a standing critical must not make a read impossible.
+    from kvm_pilot.health import preflight_once
+
+    d = stub(
+        host="crit",
+        get_atx_state=lambda: {"enabled": False, "leds": {"power": False}},
+        get_gpio_state=lambda: {"state": {"outputs": {}}},
+    )
+    rep = preflight_once(d, enforce=False)
+    assert rep is not None and rep.worst is Severity.CRITICAL
+
+
+def test_preflight_once_enforces_and_fails_closed_on_critical():
+    from kvm_pilot.health import preflight_once
+
+    d = stub(
+        host="crit",
+        get_atx_state=lambda: {"enabled": False, "leds": {"power": False}},
+        get_gpio_state=lambda: {"state": {"outputs": {}}},
+    )
+    with pytest.raises(HealthGateError):
+        preflight_once(d, confirm=None, enforce=True)  # automation -> fail closed

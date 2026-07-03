@@ -351,3 +351,76 @@ def test_destructive_gate_not_run_in_dry_run(monkeypatch):
     monkeypatch.setattr(cli, "_preflight_gate", boom)
     rc = cli.main(["power", "off-hard", "--driver", "fake", "--dry-run"])
     assert rc == 0
+
+
+# -- read-only first-connection audit (issue #80) -------------------------- #
+
+
+def test_readonly_command_audits_on_connect(monkeypatch):
+    from kvm_pilot import cli
+
+    calls = {"n": 0, "skip": None}
+
+    def spy(kvm, *, skip):
+        calls["n"] += 1
+        calls["skip"] = skip
+
+    monkeypatch.setattr(cli, "_inform_on_connect", spy)
+    assert cli.main(["info", "--driver", "fake"]) == 0
+    assert calls["n"] == 1 and calls["skip"] is False
+
+
+def test_readonly_audit_respects_skip_flag(monkeypatch):
+    from kvm_pilot import cli
+
+    seen = {}
+    monkeypatch.setattr(cli, "_inform_on_connect", lambda kvm, *, skip: seen.update(skip=skip))
+    assert cli.main(["info", "--driver", "fake", "--skip-healthcheck"]) == 0
+    assert seen["skip"] is True
+
+
+def test_readonly_audit_never_blocks_the_read(monkeypatch):
+    # The audit runs for real (fake driver is all-OK) and the read still succeeds.
+    from kvm_pilot import cli
+
+    assert cli.main(["info", "--driver", "fake"]) == 0
+
+
+def test_capabilities_does_not_preflight(monkeypatch):
+    # capabilities is offline (uses _build_client) and must trigger no audit.
+    from kvm_pilot import cli
+
+    def boom(*a, **k):
+        raise AssertionError("capabilities must not preflight")
+
+    monkeypatch.setattr(cli, "_inform_on_connect", boom)
+    monkeypatch.setattr(cli, "_preflight_gate", boom)
+    assert cli.main(["capabilities", "--driver", "fake"]) == 0
+
+
+def test_inform_on_connect_prints_findings_to_stderr(monkeypatch, capsys):
+    from kvm_pilot import cli
+    from kvm_pilot.health import CheckResult, HealthReport, Pillar, Severity
+
+    rep = HealthReport(
+        "h", "glkvm", "4.82",
+        [CheckResult("recovery-path", Pillar.READINESS, Severity.CRITICAL,
+                     "Out-of-band recovery path", "No out-of-band reset")],
+    )
+    monkeypatch.setattr("kvm_pilot.health.preflight_once", lambda *a, **k: rep)
+    cli._inform_on_connect(object(), skip=False)
+    err = capsys.readouterr().err
+    assert "preflight glkvm@h" in err
+    assert "CRITICAL" in err and "recovery path" in err.lower()
+
+
+def test_inform_on_connect_swallows_audit_errors(monkeypatch, capsys):
+    # An informational audit that blows up must not break the command.
+    from kvm_pilot import cli
+
+    def boom(*a, **k):
+        raise RuntimeError("network guard")
+
+    monkeypatch.setattr("kvm_pilot.health.preflight_once", boom)
+    cli._inform_on_connect(object(), skip=False)  # must not raise
+    assert capsys.readouterr().err == ""
