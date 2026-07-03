@@ -29,6 +29,7 @@ SERVER = REPO_ROOT / "mcp_server" / "server.py"
 
 EXPECTED_TOOLS = {
     "info",
+    "capabilities",
     "power_state",
     "logs",
     "snapshot",
@@ -172,6 +173,29 @@ def test_read_only_tools_report_provenance(config_file):
     # a driver without PiKVM's ATX detail endpoint.
     assert state.isError is False
     assert result_json(state)["powered_on"] is False
+
+
+def test_capabilities_tool_lists_offline(config_file):
+    """capabilities is structural — it lists what the driver supports with no
+    network and no preflight, including for a BMC profile that is never contacted
+    (host bmc.invalid). Output is in capability-enum declaration order."""
+
+    async def interact(session):
+        fake = await session.call_tool("capabilities", {})
+        bmc = await session.call_tool("capabilities", {"profile": "bmc"})
+        return fake, bmc
+
+    fake, bmc = run_session(server_env(config_file), interact)
+    parsed = result_json(fake)
+    assert parsed["driver"] == "fake"
+    caps = parsed["capabilities"]
+    assert {"system_info", "power", "video", "logs"} <= set(caps)
+    # Declaration order is stable: system_info precedes power precedes video.
+    assert caps.index("system_info") < caps.index("power") < caps.index("video")
+    # The BMC profile resolves and lists offline — it is never contacted.
+    bmc_parsed = result_json(bmc)
+    assert bmc_parsed["driver"] == "redfish"
+    assert isinstance(bmc_parsed["capabilities"], list) and bmc_parsed["capabilities"]
 
 
 def test_logs_tool_returns_text_with_provenance(config_file):

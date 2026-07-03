@@ -44,8 +44,9 @@ KVM HID+vision → SSH once the target OS is reachable).
 | Classify boot/run phase | **MCP** `classify_screen` | Needs a vision backend (Anthropic key or local VLM). CLI: `classify` / `watch`. |
 | Preflight audit (run first) | **MCP** `healthcheck` or CLI `healthcheck` | The intake gate — see below. |
 | Device info / host power state | **MCP** `info` / `power_state`, or CLI | Either works. |
+| List what the driver supports | **MCP** `capabilities` or CLI `capabilities` | Structural/offline — no network, no preflight. Use it to pick the right interface up front. |
 | **Read the device/host event log** | **MCP** `logs` or **CLI `logs`** | The text diagnostic when video/streamer/power looks wrong — it names a fault (e.g. a stuck encoder behind a `snapshot` 503) a screenshot can't. |
-| capabilities, firmware-check/update, events, watch, type/key, mount/eject | **CLI only** | The MCP server does not expose these. |
+| firmware-check/update, events, watch, type/key, mount/eject | **CLI only** | The MCP server does not expose these. |
 | Mouse move/click, MSD mode switching | **Python library only** | Not in MCP or CLI. |
 | Change **host** power (on/off/cycle/reset) | **MCP `power`** (gated) or CLI `power` / `power-cycle` | Destructive — confirm each step. MCP `power` is operator-enabled + per-call approval. |
 | Reboot the **KVM appliance** / restart `kvmd` / inspect `/etc/kvmd` | **SSH to the appliance** | No kvm-pilot interface does this — out-of-band only. |
@@ -219,11 +220,12 @@ unless they have explicitly said otherwise.
 ## CLI
 
 The CLI is the **primary (often only) interface** for a large part of the
-surface — `logs`, `capabilities`, `firmware-check`/`firmware-update`, `events`,
-`watch`, `type`/`key`, `mount`/`eject` have no MCP tool (see the interface
-matrix above). Use the MCP server for the visual loop (`snapshot`/`classify`)
-and gated `power`; use the CLI for everything else and for one-off checks when
-no MCP host is in the loop.
+surface — `firmware-check`/`firmware-update`, `events`, `watch`, `type`/`key`,
+`mount`/`eject` have no MCP tool (see the interface matrix above). Use the MCP
+server for the visual loop (`snapshot`/`classify`), gated `power`, and the
+read-only checks it does expose (`info`/`healthcheck`/`capabilities`/`logs`/
+`power_state`); use the CLI for everything else and for one-off checks when no
+MCP host is in the loop.
 
 `kvm-pilot info | capabilities | healthcheck | firmware-check | snapshot | power |
 power-cycle | type | key | mount | eject | classify | watch | events`. Run

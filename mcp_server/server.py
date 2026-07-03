@@ -6,9 +6,9 @@ This is a SEPARATE component from the stdlib-only core library and depends on
 the `mcp` SDK — install from ``mcp_server/requirements.txt``, not the core.
 
 SAFETY MODEL (see mcp_server/README.md for the operator-facing version):
-  * The read-only tools (``info``, ``healthcheck``, ``power_state``, ``logs``,
-    ``snapshot``, ``classify_screen``) run with a deny-all confirm callback and
-    carry a ``readOnlyHint`` tool annotation.
+  * The read-only tools (``info``, ``healthcheck``, ``capabilities``,
+    ``power_state``, ``logs``, ``snapshot``, ``classify_screen``) run with a
+    deny-all confirm callback and carry a ``readOnlyHint`` tool annotation.
   * The one destructive tool (``power``) carries ``destructiveHint`` and is
     DISABLED until the human operator sets ``KVM_PILOT_MCP_ALLOW_POWER`` in the
     server's own environment. The model-supplied ``confirm`` flag is only a
@@ -70,28 +70,32 @@ def _driver(
     profile: str | None,
     *,
     confirm: Callable[[str, str], bool],
-    capability: Capability,
+    capability: Capability | None = None,
     enforce_health: bool = False,
+    preflight: bool = True,
 ) -> Iterator[tuple[HostConfig, KVMDriver]]:
     """Resolve the profile, build its driver, and always close it afterwards.
 
     The capability gate is checked structurally (``supports()``, no network) so a
     tool the driver cannot serve fails with a clear MCP tool error instead of an
-    ``AttributeError`` — e.g. a Redfish BMC has no video capture.
+    ``AttributeError`` — e.g. a Redfish BMC has no video capture. ``capability=None``
+    skips the gate for meta tools that every driver serves (e.g. ``capabilities``).
 
     Runs the device preflight healthcheck (#80) on first connection: read-only
     tools inform (once per device, non-blocking); ``enforce_health`` (the ``power``
-    tool) fails closed on an unacknowledged CRITICAL.
+    tool) fails closed on an unacknowledged CRITICAL. ``preflight=False`` skips it
+    for structural, offline tools that never touch the network.
     """
     cfg = resolve_host(profile or os.environ.get("KVM_PILOT_PROFILE"))
     kvm = make_driver_from_config(cfg, confirm=confirm, dry_run=_dry_run())
     try:
-        if not kvm.supports(capability):
+        if capability is not None and not kvm.supports(capability):
             raise ToolError(
                 f"the '{cfg.driver}' driver for host '{cfg.host}' does not provide the "
                 f"'{capability.value}' capability this tool needs"
             )
-        _preflight(kvm, enforce=enforce_health)
+        if preflight:
+            _preflight(kvm, enforce=enforce_health)
         yield cfg, kvm
     finally:
         close = getattr(kvm, "close", None)
@@ -203,6 +207,20 @@ def healthcheck(profile: str | None = None) -> dict:
         from kvm_pilot.health import run_healthcheck
 
         return {**_provenance(cfg), **run_healthcheck(kvm).to_dict()}
+
+
+@mcp.tool(annotations=_READ_ONLY)
+def capabilities(profile: str | None = None) -> dict:
+    """List the capabilities the target's driver supports (read-only, offline).
+
+    Structural — makes no network call and runs no preflight; it answers "which
+    tools/actions can this device serve?" so you can pick the right interface up
+    front (a Redfish BMC has no video; a PiKVM has no BootProgress). Returned in
+    the capability enum's declaration order for stable output.
+    """
+    with _driver(profile, confirm=deny_all, preflight=False) as (cfg, kvm):
+        caps = kvm.capabilities()
+        return {**_provenance(cfg), "capabilities": [c.value for c in Capability if c in caps]}
 
 
 @mcp.tool(annotations=_READ_ONLY)
