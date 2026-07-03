@@ -95,6 +95,7 @@ class GLKVMDriver(PiKVMDriver):
     """
 
     _NOT_FOUND_HINT = _GL_API_DISABLED_HINT
+    _vendor = "gl.inet"
 
     def known_quirks(self, firmware: str | None = None) -> list[Quirk]:
         """Quirks that apply to ``firmware`` (auto-detected from the device if omitted)."""
@@ -112,6 +113,8 @@ class BliKVMDriver(PiKVMDriver):
     No deltas from the base client are known yet; this subclass exists so any
     BliKVM-specific behavior or quirks have a home.
     """
+
+    _vendor = "blikvm"
 
 
 __all__ = ["GLKVMDriver", "BliKVMDriver", "Quirk", "GLKVM_QUIRKS"]

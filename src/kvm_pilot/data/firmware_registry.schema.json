@@ -1,0 +1,52 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "kvm-pilot firmware registry",
+  "description": "Single source of truth for firmware currency. Each entry is keyed by (vendor, product) as normalized by a driver's get_firmware_info(), so one generic mechanism serves every family (PiKVM/GLKVM/Redfish/iDRAC/iLO/IPMI/AMT). Consumed by health.check_firmware_currency; maintained via the firmware-report ingestion pipeline.",
+  "type": "object",
+  "required": ["schema_version", "updated", "firmware"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {"const": 2},
+    "updated": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
+    "firmware": {"type": "array", "items": {"$ref": "#/definitions/entry"}}
+  },
+  "definitions": {
+    "entry": {
+      "type": "object",
+      "required": ["vendor", "product"],
+      "additionalProperties": false,
+      "properties": {
+        "vendor": {"type": "string", "minLength": 1, "description": "Matched case-insensitively against get_firmware_info().vendor (e.g. gl.inet, dell, hpe)."},
+        "product": {"type": "string", "minLength": 1, "description": "Matched case-insensitively as a substring of get_firmware_info().product (e.g. RV1126B, iDRAC9, iLO 5)."},
+        "latest": {"type": "string", "minLength": 1, "description": "Latest known version, in the same scheme the device reports."},
+        "source": {"type": "string", "pattern": "^https?://"},
+        "date": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
+        "known_bad": {"type": "array", "items": {"$ref": "#/definitions/known_bad"}},
+        "profile": {"$ref": "#/definitions/profile"}
+      }
+    },
+    "profile": {
+      "type": "object",
+      "description": "Capability / expected-UX differentiators that a healthcheck cannot safely detect live. All fields optional so a profile can be enriched incrementally.",
+      "additionalProperties": false,
+      "properties": {
+        "mouse": {"enum": ["absolute", "relative", "none"], "description": "GUI usability: absolute = usable pointer; relative = painful; none = keyboard only."},
+        "vmedia": {"enum": ["reliable", "reports-only", "none"], "description": "Boot-from-ISO fidelity: reports-only = API says mounted but the host sees nothing (#77)."},
+        "power_state_trusted": {"type": "boolean", "description": "Whether ATX/LED power readings are truthful — governs whether reboots can be automated safely."},
+        "video": {"type": "string", "minLength": 1, "description": "Rated video ceiling: transport + max mode, e.g. h264/1080p60."}
+      }
+    },
+    "known_bad": {
+      "type": "object",
+      "required": ["affected", "severity", "issue", "source"],
+      "additionalProperties": false,
+      "properties": {
+        "affected": {"type": "string", "minLength": 1, "description": "Version spec: bare X (exact), or <=X / <X / >=X / >X / ==X."},
+        "severity": {"enum": ["warning", "critical"]},
+        "issue": {"type": "string", "minLength": 1},
+        "fixed_in": {"type": "string"},
+        "source": {"type": "string", "pattern": "^https?://"}
+      }
+    }
+  }
+}
