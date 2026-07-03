@@ -1,6 +1,6 @@
 # kvm-pilot
 
-**AI-driven bare-metal control for PiKVM and the GL.iNet GLKVM fork (GL-RM1 / GL-RM1PE).**
+**AI-driven bare-metal control for IP-KVMs (PiKVM, the GL.iNet GLKVM fork GL-RM1 / GL-RM1PE, BliKVM) and Redfish BMCs (iDRAC, iLO, OpenBMC).**
 
 `kvm-pilot` is a stdlib-only Python client for the PiKVM REST API, a safety layer
 that gates destructive power/media operations, and a pluggable vision subsystem
@@ -14,13 +14,18 @@ Vision runs on Claude **or** any local OpenAI-compatible VLM (LM Studio, Ollama,
 vLLM, llama.cpp). Point it at a model on your own GPU and the screenshots never
 leave your network and cost nothing per frame.
 
-> **Status:** v0.1.0a1 — **early alpha.** This code has **not been run against
-> real hardware** — not even the GL-RM1PE it targets. It is unit-tested only
-> (mocked HTTP and vision responses), so treat every feature as unverified,
-> expect bugs and breaking API changes before 1.0, and don't point it at a
-> machine you can't afford to have power-cycled unexpectedly. Hardware reports —
-> success *or* failure — are exactly what this release is asking for; see
-> [Compatibility](#compatibility).
+> **Status:** v0.1.0a2 — **early alpha.** First real-hardware runs have happened —
+> a GL-RM1PE, with the read/`snapshot`/`healthcheck`/`logs` paths exercised live on
+> firmware V1.5.1 release2 and V1.9.1 release1 — but **most device+capability combos
+> remain unverified** (mocked HTTP/vision or emulators only), and the remote
+> firmware-flash is a known no-op on that unit
+> ([#94](https://github.com/DustinTrap/kvm-pilot/issues/94)/[#95](https://github.com/DustinTrap/kvm-pilot/issues/95)).
+> Treat every feature as unverified, expect bugs and breaking API changes before
+> 1.0, and don't point it at a machine you can't afford to have power-cycled
+> unexpectedly. What has actually been exercised lives in the
+> [Hardware-Compatibility list](https://github.com/DustinTrap/kvm-pilot/wiki/Hardware-Compatibility);
+> hardware reports — success *or* failure — are exactly what this release is
+> asking for. See [Compatibility](#compatibility).
 
 ---
 
@@ -74,28 +79,20 @@ firmware, the bootloader, and an OS install.
 ## Install
 
 ```bash
-pip install kvm-pilot==0.1.0a1                 # core, zero runtime dependencies
-pip install "kvm-pilot[totp]==0.1.0a1"         # + 2FA / TOTP support (pyotp)
-pip install "kvm-pilot[ws]==0.1.0a1"           # + WebSocket event streaming
+pip install --pre kvm-pilot                    # core, zero runtime dependencies
+pip install --pre "kvm-pilot[totp]"            # + 2FA / TOTP support (pyotp)
+pip install --pre "kvm-pilot[ws]"              # + WebSocket event streaming
 ```
 
-This release is **yanked on PyPI on purpose** — a deliberate "don't install me
-unless you mean it" marker for untested alpha code. A plain
-`pip install kvm-pilot` will therefore install **nothing**; opt in by pinning
-the exact version as shown above. The core has **no third-party runtime
-dependencies** — it is pure standard library. Extras are opt-in.
+The current release (`0.1.0a2`) is a **pre-release**, so `--pre` (or pinning
+`==0.1.0a2`) is required — a plain `pip install kvm-pilot` deliberately picks up
+no alpha. The core has **no third-party runtime dependencies** — it is pure
+standard library; extras are opt-in. (`0.1.0a1` is yanked and much older than this
+README — don't use it.) For the latest unreleased tree, install from git:
 
-> **Heads-up: `0.1.0a1` is much older than this README.** It predates
-> `make_driver` and the driver registry, the GLKVM/BliKVM/Redfish/fake drivers,
-> `ApiDisabledError`, and the newer CLI (`capabilities`, `events`, `eject`,
-> `--driver`, `--timeout`). To try what this page actually describes, install
-> the current tree from git:
->
-> ```bash
-> pip install "kvm-pilot[totp,ws] @ git+https://github.com/DustinTrap/kvm-pilot"
-> ```
->
-> A `0.1.0a2` release covering all of the above is planned.
+```bash
+pip install "kvm-pilot[totp,ws] @ git+https://github.com/DustinTrap/kvm-pilot"
+```
 
 ## Quickstart
 
@@ -237,13 +234,15 @@ gating every destructive call, and the vision loop on devices that have pixels.
 
 | Device | Status |
 |--------|--------|
-| GL-RM1PE (Comet PoE) | Primary development target — **not yet hardware-tested** |
+| GL-RM1PE (Comet PoE) | Primary target — **exercised live**: read/`snapshot`/`healthcheck`/`logs` verified on firmware V1.5.1 release2 & V1.9.1 release1; remote flash a no-op ([#94](https://github.com/DustinTrap/kvm-pilot/issues/94)/[#95](https://github.com/DustinTrap/kvm-pilot/issues/95)); encoder wedges >1080p ([#107](https://github.com/DustinTrap/kvm-pilot/issues/107)) |
 | GL-RM1 (Comet) | Expected to work (same firmware family); untested |
 | PiKVM v3 / v4 | Expected to work (upstream API); untested |
 | BliKVM | Expected to work (PiKVM-compatible API); untested |
 
-**Nothing in this table has been verified on real hardware yet** — the entire
-matrix is "expected to work" pending validation. ATX power control needs the
+Only the GL-RM1PE has been run live so far, and only on the read/snapshot
+paths — everything else is "expected to work" pending validation. The
+[Hardware-Compatibility list](https://github.com/DustinTrap/kvm-pilot/wiki/Hardware-Compatibility)
+is the authoritative, per-capability record. ATX power control needs the
 ATX adapter wired to the target's front-panel header: on the GL Comet family
 (GL-RM1 / GL-RM1PE) that is GL.iNet's separately sold ATX board (GL-ATXPC),
 while PiKVM v3/v4 kits include the ATX adapter in the box and BliKVM bundles
