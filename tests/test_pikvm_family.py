@@ -99,3 +99,44 @@ def test_observed_atx_power_quirk_matches_its_firmware():
     assert by_id["atx-power-state-always-off"].source == "observed"
     other = {q.id for q in GLKVMDriver("h").known_quirks(firmware="9.99")}
     assert "atx-power-state-always-off" not in other
+
+
+# -- GL product firmware version (what the UI shows: /api/upgrade/version) --
+
+
+class _FakeHTTP:
+    """Minimal transport: return canned JSON per path, 404 for anything else."""
+
+    def __init__(self, results):
+        self.results = results
+
+    def get(self, path, **kw):
+        val = self.results.get(path)
+        if val is None:
+            from kvm_pilot.errors import KVMPilotError
+
+            raise KVMPilotError("not found", 404)
+        return val
+
+
+def test_glkvm_reports_gl_product_firmware_when_available():
+    d = GLKVMDriver("h")
+    d._http = _FakeHTTP({
+        "/api/info": {"system": {"kvmd": {"version": "4.82"},
+                                 "platform": {"base": "Rockchip RV1126B-P EVB", "model": "v3"}}},
+        "/api/upgrade/version": {"model": "RM1PE", "version": "V1.9.1 release1"},
+    })
+    fw = d.get_firmware_info()
+    assert fw["version"] == "V1.9.1 release1"        # what the UI shows
+    assert fw["product"] == "RM1PE" and fw["model"] == "RM1PE"
+    assert fw["kvmd_version"] == "4.82" and fw["vendor"] == "gl.inet"
+
+
+def test_glkvm_falls_back_to_kvmd_when_upgrade_endpoint_absent():
+    d = GLKVMDriver("h")
+    d._http = _FakeHTTP({
+        "/api/info": {"system": {"kvmd": {"version": "4.82"},
+                                 "platform": {"base": "some-board", "model": "v3"}}},
+    })
+    fw = d.get_firmware_info()
+    assert fw["version"] == "4.82" and fw["product"] == "some-board"  # base identity

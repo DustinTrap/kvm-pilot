@@ -97,6 +97,26 @@ class GLKVMDriver(PiKVMDriver):
     _NOT_FOUND_HINT = _GL_API_DISABLED_HINT
     _vendor = "gl.inet"
 
+    def get_firmware_info(self) -> dict:
+        """GL reports its **product** firmware (what the UI shows) at
+        ``/api/upgrade/version`` — e.g. ``{"model": "RM1PE", "version": "V1.9.1
+        release1"}``. Use that as the identity version/product so the report
+        matches the UI; keep the kvmd component version alongside. Falls back to
+        the base (kvmd-only) info on firmware that lacks the endpoint.
+        """
+        info = super().get_firmware_info()
+        try:
+            up = self._http.get("/api/upgrade/version")
+        except KVMPilotError:
+            return info
+        if isinstance(up, dict):
+            if up.get("version"):
+                info["version"] = up["version"]        # "V1.9.1 release1" (what the UI shows)
+            if up.get("model"):
+                info["product"] = up["model"]          # "RM1PE"
+                info["model"] = up["model"]
+        return info
+
     def known_quirks(self, firmware: str | None = None) -> list[Quirk]:
         """Quirks that apply to ``firmware`` (auto-detected from the device if omitted)."""
         if firmware is None:
