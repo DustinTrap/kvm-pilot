@@ -79,6 +79,34 @@ The status report showed `snapshot` returning an undecodable image and
 - **`power_state` is not trustworthy** on RM1PE (ATX always reads off); verify
   power visually, never automate a blind reboot.
 
+## Follow-up: manual upgrade to V1.9.1 release1 (same day)
+
+The maintainer flashed the unit **manually via the vendor UI** to **V1.9.1
+release1** (kernel 6.1.118 → 6.1.141; adds Pion/WebRTC extras). Re-running against
+the upgraded box gives a **split result**:
+
+- **`snapshot` is fixed by the firmware.** `GET /api/streamer/snapshot` now returns
+  a real **43 KB JPEG** (`Snapshot successful: JPEG size=43262 bytes (from cache)`),
+  reliably (6/6), at 1920×1200 — the V1.5.1 "78-byte H.264 NAL" behaviour is gone.
+  V1.9.1 serves a **cached JPEG decoupled from the H.264 encoder**, so a still no
+  longer depends on the encoder's health. Snapshot/vision is restored. *(One
+  transient H.264 response was seen in the first seconds after boot, during
+  streamer warm-up; it settled to JPEG immediately after.)*
+- **The RV1126 encoder wedge is NOT fixed.** At 1920×1200 the same ten media
+  threads (`venc vpss vvi_thread …`) are still in D-state with load ~10 on V1.9.1.
+  So the wedge is not native-res-only — 1200p wedges too — and firmware didn't
+  address it. A true **1920×1080** is still the recommendation. The saving grace is
+  that on V1.9.1 the wedge no longer breaks stills.
+- **The upgrade validates the *vendor* path, not kvm-pilot's.** This was a manual
+  vendor-UI flash. kvm-pilot's own remote-flash path (#94/#95) remains a no-op /
+  unverified — the successful upgrade says nothing about it.
+- Firmware currency clears: the `firmware-currency` WARNING is gone; the box is on
+  the registry's latest. `recovery-path` is still CRITICAL (hardware wiring, not
+  firmware) and TLS is still unverified.
+
+Net for #107: the **snapshot-format** half is resolved by V1.9.1; the
+**encoder-wedge** half stands.
+
 ## What changed as a result
 
 - New GitHub issue **#107** (snapshot-H.264 / encoder-wedge above 1080p), linked
