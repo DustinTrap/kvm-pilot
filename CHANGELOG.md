@@ -6,6 +6,27 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added — MCP interface parity + skill interface-selection guidance (2026-07-03, #93)
+- **`logs` MCP tool** (read-only, `Capability.LOGS`) — exposes the device/host
+  event log over MCP with a `seek` lookback (tail-follow omitted; it blocks over
+  the synchronous transport). This is the text diagnostic behind a `snapshot`
+  503 (e.g. a stuck encoder) that the image tools can't give — previously it was
+  reachable only from the CLI.
+- **`capabilities` MCP tool** (read-only, **structural/offline** — no network,
+  no preflight) — lists what the target driver supports so an agent can pick the
+  right interface up front. The server's `_driver()` helper gains
+  `capability=None` (skip the gate for meta tools every driver serves) and
+  `preflight=False` (skip the on-connect audit for offline tools).
+- **Skill reframed from "MCP-preferred / CLI-fallback" to best-interface-per-
+  action.** `skill/SKILL.md` now carries a per-action **interface matrix**, the
+  **host-vs-appliance** distinction (rebooting the KVM box is out-of-band SSH,
+  not `power`), **`snapshot`-failure reads** (503 → `logs` → appliance reboot;
+  tiny-frame-with-signal → H.264-at-native-res → stream), a **multitasking**
+  section (run read-only interfaces in parallel; never parallelize destructive
+  ops), and a fix for the MCP `-s local` scope gotcha. Mirrored into
+  `mcp_server/README.md`. This is the operator-interface complement to the
+  sensing (#13) and actuation (#81) hierarchies.
+
 ### Added — gated remote firmware update (2026-07-03, #92)
 - **`kvm-pilot firmware-update`** — assesses (and, with `--execute`, performs) a
   remote flash of the KVM's own firmware. Read-only by default: prints
