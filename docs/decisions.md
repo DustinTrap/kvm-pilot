@@ -5,6 +5,25 @@ are intentional**, so they don't get re-litigated. Newest first.
 
 ## Drivers
 
+### SSH-to-target is a per-profile channel, not a KVM-driver capability ([#81](https://github.com/DustinTrap/kvm-pilot/issues/81))
+The in-band SSH channel targets the **managed host's OS** — a different machine from
+the KVM appliance, with its own address (`ssh_host`) and login. It could have been a
+driver capability, but capability detection is **structural** (`detect_capabilities`
+is `hasattr`-based via `runtime_checkable` protocols) and therefore config-independent:
+a driver that merely *had* `ssh_reachable`/`ssh_exec` would report SSH support even with
+no target configured. So SSH is a standalone `SSHChannel` (`src/kvm_pilot/ssh.py`) built
+from the profile's `ssh_*` fields and **gated on "is `ssh_host` set?"** (raising
+`CapabilityError` otherwise), never inferred from the KVM's address. `Capability.SSH` +
+the `RemoteShell` protocol exist as a **seam** (like `SerialConsole`), implemented by the
+channel rather than by KVM drivers. Dependency-free by design: reachability is a stdlib
+`socket` probe and exec shells out to the **system `ssh`** (`BatchMode`), so no
+`paramiko` — matching the stdlib-only-at-core convention. Every exec routes through
+`safety.guard("ssh.exec", …)` (an arbitrary command can't be statically classified);
+the reachability probe is read-only and ungated. SSH is deliberately **not** folded into
+the `recovery-path` healthcheck: that check answers "can a *hung* host be reset?", and a
+hung host won't answer SSH — so SSH reachability is a complementary in-band lever, not an
+out-of-band reset path.
+
 ### Remote firmware flash is its own gated command, not a healthcheck auto-fix ([#92](https://github.com/DustinTrap/kvm-pilot/issues/92))
 The healthcheck already carries an `AutoFix` mechanism (applied, with per-item consent,
 by `healthcheck --fix`), so attaching the firmware update there looks natural — but

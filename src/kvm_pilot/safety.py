@@ -68,6 +68,10 @@ DESTRUCTIVE_OPS: set[str] = {
     # device reboots into a new image (dropping this control channel) and a failed
     # flash may need physical recovery. See FirmwareUpdate in drivers/base.py.
     "firmware.flash",
+    # A command run over SSH on the managed host's OS can change anything (rm -rf,
+    # reboot, service stop). An arbitrary command can't be statically classified,
+    # so every exec is gated. Reachability probes stay ungated (read-only).
+    "ssh.exec",
 }
 
 # Callback signature: (op_name, human_description) -> bool
