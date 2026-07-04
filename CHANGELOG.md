@@ -6,6 +6,16 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.0a6] — 2026-07-03
+
+### Changed
+- **CI now runs a clean-room `--pre` install smoke test** (#110): a fresh venv
+  `pip install --pre`s the built wheel and asserts the bundled MCP server imports
+  and the skill + both console scripts ship — the check the editable dev installs
+  couldn't do. It also runs as a **pre-publish gate in the release workflow**
+  against the exact artifact, so a broken `--pre` dependency resolution can't reach
+  PyPI. No library changes in this release.
+
 ## [0.1.0a5] — 2026-07-03
 
 ### Fixed
@@ -438,6 +448,7 @@ user feedback. **Not validated on real hardware** — see Notes.
   feedback are the explicit goals of this alpha. Reports welcome in the issue
   tracker.
 
+[0.1.0a6]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a6
 [0.1.0a5]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a5
 [0.1.0a4]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a4
 [0.1.0a3]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a3
