@@ -17,7 +17,7 @@ from __future__ import annotations
 import logging
 import shutil
 import socket
-import subprocess
+import subprocess  # nosec B404 - intentional: shells out to the system `ssh` (no SSH lib)
 
 from .config import HostConfig
 from .errors import CapabilityError, TimeoutError
@@ -116,7 +116,9 @@ class SSHChannel:
         # shell; args after the destination are never parsed as ssh options.
         argv = self._ssh_argv() + [command]
         try:
-            proc = subprocess.run(  # noqa: S603 - argv is built from config, shell=False
+            # shell=False and argv is built from config (no untrusted shell string);
+            # the single command runs via the remote shell over ssh.
+            proc = subprocess.run(  # nosec B603
                 argv,
                 capture_output=True,
                 text=True,
