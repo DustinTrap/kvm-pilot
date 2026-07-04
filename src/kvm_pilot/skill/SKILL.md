@@ -11,9 +11,9 @@ description: >-
   (`kvm-pilot-mcp`) for the visual loop (snapshot/classify) and gated power, the
   CLI for logs/capabilities/firmware/events/HID/media, the Python library for
   mouse and MSD switching, and SSH for appliance maintenance the tool can't do.
-  See the interface matrix in the skill body.** Early alpha, never validated on real hardware
-  — treat every operation as unverified and confirm destructive steps with the
-  user.
+  See the interface matrix in the skill body.** Early alpha — most device/capability
+  combos are still unverified (only a few exercised live, on a GL-RM1PE); treat
+  every operation as unverified and confirm destructive steps with the user.
 ---
 
 # kvm-pilot skill
@@ -69,9 +69,21 @@ itself** — e.g. to clear a stuck video encoder — is **out-of-band**: SSH in 
 
 ### Enabling the MCP server
 
-Look for `mcp__kvm-pilot__*` tools (e.g. `mcp__kvm-pilot__snapshot`). If they're
-absent, register the server and tell the user to restart the session so the
-tools load:
+**The 8 tools it exposes**, all named `mcp__kvm-pilot__<tool>`:
+- Read-only: `info`, `power_state`, `capabilities`, `healthcheck`, `logs`
+- `snapshot` — returns a model-visible JPEG of the screen
+- `classify_screen` — boot/run phase (needs a vision backend: `ANTHROPIC_API_KEY`
+  or a local VLM configured in the **server's** env, else it errors)
+- `power` — **destructive**, on/off/cycle/reset of the managed host; disabled
+  unless the operator set `KVM_PILOT_MCP_ALLOW_POWER=1`, and requires `confirm=true`
+
+Every tool takes an optional `profile` argument to pick a device from
+`~/.config/kvm-pilot/config.toml`; omit it to use the server's default profile.
+
+**To use it:** look for `mcp__kvm-pilot__*` tools (e.g. `mcp__kvm-pilot__snapshot`).
+If they're absent, `pip install --pre kvm-pilot` (which provides `kvm-pilot-mcp`),
+then register the server and tell the user to restart the session so the tools
+load:
 
 ```bash
 # pip install --pre kvm-pilot   installs the CLI, the MCP server, and its deps
@@ -117,7 +129,7 @@ pip install --pre kvm-pilot               # CLI + this skill + the MCP server
 pip install --pre "kvm-pilot[totp]"       # add if the device has 2FA enabled
 ```
 
-It's a pre-release, so `--pre` (or pinning `==0.1.0a4`) is required — a bare
+It's a pre-release, so `--pre` (or pinning `==0.1.0a5`) is required — a bare
 `pip install kvm-pilot` deliberately picks up no alpha. A single install brings
 the `kvm-pilot` CLI, the `kvm-pilot-mcp` server, and this skill file. For the
 latest unreleased tree, install from git:
