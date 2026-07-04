@@ -14,7 +14,7 @@ from kvm_pilot.config import HostConfig, resolve_host
 from kvm_pilot.drivers.base import CAPABILITY_PROTOCOLS, Capability, RemoteShell
 from kvm_pilot.errors import CapabilityError, SafetyError, TimeoutError
 from kvm_pilot.safety import DESTRUCTIVE_OPS, SafetyPolicy, deny_all
-from kvm_pilot.ssh import SSHChannel
+from kvm_pilot.ssh import MAX_SWEEP_HOSTS, SSHChannel, discover_ssh_hosts
 
 
 def _cfg(**kw) -> HostConfig:
@@ -126,3 +126,22 @@ def test_resolve_host_ssh_port_defaults_to_22(tmp_path):
     cfg = resolve_host(host="10.0.0.1", config_path=tmp_path / "none.toml")
     assert cfg.ssh_host is None
     assert cfg.ssh_port == 22
+
+
+# -- network sweep (opt-in, risky) -------------------------------------------
+
+def test_discover_returns_only_open_hosts():
+    open_hosts = {"10.0.0.3"}
+    with mock.patch("kvm_pilot.ssh._port_open", side_effect=lambda h, p, t: h in open_hosts):
+        found = discover_ssh_hosts("10.0.0.0/29", port=22)
+    assert found == [{"host": "10.0.0.3", "port": 22}]
+
+
+def test_discover_rejects_over_broad_range():
+    with pytest.raises(ValueError, match="narrow the range"):
+        discover_ssh_hosts(f"10.0.0.0/{32 - (MAX_SWEEP_HOSTS.bit_length())}")  # > MAX_SWEEP_HOSTS
+
+
+def test_discover_rejects_malformed_cidr():
+    with pytest.raises(ValueError):
+        discover_ssh_hosts("not-a-cidr")
