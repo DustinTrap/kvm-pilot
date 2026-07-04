@@ -38,7 +38,8 @@ for everything.** Pick per action, and run more than one at once when the work
 is independent (see [Multitasking](#multitasking--use-interfaces-in-parallel)).
 This is the operator-side complement to the sensing hierarchy (#13, prefer
 structured/text over vision) and the actuation-channel hierarchy (#81, hand off
-KVM HID+vision → SSH once the target OS is reachable).
+KVM HID+vision → SSH once the target OS is reachable — see **Recovery order —
+remote before physical**, below).
 
 | Action | Best interface | Notes / fallback |
 |---|---|---|
@@ -52,12 +53,32 @@ KVM HID+vision → SSH once the target OS is reachable).
 | Mouse move/click, MSD mode switching | **Python library only** | Not in MCP or CLI. |
 | Change **host** power (on/off/cycle/reset) | **MCP `power`** (gated) or CLI `power` / `power-cycle` | Destructive — confirm each step. MCP `power` is operator-enabled + per-call approval. |
 | Reboot the **KVM appliance** / restart `kvmd` / inspect `/etc/kvmd` | **SSH to the appliance** | No kvm-pilot interface does this — out-of-band only. |
+| Run commands on / recover the **target host** once its OS is network-reachable | **SSH to the target OS** (in-band) | Prefer this over KVM keystrokes once the OS is up. Ask the user for the target's IP/host/FQDN (≠ the KVM's address). See "Recovery order" below. |
 | View the screen when `snapshot` fails | **WebRTC/Janus stream or the vendor web UI** | The only way to see a unit that streams H.264 at its native resolution. |
 
 **Host vs. appliance — keep these straight.** The `power` tool/CLI acts on the
 **managed host** (the machine the KVM controls). Rebooting the **KVM appliance
-itself** — e.g. to clear a stuck video encoder — is **out-of-band**: SSH in and
-`reboot`, or restart `kvmd`. Nothing in kvm-pilot reboots the appliance.
+itself** — e.g. to clear a stuck video encoder — is **out-of-band**: SSH into the
+*appliance* and `reboot`, or restart `kvmd`. Nothing in kvm-pilot reboots the
+appliance. And the appliance's address is **not** the managed host's address —
+they are separate machines with separate IPs.
+
+**Recovery order — remote before physical.** When the host is wedged or its screen
+is black and you can't power-cycle it through the KVM (`recovery-path` is CRITICAL
+— no ATX/GPIO wired), do **not** jump to asking the user to physically intervene.
+Prefer remote recovery, in this order, and present the options in this order:
+1. **SSH into the target host OS** (in-band) — if its OS is on the network this is
+   the fastest, most reliable lever (and far better than typing through KVM HID).
+   You must **ask the user for the target's IP / hostname / FQDN** — it's a
+   different machine from the KVM, so you cannot infer it from the KVM's address.
+2. **Wake-on-LAN** — if the host is off but WoL-capable and you have its MAC.
+3. Only after remote options are exhausted, suggest **physical intervention**
+   (press the power button) or **wiring the ATX cable** for future remote control.
+
+> **Network sweep is opt-in and risky.** If the user doesn't know the target's
+> address, you may *offer* to scan a network range for SSH — but say plainly it's
+> noisy and only acceptable on networks they own, get them to confirm the range
+> first, and never sweep by default.
 
 **Reading a failed `snapshot`:**
 - **HTTP 503 / "Service Unavailable"** → the video subsystem is down. Pull `logs`
@@ -66,6 +87,13 @@ itself** — e.g. to clear a stuck video encoder — is **out-of-band**: SSH in 
 - **A tiny/empty frame while `has_video_signal` is True** → the JPEG path can't
   encode the current mode, typically **H.264 at the panel's native resolution**.
   Use the WebRTC stream, or drop the host to 1080p, to see the screen.
+- **A black/blank screen while `power_state`/`powered_on` reads True** → on a
+  device whose capability profile marks power readings **not trusted** (no ATX
+  board), `powered_on: true` can be an HDMI/EDID artifact, not proof the OS is up —
+  `is_powered_on` fails *open*. **Don't trust it.** Disambiguate by what the
+  snapshot actually shows **and** an **SSH reachability check to the target host**
+  (is its OS answering on the network?), not "verify visually" alone — visual
+  checks are exactly what fails on a black screen.
 
 ### Enabling the MCP server
 
@@ -123,6 +151,16 @@ and cross-check signals:
   observation only.
 
 ## Setup
+
+**First-time user? Offer a quick orientation.** If this looks like a first run —
+no `~/.config/kvm-pilot/config.toml` (or it has no `[hosts.*]` profile), the user
+is asking how to get started, or you're setting up credentials for the first time —
+proactively share two or three tips and point them to the
+[getting-started guide](https://github.com/DustinTrap/kvm-pilot/blob/main/docs/getting-started.md):
+start with a **read-only status report**, keep **`KVM_PILOT_MCP_DRY_RUN=1`** on
+until they trust a flow, run **`healthcheck` first**, and **name the machine you
+mean** ("the connected server behind the KVM at `<ip>`", not the KVM appliance
+itself). Don't repeat this for a user who is clearly already experienced.
 
 ```bash
 pip install --pre kvm-pilot               # CLI + this skill + the MCP server
