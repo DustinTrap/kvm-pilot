@@ -35,6 +35,7 @@ REPO_URL = "https://github.com/DustinTrap/kvm-pilot"
 # strip; ``Home`` is the wiki's reserved landing page.
 PAGES: list[tuple[str, str, str | None]] = [
     ("docs/README.md", "Home.md", None),
+    ("docs/getting-started.md", "getting-started.md", "Getting started"),
     ("docs/architecture.md", "architecture.md", "Architecture"),
     ("docs/configuration.md", "configuration.md", "Configuration"),
     ("docs/decisions.md", "decisions.md", "Design decisions"),
