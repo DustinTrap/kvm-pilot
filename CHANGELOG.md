@@ -15,6 +15,8 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   couldn't do. It also runs as a **pre-publish gate in the release workflow**
   against the exact artifact, so a broken `--pre` dependency resolution can't reach
   PyPI. No library changes in this release.
+- Updated the release-workflow guard test to allow the new `smoke-install` gate in
+  `publish.needs` (it still requires `build` + `test`).
 
 ## [0.1.0a5] — 2026-07-03
 

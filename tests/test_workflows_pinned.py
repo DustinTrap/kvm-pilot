@@ -45,10 +45,14 @@ def _release_yml() -> str:
 def test_release_publish_needs_a_test_gate():
     rel = _release_yml()
     assert "run: pytest" in rel, "release.yml must run pytest before publishing"
-    # the publish job must depend on both build and test
-    assert re.search(r"needs:\s*\[\s*build\s*,\s*test\s*\]", rel) or \
-        re.search(r"needs:\s*\[\s*test\s*,\s*build\s*\]", rel), \
-        "publish must `needs: [build, test]`"
+    # The publish job must be gated on both `build` and `test`; additional gates
+    # (e.g. the `smoke-install` pre-publish check) are allowed, so match the
+    # publish job's own `needs:` list and require build+test to be present.
+    m = re.search(r"^  publish:\n(?:.*\n)*?    needs:\s*\[([^\]]+)\]", rel, re.M)
+    assert m, "publish job must declare a `needs:` list"
+    needs = {n.strip() for n in m.group(1).split(",")}
+    assert {"build", "test"} <= needs, \
+        f"publish must gate on at least build+test; got needs={sorted(needs)}"
 
 
 def test_release_verifies_tag_matches_version():
