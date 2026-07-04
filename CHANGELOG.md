@@ -6,6 +6,21 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.0a5] — 2026-07-03
+
+### Fixed
+- **MCP server import broke on a fresh `pip install --pre kvm-pilot`** (#110). The
+  uncaught `mcp>=1.10` let `--pre` pull the `mcp` 2.x **beta** into a clean env,
+  and mcp 2.x relocated `mcp.server.fastmcp` (`FastMCP`/`Image`) — so the bundled
+  server raised `ModuleNotFoundError` out of the box. Capped `mcp>=1.10,<2` (a4's
+  editable dev/CI installs missed it because they don't pass `--pre`). Caught by a
+  clean-room install of the published wheel.
+
+### Changed
+- **Skill clarity for agents:** the bundled `SKILL.md` now enumerates the 8 MCP
+  tools explicitly (with the vision-backend and `power`-gate caveats), and its
+  front-matter description drops the stale "never validated on real hardware."
+
 ## [0.1.0a4] — 2026-07-03
 
 Batteries-included packaging: `pip install kvm-pilot` now installs the whole
@@ -423,6 +438,7 @@ user feedback. **Not validated on real hardware** — see Notes.
   feedback are the explicit goals of this alpha. Reports welcome in the issue
   tracker.
 
+[0.1.0a5]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a5
 [0.1.0a4]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a4
 [0.1.0a3]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a3
 [0.1.0a2]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a2

@@ -34,7 +34,10 @@ classifiers = [
 # The client/driver code is stdlib-only at import time; `mcp` is a base dependency
 # because the bundled MCP server ships in the wheel and must run from a plain
 # `pip install kvm-pilot` (see the batteries-included rule in CLAUDE.md, #109).
-dependencies = ["mcp>=1.10"]
+# Cap below 2.0: mcp 2.x relocated `mcp.server.fastmcp` (FastMCP/Image), which the
+# server imports. The cap also stops `pip install --pre kvm-pilot` from pulling the
+# mcp 2.x beta into a fresh env (#110).
+dependencies = ["mcp>=1.10,<2"]
 
 [project.optional-dependencies]
 totp = ["pyotp>=2.10.0"]
