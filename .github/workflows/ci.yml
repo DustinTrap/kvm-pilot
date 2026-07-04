@@ -49,6 +49,39 @@ jobs:
           path: coverage.xml
           if-no-files-found: ignore
 
+  smoke-install:
+    # Clean-room `pip install --pre` of the built wheel in a fresh venv — the exact
+    # path a user takes (kvm-pilot is a pre-release, so `--pre` is required, and it
+    # leaks pre-releases into the transitive dep resolution). The `test`/`security`
+    # jobs use editable installs *without* `--pre`, so they can't catch a dependency
+    # that only breaks under a real `--pre` resolve — e.g. #110, where `--pre` pulled
+    # the mcp 2.x beta and the bundled server failed to import out of the box.
+    # Asserts the shipped MCP server + skill + console scripts actually work.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+      - name: Build the wheel
+        run: |
+          python -m pip install --upgrade pip
+          pip wheel . --no-deps -w dist   # just the project wheel; deps resolve at install
+      - name: Install the wheel with --pre in a clean venv
+        run: |
+          python -m venv /tmp/smoke
+          # --pre allows pre-releases across the whole resolution, mirroring the user path.
+          /tmp/smoke/bin/pip install --pre dist/*.whl
+      - name: Smoke-check the shipped surfaces
+        run: |
+          /tmp/smoke/bin/python -c "import kvm_pilot.mcp.server as s; assert callable(s.main); print('OK: MCP server imports')"
+          /tmp/smoke/bin/python -c "import importlib.resources as r; p = r.files('kvm_pilot') / 'skill' / 'SKILL.md'; assert p.is_file(); print('OK: SKILL.md shipped')"
+          test -x /tmp/smoke/bin/kvm-pilot        # CLI console script
+          test -x /tmp/smoke/bin/kvm-pilot-mcp    # MCP server console script
+          /tmp/smoke/bin/kvm-pilot --version
+
   redfish-integration:
     # Validates `--driver redfish` end-to-end against an external, DMTF-conformant
     # reference emulator (sushy-tools, --fake driver). The fake backend needs no
