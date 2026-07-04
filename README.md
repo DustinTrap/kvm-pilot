@@ -86,8 +86,8 @@ pip install --pre "kvm-pilot[ws]"              # + WebSocket event streaming
 
 One install gives you the whole product: the **`kvm-pilot` CLI**, the **`kvm-pilot-mcp`
 MCP server** (for Claude Desktop / Claude Code and other agent hosts), and the
-bundled **Claude skill** — nothing to clone. The current release (`0.1.0a5`) is a
-**pre-release**, so `--pre` (or pinning `==0.1.0a5`) is required — a plain
+bundled **Claude skill** — nothing to clone. The current release (`0.1.0a6`) is a
+**pre-release**, so `--pre` (or pinning `==0.1.0a6`) is required — a plain
 `pip install kvm-pilot` deliberately picks up no alpha. The client/driver code
 imports only the standard library; the one runtime dependency is the `mcp` SDK
 (for the bundled server), and `totp`/`ws` are opt-in extras. (`0.1.0a1` is yanked
