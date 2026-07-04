@@ -27,6 +27,7 @@ client/driver code stays stdlib-only; `mcp` is imported only in this subpackage.
 | `ssh_reachable` | `readOnlyHint` | Is the **managed host's OS** reachable over SSH (in-band)? Targets the host *behind* the KVM (its own `ssh_host`), not the appliance — use it to prefer remote recovery before physical intervention |
 | `power` | `destructiveHint` | `on` / `off` / `off-hard` / `reset` — **disabled unless the operator opts in** |
 | `ssh_exec` | `destructiveHint` | Run a command on the managed host's OS over SSH — **disabled unless the operator opts in** (`KVM_PILOT_MCP_ALLOW_SSH`) |
+| `ssh_discover` | `readOnlyHint` | Scan a CIDR for open SSH — **RISKY/opt-in** (active network scan; `confirm=true` required). Only to help find a target the user can't address, on networks they own |
 
 Every tool result names the **host and driver it acted on**, and read-only
 tools always run with a deny-all confirm callback, so a bug in a read path can
