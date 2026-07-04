@@ -8,6 +8,7 @@ on every push to `main` — edit the files here, never the wiki directly).
 
 ## Start here
 
+- **New here? Drive a KVM from your agent** → [Getting started](getting-started.md)
 - **Overview, install, quickstart** → [README](https://github.com/DustinTrap/kvm-pilot/blob/main/README.md)
 - **Release history** → [CHANGELOG](https://github.com/DustinTrap/kvm-pilot/blob/main/CHANGELOG.md)
 
