@@ -61,8 +61,37 @@ jobs:
           name: dist
           path: dist/
 
+  smoke-install:
+    # Pre-publish gate: clean-room `pip install --pre` of the *exact* wheel we are
+    # about to upload, in a fresh venv, asserting the bundled MCP server + skill +
+    # console scripts work. Mirrors the CI `smoke-install` job (guards #110) but
+    # tests the built artifact, so a broken `--pre` dependency resolution can never
+    # reach PyPI. `--pre` allows pre-releases across the whole resolution, as a user
+    # installing this pre-release package hits.
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: dist
+          path: dist/
+      - name: Install the built wheel with --pre in a clean venv
+        run: |
+          python -m venv /tmp/smoke
+          /tmp/smoke/bin/pip install --pre dist/*.whl
+      - name: Smoke-check the shipped surfaces
+        run: |
+          /tmp/smoke/bin/python -c "import kvm_pilot.mcp.server as s; assert callable(s.main); print('OK: MCP server imports')"
+          /tmp/smoke/bin/python -c "import importlib.resources as r; p = r.files('kvm_pilot') / 'skill' / 'SKILL.md'; assert p.is_file(); print('OK: SKILL.md shipped')"
+          test -x /tmp/smoke/bin/kvm-pilot        # CLI console script
+          test -x /tmp/smoke/bin/kvm-pilot-mcp    # MCP server console script
+          /tmp/smoke/bin/kvm-pilot --version
+
   publish:
-    needs: [build, test]
+    needs: [build, test, smoke-install]
     runs-on: ubuntu-latest
     environment: pypi
     permissions:
