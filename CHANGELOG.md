@@ -6,6 +6,20 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.0a7] — 2026-07-04
+
+### Added — first-run onboarding + agent recovery guidance (2026-07-04, #111)
+- **`docs/getting-started.md`** — an agent-first first-run guide: install `--pre`,
+  enabling the `kvm-pilot-mcp` server in your agent (including the exit/relaunch-your-
+  session + activation-prompt steps), in-agent vs profile credentials, the
+  KVM-appliance-vs-connected-server distinction, a sample-prompt library, a "what a
+  good first run looks like" example, and a Tips & tricks section.
+- **Skill recovery guidance** (`SKILL.md`): prefer **remote recovery before physical
+  intervention** (SSH into the target OS — ask the user for its IP/host/FQDN; offer a
+  risky opt-in sweep as a fallback); how to read a black screen while `powered_on`
+  reads True on an untrusted-power device; and proactively offering tips to a
+  likely-new user.
+
 ### Added — in-band SSH-to-target channel (2026-07-04, #81)
 - **SSH to the managed host's OS** — a new per-profile channel (targets the host
   *behind* the KVM, not the appliance) so an agent can probe reachability and run
@@ -469,6 +483,7 @@ user feedback. **Not validated on real hardware** — see Notes.
   feedback are the explicit goals of this alpha. Reports welcome in the issue
   tracker.
 
+[0.1.0a7]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a7
 [0.1.0a6]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a6
 [0.1.0a5]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a5
 [0.1.0a4]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a4

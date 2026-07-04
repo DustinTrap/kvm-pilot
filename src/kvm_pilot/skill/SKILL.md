@@ -169,7 +169,7 @@ pip install --pre kvm-pilot               # CLI + this skill + the MCP server
 pip install --pre "kvm-pilot[totp]"       # add if the device has 2FA enabled
 ```
 
-It's a pre-release, so `--pre` (or pinning `==0.1.0a6`) is required — a bare
+It's a pre-release, so `--pre` (or pinning `==0.1.0a7`) is required — a bare
 `pip install kvm-pilot` deliberately picks up no alpha. A single install brings
 the `kvm-pilot` CLI, the `kvm-pilot-mcp` server, and this skill file. For the
 latest unreleased tree, install from git:
