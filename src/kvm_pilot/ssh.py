@@ -14,10 +14,12 @@ third-party SSH library. State-changing execs route through ``SafetyPolicy``
 
 from __future__ import annotations
 
+import ipaddress
 import logging
 import shutil
 import socket
 import subprocess  # nosec B404 - intentional: shells out to the system `ssh` (no SSH lib)
+from concurrent.futures import ThreadPoolExecutor
 
 from .config import HostConfig
 from .errors import CapabilityError, TimeoutError
@@ -27,6 +29,43 @@ logger = logging.getLogger("kvm_pilot.ssh")
 
 DEFAULT_SSH_PORT = 22
 _REACHABLE_TIMEOUT = 5.0  # a liveness probe should be quick, regardless of cfg.timeout
+MAX_SWEEP_HOSTS = 1024  # refuse an over-broad scan (~/22); ask for a smaller range
+
+
+def _port_open(host: str, port: int, timeout: float) -> bool:
+    """True if a TCP connection to ``host:port`` succeeds. Never raises."""
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
+
+
+def discover_ssh_hosts(
+    cidr: str,
+    *,
+    port: int = DEFAULT_SSH_PORT,
+    timeout: float = 0.5,
+    max_hosts: int = MAX_SWEEP_HOSTS,
+) -> list[dict]:
+    """Scan a CIDR for hosts with an open SSH port.
+
+    **RISKY / opt-in.** This is an active network scan — noisy, and only acceptable
+    on networks you own or are authorized to probe. Never run it by default; use it
+    only to help a user find a target whose address they don't know, after they
+    confirm the range. Returns ``[{"host", "port"}]`` for reachable hosts.
+
+    Raises ``ValueError`` for a malformed CIDR or a range larger than ``max_hosts``.
+    """
+    net = ipaddress.ip_network(cidr, strict=False)  # raises ValueError on bad input
+    hosts = list(net.hosts()) or [net.network_address]
+    if len(hosts) > max_hosts:
+        raise ValueError(
+            f"{cidr} covers {len(hosts)} addresses (> {max_hosts}); narrow the range."
+        )
+    with ThreadPoolExecutor(max_workers=min(64, len(hosts))) as pool:
+        checked = pool.map(lambda ip: (str(ip), _port_open(str(ip), port, timeout)), hosts)
+    return [{"host": h, "port": port} for h, is_open in checked if is_open]
 
 
 class SSHChannel:
@@ -89,12 +128,7 @@ class SSHChannel:
 
     def ssh_reachable(self) -> bool:
         """True if the target's SSH port accepts a TCP connection. Never raises."""
-        timeout = min(self.timeout, _REACHABLE_TIMEOUT)
-        try:
-            with socket.create_connection((self.host, self.port), timeout=timeout):
-                return True
-        except OSError:
-            return False
+        return _port_open(self.host, self.port, min(self.timeout, _REACHABLE_TIMEOUT))
 
     def ssh_exec(self, command: str, *, timeout: float | None = None) -> dict:
         """Run ``command`` on the target over SSH. Gated as ``ssh.exec``.
@@ -165,4 +199,4 @@ def _result(command, *, returncode, stdout, stderr, dry_run) -> dict:
     }
 
 
-__all__ = ["SSHChannel", "DEFAULT_SSH_PORT"]
+__all__ = ["SSHChannel", "DEFAULT_SSH_PORT", "MAX_SWEEP_HOSTS", "discover_ssh_hosts"]

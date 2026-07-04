@@ -280,6 +280,19 @@ def cmd_ssh_exec(args) -> int:
     return 0 if (result["dry_run"] or result["ok"]) else int(result["returncode"] or 1)
 
 
+def cmd_ssh_discover(args) -> int:
+    """Scan a CIDR for hosts with an open SSH port (RISKY — opt-in, your networks only)."""
+    from .ssh import discover_ssh_hosts
+
+    print(
+        f"WARNING: scanning {args.cidr} for open SSH — only do this on networks you own.",
+        file=sys.stderr,
+    )
+    found = discover_ssh_hosts(args.cidr, port=args.ssh_port)
+    print(json.dumps({"cidr": args.cidr, "port": args.ssh_port, "candidates": found}, indent=2))
+    return 0 if found else 1
+
+
 def cmd_snapshot(args) -> int:
     kvm = _rich_client(args, Capability.VIDEO)
     out = kvm.snapshot_save(args.output)
@@ -728,6 +741,12 @@ def build_parser() -> argparse.ArgumentParser:
                        help="Run a command on the managed host's OS over SSH (in-band; gated)")
     p.add_argument("command", help="The command to run on the target host")
     p.set_defaults(func=cmd_ssh_exec)
+
+    p = sub.add_parser("ssh-discover",
+                       help="Scan a CIDR for open SSH (RISKY, opt-in — your networks only)")
+    p.add_argument("cidr", help="CIDR to scan, e.g. 10.0.1.0/24")
+    p.add_argument("--ssh-port", type=int, default=22, help="SSH port to probe (default 22)")
+    p.set_defaults(func=cmd_ssh_discover)
 
     p = sub.add_parser("boot-progress", help="Structured boot phase (BMC BootProgress)")
     _add_common(p)

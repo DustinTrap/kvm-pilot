@@ -361,6 +361,29 @@ def ssh_exec(command: str, confirm: bool = False, profile: str | None = None) ->
     return {**_provenance(cfg), **ch.ssh_exec(command)}
 
 
+@mcp.tool(annotations=_READ_ONLY)
+def ssh_discover(cidr: str, confirm: bool = False, port: int = 22) -> dict:
+    """Scan a CIDR for hosts with an open SSH port. RISKY — opt-in.
+
+    An active network scan: noisy, and only acceptable on networks the user owns or
+    is authorized to probe. Use it ONLY to help find a target whose address the user
+    doesn't know, after they confirm the range — never by default. ``confirm=true``
+    is required to acknowledge the scan.
+    """
+    if not confirm:
+        raise ToolError(
+            "ssh_discover was not confirmed. A network scan is risky/noisy — only run "
+            "it on networks the user owns, after they confirm the range."
+        )
+    from kvm_pilot.ssh import discover_ssh_hosts
+
+    try:
+        candidates = discover_ssh_hosts(cidr, port=port)
+    except ValueError as exc:
+        raise ToolError(str(exc)) from exc
+    return {"cidr": cidr, "port": port, "candidates": candidates}
+
+
 def main() -> None:
     mcp.run()
 

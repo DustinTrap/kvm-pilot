@@ -20,6 +20,10 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   system `ssh`; every exec is gated via the new `ssh.exec` destructive op. Modeled
   as a `Capability.SSH` / `RemoteShell` seam, not a KVM-driver capability (see
   `docs/decisions.md`).
+- **Opt-in SSH host discovery** — CLI `ssh-discover <CIDR>` / MCP `ssh_discover`
+  scan a user-provided range for an open SSH port to help find a target whose
+  address the user doesn't know. **Risky/opt-in by design**: never a default,
+  bounded to ≤1024 hosts, prints a warning, and the MCP tool requires `confirm=true`.
 
 ## [0.1.0a6] — 2026-07-03
 

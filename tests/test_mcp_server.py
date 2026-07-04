@@ -35,6 +35,7 @@ EXPECTED_TOOLS = {
     "healthcheck",
     "ssh_reachable",
     "ssh_exec",
+    "ssh_discover",
 }
 # Tools that change state (readOnlyHint=False, destructiveHint=True).
 DESTRUCTIVE_TOOLS = {"power", "ssh_exec"}
@@ -170,6 +171,17 @@ def test_ssh_reachable_errors_when_not_configured(config_file):
     result = run_session(server_env(config_file), interact)
     assert result.isError is True
     assert "not configured" in result.content[0].text
+
+
+def test_ssh_discover_requires_confirm(config_file):
+    """A network scan is risky — it must not run without an explicit acknowledgement."""
+
+    async def interact(session):
+        return await session.call_tool("ssh_discover", {"cidr": "10.0.0.0/30"})
+
+    result = run_session(server_env(config_file), interact)
+    assert result.isError is True
+    assert "not confirmed" in result.content[0].text
 
 
 def test_dry_run_marks_results_and_skips_the_command(config_file):
