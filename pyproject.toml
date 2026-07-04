@@ -41,7 +41,7 @@ dependencies = ["mcp>=1.10,<2"]
 
 [project.optional-dependencies]
 totp = ["pyotp>=2.10.0"]
-ws = ["websocket-client>=1.7"]
+ws = ["websocket-client>=1.9.0"]
 dev = [
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
