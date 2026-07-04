@@ -14,7 +14,7 @@ Vision runs on Claude **or** any local OpenAI-compatible VLM (LM Studio, Ollama,
 vLLM, llama.cpp). Point it at a model on your own GPU and the screenshots never
 leave your network and cost nothing per frame.
 
-> **Status:** v0.1.0a2 — **early alpha.** First real-hardware runs have happened —
+> **Status:** v0.1.0a6 — **early alpha.** First real-hardware runs have happened —
 > a GL-RM1PE, with the read/`snapshot`/`healthcheck`/`logs` paths exercised live on
 > firmware V1.5.1 release2 and V1.9.1 release1 — but **most device+capability combos
 > remain unverified** (mocked HTTP/vision or emulators only), and the remote
@@ -96,6 +96,11 @@ and much older than this README — don't use it.) For the latest unreleased tre
 ```bash
 pip install "kvm-pilot[totp,ws] @ git+https://github.com/DustinTrap/kvm-pilot"
 ```
+
+**Driving a KVM from an AI agent (MCP)?** Start with the
+[Getting started guide](docs/getting-started.md) — it covers enabling the
+`kvm-pilot-mcp` server in your agent, credentials, and sample prompts. The
+Python/CLI quickstart below is for scripting.
 
 ## Quickstart
 
