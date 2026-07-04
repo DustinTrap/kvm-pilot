@@ -53,7 +53,7 @@ remote before physical**, below).
 | Mouse move/click, MSD mode switching | **Python library only** | Not in MCP or CLI. |
 | Change **host** power (on/off/cycle/reset) | **MCP `power`** (gated) or CLI `power` / `power-cycle` | Destructive — confirm each step. MCP `power` is operator-enabled + per-call approval. |
 | Reboot the **KVM appliance** / restart `kvmd` / inspect `/etc/kvmd` | **SSH to the appliance** | No kvm-pilot interface does this — out-of-band only. |
-| Run commands on / recover the **target host** once its OS is network-reachable | **SSH to the target OS** (in-band) | Prefer this over KVM keystrokes once the OS is up. Ask the user for the target's IP/host/FQDN (≠ the KVM's address). See "Recovery order" below. |
+| Check if the **target host** is reachable / run commands on it once its OS is up | **MCP `ssh_reachable` / `ssh_exec`**, or CLI `ssh-check` / `ssh-exec` (in-band) | Prefer SSH over KVM keystrokes once the OS is up. Configure the target's IP/host/FQDN via `ssh_host` (≠ the KVM's address); `ssh_exec` is gated (operator opt-in `KVM_PILOT_MCP_ALLOW_SSH`). See "Recovery order" below. |
 | View the screen when `snapshot` fails | **WebRTC/Janus stream or the vendor web UI** | The only way to see a unit that streams H.264 at its native resolution. |
 
 **Host vs. appliance — keep these straight.** The `power` tool/CLI acts on the
@@ -69,8 +69,10 @@ is black and you can't power-cycle it through the KVM (`recovery-path` is CRITIC
 Prefer remote recovery, in this order, and present the options in this order:
 1. **SSH into the target host OS** (in-band) — if its OS is on the network this is
    the fastest, most reliable lever (and far better than typing through KVM HID).
-   You must **ask the user for the target's IP / hostname / FQDN** — it's a
-   different machine from the KVM, so you cannot infer it from the KVM's address.
+   Probe with `ssh_reachable` / `ssh-check`, then act with `ssh_exec` / `ssh-exec`.
+   You must **ask the user for the target's IP / hostname / FQDN** (set it as
+   `ssh_host`) — it's a different machine from the KVM, so you cannot infer it from
+   the KVM's address.
 2. **Wake-on-LAN** — if the host is off but WoL-capable and you have its MAC.
 3. Only after remote options are exhausted, suggest **physical intervention**
    (press the power button) or **wiring the ATX cable** for future remote control.

@@ -42,6 +42,7 @@ from mcp.types import ToolAnnotations
 from kvm_pilot import resolve_host
 from kvm_pilot.config import HostConfig
 from kvm_pilot.drivers import Capability, KVMDriver, make_driver_from_config
+from kvm_pilot.errors import CapabilityError
 from kvm_pilot.safety import allow_all, deny_all
 from kvm_pilot.vision import ScreenAnalyzer, VisionBackend, make_backend
 
@@ -309,6 +310,55 @@ def power(
                 f"host '{cfg.host}' ({cfg.driver})"
             )
         return f"power {action}: requested on host '{cfg.host}' ({cfg.driver})"
+
+
+@mcp.tool(annotations=_READ_ONLY)
+def ssh_reachable(profile: str | None = None) -> dict:
+    """Is the managed host's OS reachable over SSH? (read-only, in-band).
+
+    Targets the host *behind* the KVM (its own ``ssh_host`` / `KVM_PILOT_SSH_HOST`),
+    a different machine from the KVM appliance. Use this to prefer remote recovery
+    before asking a user to physically intervene.
+    """
+    cfg = resolve_host(profile or os.environ.get("KVM_PILOT_PROFILE"))
+    from kvm_pilot.ssh import SSHChannel
+
+    try:
+        ch = SSHChannel.from_config(cfg)
+    except CapabilityError as exc:
+        raise ToolError(str(exc)) from exc
+    return {
+        **_provenance(cfg),
+        "target": ch.target,
+        "port": ch.port,
+        "reachable": ch.ssh_reachable(),
+    }
+
+
+@mcp.tool(annotations=_DESTRUCTIVE)
+def ssh_exec(command: str, confirm: bool = False, profile: str | None = None) -> dict:
+    """Run a command on the managed host's OS over SSH. DESTRUCTIVE / in-band.
+
+    Disabled unless the server operator set `KVM_PILOT_MCP_ALLOW_SSH` in the
+    server's own environment. ``confirm=true`` is required as a second factor.
+    """
+    if not _env_flag("KVM_PILOT_MCP_ALLOW_SSH"):
+        raise ToolError(
+            "ssh_exec is disabled on this server. Only the human operator can enable "
+            "it, by setting the SSH-enable environment variable (documented in the "
+            "server's README.md) in the MCP server's own environment before starting "
+            "it. It cannot be enabled from within an agent session."
+        )
+    if not confirm:
+        raise ToolError("ssh_exec was not confirmed")
+    cfg = resolve_host(profile or os.environ.get("KVM_PILOT_PROFILE"))
+    from kvm_pilot.ssh import SSHChannel
+
+    try:
+        ch = SSHChannel.from_config(cfg, confirm=allow_all, dry_run=_dry_run())
+    except CapabilityError as exc:
+        raise ToolError(str(exc)) from exc
+    return {**_provenance(cfg), **ch.ssh_exec(command)}
 
 
 def main() -> None:
