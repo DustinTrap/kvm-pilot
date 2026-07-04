@@ -41,6 +41,10 @@ class Capability(StrEnum):
     SERIAL_CONSOLE = "serial_console"
     WATCHDOG = "watchdog"
     FIRMWARE_UPDATE = "firmware_update"
+    # In-band control of the managed HOST's OS over SSH (the machine behind the
+    # KVM, not the KVM appliance). A per-profile channel, not something a KVM
+    # driver implements — see src/kvm_pilot/ssh.py and RemoteShell below.
+    SSH = "ssh"
 
 
 @runtime_checkable
@@ -166,6 +170,21 @@ class SerialConsole(Protocol):
 
 
 @runtime_checkable
+class RemoteShell(Protocol):
+    """In-band control of the managed HOST's OS over SSH — reachability plus
+    command execution, once the target OS is on the network.
+
+    This targets the host *behind* the KVM, not the KVM appliance, and is a
+    per-profile channel (built from the profile's ``ssh_*`` config) rather than a
+    KVM-driver capability. ``ssh_reachable`` is a read-only probe; ``ssh_exec``
+    can change the target's state and MUST route through
+    ``safety.guard("ssh.exec", …)``. See ``src/kvm_pilot/ssh.py``."""
+
+    def ssh_reachable(self) -> bool: ...
+    def ssh_exec(self, command: str, *, timeout: float | None = None) -> dict: ...
+
+
+@runtime_checkable
 class Watchdog(Protocol):
     """Arm / pet / inspect a hardware watchdog timer (IPMI) — an OS-liveness
     primitive whose expiry pinpoints a hang."""
@@ -209,6 +228,7 @@ CAPABILITY_PROTOCOLS: dict[Capability, type] = {
     Capability.SERIAL_CONSOLE: SerialConsole,
     Capability.WATCHDOG: Watchdog,
     Capability.FIRMWARE_UPDATE: FirmwareUpdate,
+    Capability.SSH: RemoteShell,
 }
 
 
@@ -295,6 +315,7 @@ __all__ = [
     "SerialConsole",
     "Watchdog",
     "FirmwareUpdate",
+    "RemoteShell",
     "KVMDriver",
     "CapabilityMixin",
     "PowerMixin",

@@ -33,7 +33,11 @@ EXPECTED_TOOLS = {
     "classify_screen",
     "power",
     "healthcheck",
+    "ssh_reachable",
+    "ssh_exec",
 }
+# Tools that change state (readOnlyHint=False, destructiveHint=True).
+DESTRUCTIVE_TOOLS = {"power", "ssh_exec"}
 
 
 @pytest.fixture()
@@ -89,11 +93,12 @@ def test_handshake_lists_annotated_tools(config_file):
     tools = run_session(server_env(config_file), interact)
     by_name = {t.name: t for t in tools}
     assert set(by_name) == EXPECTED_TOOLS
-    for name in EXPECTED_TOOLS - {"power"}:
+    for name in EXPECTED_TOOLS - DESTRUCTIVE_TOOLS:
         assert by_name[name].annotations.readOnlyHint is True, name
-    power = by_name["power"].annotations
-    assert power.readOnlyHint is False
-    assert power.destructiveHint is True
+    for name in DESTRUCTIVE_TOOLS:
+        ann = by_name[name].annotations
+        assert ann.readOnlyHint is False, name
+        assert ann.destructiveHint is True, name
 
 
 def test_healthcheck_tool_returns_report(config_file):
@@ -141,6 +146,30 @@ def test_power_executes_on_fake_driver_when_fully_gated(config_file):
     text = result.content[0].text
     assert "requested on host 'fakebox.local' (fake)" in text
     assert "DRY-RUN" not in text
+
+
+def test_ssh_exec_errors_without_operator_gate(config_file):
+    """The env gate is the floor, checked before anything else (mirrors power)."""
+
+    async def interact(session):
+        return await session.call_tool("ssh_exec", {"command": "reboot", "confirm": True})
+
+    result = run_session(server_env(config_file), interact)
+    assert result.isError is True
+    text = result.content[0].text
+    assert "operator" in text
+    assert "KVM_PILOT_MCP_ALLOW_SSH" not in text  # no copy-pasteable incantation
+
+
+def test_ssh_reachable_errors_when_not_configured(config_file):
+    """The fake profile has no ssh_host — SSH-to-target must not be inferred."""
+
+    async def interact(session):
+        return await session.call_tool("ssh_reachable", {})
+
+    result = run_session(server_env(config_file), interact)
+    assert result.isError is True
+    assert "not configured" in result.content[0].text
 
 
 def test_dry_run_marks_results_and_skips_the_command(config_file):

@@ -79,9 +79,9 @@ def _resolve_secret(direct, file_path, ask: bool, prompt: str) -> str | None:
     return None
 
 
-def _build_client(args) -> AnyDriver:
-    confirm = allow_all if getattr(args, "yes", False) else interactive_confirm
-    dry_run = getattr(args, "dry_run", False)
+def _resolve_cfg(args):
+    """Resolve a HostConfig from CLI args (no driver built). Shared by the driver
+    path and the SSH-channel commands, which target the OS, not the KVM."""
     passwd = _resolve_secret(
         getattr(args, "passwd", None), getattr(args, "passwd_file", None),
         getattr(args, "ask_passwd", False), "Password: ",
@@ -90,7 +90,7 @@ def _build_client(args) -> AnyDriver:
         getattr(args, "totp_secret", None), getattr(args, "totp_secret_file", None),
         False, "",
     )
-    cfg = resolve_host(
+    return resolve_host(
         getattr(args, "profile", None),
         host=getattr(args, "host", None),
         user=getattr(args, "user", None),
@@ -104,6 +104,12 @@ def _build_client(args) -> AnyDriver:
         driver=getattr(args, "driver", None),
         redfish_auth=getattr(args, "redfish_auth", None),
     )
+
+
+def _build_client(args) -> AnyDriver:
+    confirm = allow_all if getattr(args, "yes", False) else interactive_confirm
+    dry_run = getattr(args, "dry_run", False)
+    cfg = _resolve_cfg(args)
     # Shared with the MCP server so cfg.driver is honored the same way everywhere.
     kvm = make_driver_from_config(cfg, confirm=confirm, dry_run=dry_run)
     # Stash it so main() can close() it on the way out — a RedfishDriver holds a
@@ -249,6 +255,29 @@ def cmd_boot_progress(args) -> int:
     # None = the device can't report yet (e.g. powered off with no BootProgress).
     print(phase if phase is not None else "unknown")
     return 0
+
+
+def cmd_ssh_check(args) -> int:
+    """Probe whether the managed host's OS is reachable over SSH (read-only)."""
+    from .ssh import SSHChannel
+
+    ch = SSHChannel.from_config(_resolve_cfg(args))  # CapabilityError if not configured
+    reachable = ch.ssh_reachable()
+    print(json.dumps({"target": ch.target, "port": ch.port, "reachable": reachable}, indent=2))
+    return 0 if reachable else 1
+
+
+def cmd_ssh_exec(args) -> int:
+    """Run a command on the managed host's OS over SSH (destructive — gated)."""
+    from .ssh import SSHChannel
+
+    confirm = allow_all if getattr(args, "yes", False) else interactive_confirm
+    ch = SSHChannel.from_config(
+        _resolve_cfg(args), confirm=confirm, dry_run=getattr(args, "dry_run", False)
+    )
+    result = ch.ssh_exec(args.command)
+    print(json.dumps(result, indent=2, default=str))
+    return 0 if (result["dry_run"] or result["ok"]) else int(result["returncode"] or 1)
 
 
 def cmd_snapshot(args) -> int:
@@ -690,6 +719,15 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Seconds of lookback (0 = everything available)")
     _add_common(p)
     p.set_defaults(func=cmd_logs)
+
+    p = sub.add_parser("ssh-check",
+                       help="Is the managed host's OS reachable over SSH? (read-only)")
+    p.set_defaults(func=cmd_ssh_check)
+
+    p = sub.add_parser("ssh-exec",
+                       help="Run a command on the managed host's OS over SSH (in-band; gated)")
+    p.add_argument("command", help="The command to run on the target host")
+    p.set_defaults(func=cmd_ssh_exec)
 
     p = sub.add_parser("boot-progress", help="Structured boot phase (BMC BootProgress)")
     _add_common(p)

@@ -63,6 +63,10 @@ Every key `resolve_host()` reads, with its default:
 | `totp_secret` | `KVM_PILOT_TOTP_SECRET` | unset | Base32 secret for 2FA; needs the `totp` extra. |
 | `driver` | `KVM_PILOT_DRIVER` | `pikvm` | `pikvm` \| `glkvm` \| `blikvm` \| `fake` \| `redfish`; the CLI `--driver` flag overrides. |
 | `redfish_auth` | `KVM_PILOT_REDFISH_AUTH` | `session` | Redfish driver only: `session` or `basic` (for BMCs/emulators without a SessionService). Ignored by the PiKVM family. |
+| `ssh_host` | `KVM_PILOT_SSH_HOST` | unset | The **managed host's own** IP/hostname (a *different* machine from the KVM) for the in-band SSH channel (`ssh-check`/`ssh-exec`, MCP `ssh_reachable`/`ssh_exec`). Unset = SSH-to-target disabled. |
+| `ssh_user` | `KVM_PILOT_SSH_USER` | unset | SSH login on the target host. |
+| `ssh_port` | `KVM_PILOT_SSH_PORT` | `22` | SSH port on the target host. |
+| `ssh_key` | `KVM_PILOT_SSH_KEY` | unset | Private-key path for the target SSH login; omit to use the agent's SSH config / default keys. Auth is key-based (no password). |
 
 Naming a `--profile` that doesn't exist in the file is an error (`KeyError`),
 not a silent fallback.

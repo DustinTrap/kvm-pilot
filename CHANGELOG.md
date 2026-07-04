@@ -6,6 +6,21 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added — in-band SSH-to-target channel (2026-07-04, #81)
+- **SSH to the managed host's OS** — a new per-profile channel (targets the host
+  *behind* the KVM, not the appliance) so an agent can probe reachability and run
+  recovery commands once the target OS is on the network, and prefer remote
+  recovery over asking a user to physically intervene (surfaced by the #111
+  first-run experience). CLI `ssh-check` (read-only) / `ssh-exec` (destructive,
+  gated); MCP `ssh_reachable` (read-only) / `ssh_exec` (destructive, disabled
+  unless the operator sets `KVM_PILOT_MCP_ALLOW_SSH`).
+- Config: `ssh_host` / `ssh_user` / `ssh_port` / `ssh_key` profile keys +
+  `KVM_PILOT_SSH_*` env (separate from the KVM appliance creds). Zero new
+  dependencies — reachability is a stdlib `socket` probe, exec shells out to the
+  system `ssh`; every exec is gated via the new `ssh.exec` destructive op. Modeled
+  as a `Capability.SSH` / `RemoteShell` seam, not a KVM-driver capability (see
+  `docs/decisions.md`).
+
 ## [0.1.0a6] — 2026-07-03
 
 ### Changed
