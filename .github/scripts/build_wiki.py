@@ -39,6 +39,7 @@ PAGES: list[tuple[str, str, str | None]] = [
     ("docs/architecture.md", "architecture.md", "Architecture"),
     ("docs/configuration.md", "configuration.md", "Configuration"),
     ("docs/decisions.md", "decisions.md", "Design decisions"),
+    ("docs/reflexes.md", "reflexes.md", "Reflexes (RFC)"),
     ("docs/redfish.md", "redfish.md", "Redfish reference"),
     ("src/kvm_pilot/skill/SKILL.md", "skill.md", "Claude skill"),
     ("src/kvm_pilot/mcp/README.md", "mcp-server.md", "MCP server"),

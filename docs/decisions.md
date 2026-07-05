@@ -312,6 +312,47 @@ path downscales to ~1/5 resolution (which would break OCR/vision) — there is n
 full-resolution re-encode-at-quality endpoint. The parameter was a no-op lie;
 deleted rather than deprecated while the API is alpha.
 
+## Orchestration — "Reflexes" edge-autonomy release (planned)
+
+These two records are **forward-looking**: the feature (an on-demand playbook
+runner over `ScreenAnalyzer`) is not yet in the code. They are recorded here now,
+per the "capture it so it isn't re-litigated" rule, ahead of the build. Builds on
+the sensing-hierarchy efficiency roadmap ([#13](https://github.com/DustinTrap/kvm-pilot/issues/13));
+full design in the [Reflexes epic #117](https://github.com/DustinTrap/kvm-pilot/issues/117)
+and the [Reflexes RFC](reflexes.md).
+
+### Playbooks are Ansible-*style* YAML on our own runner, not Ansible-the-engine
+Playbooks read like Ansible tasks (named steps, `wait_for`, `when`/`register`)
+because that YAML is what humans find easiest to author, read, and enhance — but
+they are executed by a small stdlib runner, **not** by `ansible-playbook`.
+Adopting Ansible-the-engine was rejected: it fights the stdlib-only-core +
+`pip`-ships-everything thesis (it becomes a heavy shell-out extra, not
+"included"); its execution model *converges idempotent tasks to a desired state*,
+which does not model our **reactive** watch → act → **escalate-to-agent-on-unknown**
+loop; and its host/connection model is wrong for a managed host that has **no
+agent** and is driven through the KVM's REST API (everything would be
+`connection: local`). The same step model also loads from JSON (stdlib) for the
+agent-emitted path — one internal model, two loaders. YAML pulls in **PyYAML as a
+base dependency** (a user-facing surface, so base not an extra, per the
+batteries-included rule); the core library import stays stdlib via a lazy import.
+A real, opt-in Ansible collection may still come later as an ecosystem
+integration — it is just not the core format.
+
+### Destructive playbook steps: pre-authorize the whole run, then verify each precondition
+A playbook may contain destructive steps (power, reset, virtual media). To run
+unattended without a per-step human round-trip *and* honor the invariant that "a
+vision classification must never trigger a destructive action on its own", the
+operator **pre-authorizes the whole run** (a run-scoped allow-list), moving the
+safety decision to authoring/launch time — the classifier still never
+*authorizes*, the human did, in advance. Pre-authorization is deliberately **not
+blanket**: before firing each destructive step the runner re-verifies, via the
+cheap sensing gates, that the device is actually in that step's expected
+`precondition` phase. A precondition mismatch does **not** fire the step — it
+escalates. This is what stops a surprise state from triggering the wrong
+destructive action, which is exactly the risk the invariant guards against. All
+destructive steps keep their `DESTRUCTIVE_OPS` / `safety.guard()` routing, and the
+health preflight gate still runs before the run.
+
 ## Process
 
 Most structural choices came from adversarial review passes (find → verify →

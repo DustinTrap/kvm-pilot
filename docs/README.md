@@ -17,6 +17,7 @@ on every push to `main` — edit the files here, never the wiki directly).
 - [Architecture](architecture.md) — the driver-plugin design, capability protocols, and diagrams.
 - [Configuration](configuration.md) — the config file, every `KVM_PILOT_*` env var, and precedence.
 - [Design decisions](decisions.md) — the "looks wrong but is intentional" record, newest first.
+- [Reflexes (RFC)](reflexes.md) — the post-GA edge-autonomy playbook runner: act locally on known steps, escalate surprises to the agent ([#117](https://github.com/DustinTrap/kvm-pilot/issues/117)).
 - [Redfish reference](redfish.md) — the BMC driver: hypermedia navigation, auth, and firmware quirks.
 - [Firmware registry](firmware-registry.md) — the firmware-currency check, the community registry data model, and the GitHub-based single-source-of-truth + ingestion design (#80 follow-up).
 - [Remote firmware update](firmware-update.md) — the GL `/api/upgrade/*` surface, the reliability/risk model, and the gated `firmware-update` command (#92).
