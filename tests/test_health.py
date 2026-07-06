@@ -8,7 +8,7 @@ import pytest
 
 from emulator import EmulatorServer
 from kvm_pilot.drivers.fake import FakeDriver
-from kvm_pilot.drivers.pikvm import GLKVMDriver
+from kvm_pilot.drivers.glkvm import GLKVMDriver
 from kvm_pilot.health import (
     CheckResult,
     HealthCache,
@@ -351,6 +351,41 @@ def test_recovery_path_critical_over_transport_when_atx_disabled(emu):
     rec = next(r for r in rep.results if r.id == "recovery-path")
     assert rec.severity is Severity.CRITICAL
     assert rep.worst is Severity.CRITICAL
+
+
+# ---- wrong-driver fingerprint (#145) -------------------------------------- #
+
+
+def _base_pikvm(emu):
+    from kvm_pilot.client import PiKVMDriver
+
+    d = PiKVMDriver("127.0.0.1", "admin", "s3cr3t", port=emu.port, scheme="http")
+    d._http._backoff_base = 0.0
+    return d
+
+
+def test_driver_identity_warns_when_pikvm_profile_hits_gl_device(emu):
+    # GL firmware self-reports as a stock rpi PiKVM (#126), so the healthcheck
+    # probes GL's proprietary /api/upgrade/version to catch a wrong profile.
+    from kvm_pilot.health import check_driver_identity
+
+    emu.state.upgrade_present = True
+    res = check_driver_identity(_base_pikvm(emu))
+    assert res is not None and res.severity is Severity.WARNING
+    assert 'driver = "glkvm"' in res.remediation
+
+
+def test_driver_identity_silent_on_stock_pikvm(emu):
+    from kvm_pilot.health import check_driver_identity
+
+    assert check_driver_identity(_base_pikvm(emu)) is None  # 404 = stock answer
+
+
+def test_driver_identity_skips_fork_drivers(emu):
+    from kvm_pilot.health import check_driver_identity
+
+    emu.state.upgrade_present = True
+    assert check_driver_identity(gl(emu)) is None  # glkvm already knows who it is
 
 
 # ---- first-connection audit (issue #80) ---------------------------------- #
