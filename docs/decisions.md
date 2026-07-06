@@ -353,6 +353,29 @@ destructive action, which is exactly the risk the invariant guards against. All
 destructive steps keep their `DESTRUCTIVE_OPS` / `safety.guard()` routing, and the
 health preflight gate still runs before the run.
 
+### MCP act tools: classify by effect, gate by effect, approve per invocation (#61)
+The MCP act tools (`type_text`/`press_key`/`send_shortcut`/`ctrl_alt_delete`) are
+authorized by an **effect class** (`EffectClass` in `safety.py`), not by tool name
+or transport. The class layer is **additive over `DESTRUCTIVE_OPS`** — the set and
+`SafetyPolicy.guard` are unchanged, so the driver stays stdlib-only and the client
+transport guard is untouched; `OP_EFFECT`/`effect_of`/`shortcut_effect` are a
+read-only lookup consumed only by the MCP layer (`mcp/act.py`).
+- **Ctrl+Alt+Del is `power_soft`, not HID.** It is a reboot delivered over the
+  keyboard, so it is gated by `KVM_PILOT_MCP_ALLOW_POWER`, and `send_shortcut`
+  computes its class from the chord (CAD, Magic SysRq `b`/`o`) so a reboot can't
+  slip through the weaker HID gate by choosing a different actuator. The result
+  records **both** transport and effect for the same reason.
+- **Two guarantees, two postures.** (a) *allowed* — operator env flag per effect +
+  a fail-closed `KVM_PILOT_MCP_PROFILES` allowlist; (b) *approved at run time* —
+  MCP elicitation when the client supports it (*interactive*), else an explicit
+  `confirm=true` under a standing policy (*pre-authorized*). The pre-authorized
+  posture is **intentional, not a fallback hack**: an unattended install loop has
+  no human to answer an elicitation, so forcing elicitation-only would break the
+  product's headline use case. Denials return through the same call path
+  (`approved:false` + reason) so the agent recovers instead of hanging.
+- **Deferred to #72:** the signed/expiring consent receipt. The MVP result already
+  carries a stable `invocation_id` + effect class so that layer can build on it.
+
 ## Process
 
 Most structural choices came from adversarial review passes (find → verify →

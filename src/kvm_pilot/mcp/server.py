@@ -11,11 +11,16 @@ SAFETY MODEL (see the co-located README.md for the operator-facing version):
   * The read-only tools (``info``, ``healthcheck``, ``capabilities``,
     ``power_state``, ``logs``, ``snapshot``, ``classify_screen``) run with a
     deny-all confirm callback and carry a ``readOnlyHint`` tool annotation.
-  * The one destructive tool (``power``) carries ``destructiveHint`` and is
-    DISABLED until the human operator sets ``KVM_PILOT_MCP_ALLOW_POWER`` in the
-    server's own environment. The model-supplied ``confirm`` flag is only a
-    second factor, NOT human approval — MCP hosts should additionally require
-    per-call human approval for this tool. Annotations are hints, never a
+  * The destructive tools (``power`` and the HID act tools ``type_text`` /
+    ``press_key`` / ``send_shortcut`` / ``ctrl_alt_delete``) carry
+    ``destructiveHint`` and are DISABLED until the operator opts the tool's
+    *effect class* in via an env flag in the server's own environment
+    (``KVM_PILOT_MCP_ALLOW_POWER`` / ``KVM_PILOT_MCP_ALLOW_HID``). On top of that
+    each act call requires per-invocation approval — a human MCP elicitation when
+    the client supports it, else an explicit ``confirm=true`` under the operator's
+    standing policy. Tools are classified by effect not transport, so a reboot
+    (``ctrl_alt_delete``, a Ctrl+Alt+Del chord) needs the power gate, not the HID
+    gate. See ``act.py`` and the co-located README. Annotations are hints, never a
     security boundary.
   * ``KVM_PILOT_MCP_DRY_RUN=1`` builds every driver with ``dry_run=True``:
     destructive calls are logged and skipped, and results say so.
@@ -35,7 +40,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Literal, cast
 
-from mcp.server.fastmcp import FastMCP, Image
+from mcp.server.fastmcp import Context, FastMCP, Image
 from mcp.server.fastmcp.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
@@ -43,14 +48,15 @@ from kvm_pilot import resolve_host
 from kvm_pilot.config import HostConfig
 from kvm_pilot.drivers import Capability, KVMDriver, make_driver_from_config
 from kvm_pilot.errors import CapabilityError
-from kvm_pilot.safety import allow_all, deny_all
+from kvm_pilot.mcp import act
+from kvm_pilot.safety import EffectClass, allow_all, deny_all, shortcut_effect
 from kvm_pilot.vision import ScreenAnalyzer, VisionBackend, make_backend
 
 if TYPE_CHECKING:
     # ``_driver(capability=…)`` guarantees the driver supports the capability at
     # runtime; narrow to the owning protocol for the capability-specific calls
     # (mirrors the ``cast`` pattern in cli.py).
-    from kvm_pilot.drivers.base import Logs, Power, SystemInfo, Video
+    from kvm_pilot.drivers.base import HID, Logs, Power, SystemInfo, Video
 
 mcp = FastMCP("kvm-pilot")
 _log = logging.getLogger("kvm_pilot.mcp")
@@ -66,8 +72,8 @@ _POWER_ACTIONS = {
 }
 
 
-def _env_flag(name: str) -> bool:
-    return os.environ.get(name, "").strip().lower() in ("1", "true", "yes")
+# Single source of truth for the operator env flags (shared with the act layer).
+_env_flag = act.env_flag
 
 
 def _dry_run() -> bool:
@@ -95,6 +101,7 @@ def _driver(
     tool) fails closed on an unacknowledged CRITICAL. ``preflight=False`` skips it
     for structural, offline tools that never touch the network.
     """
+    act.enforce_allowlist(profile)  # fail-closed KVM_PILOT_MCP_PROFILES; raises ToolError
     cfg = resolve_host(profile or os.environ.get("KVM_PILOT_PROFILE"))
     kvm = make_driver_from_config(cfg, confirm=confirm, dry_run=_dry_run())
     try:
@@ -310,6 +317,114 @@ def power(
                 f"host '{cfg.host}' ({cfg.driver})"
             )
         return f"power {action}: requested on host '{cfg.host}' ({cfg.driver})"
+
+
+# -- HID act tools (issue #61): see act.py for the two-guarantee model --------
+
+
+async def _act(
+    ctx: Context,
+    profile: str | None,
+    *,
+    tool: str,
+    effect: EffectClass,
+    op: str,
+    transport: str,
+    args: dict,
+    confirm: bool,
+    run: Callable[[KVMDriver], None],
+    detail: str,
+    capability: Capability = Capability.HID,
+) -> dict:
+    """Shared act-tool flow (#61): resolve+gate the driver, run the two-guarantee
+    approval, execute on approval, and return the receipt. Denials come back
+    through the same path (a result with ``approved=False`` + a reason), never a
+    raised error, so the agent can recover. Dry-run is handled by the driver's own
+    SafetyPolicy, so ``run`` becomes a no-op and the receipt still records intent.
+    """
+    with _driver(profile, confirm=allow_all, capability=capability) as (cfg, kvm):
+        inv = act.new_invocation(
+            host=cfg.host, profile=profile, tool=tool, effect=effect, op=op,
+            transport=transport, args=args, dry_run=_dry_run(),
+        )
+        approval = await act.approve_or_deny(ctx, inv, confirm=confirm)
+        if not approval.approved:
+            return {**_provenance(cfg), **act.result(inv, approval)}
+        run(kvm)
+        return {**_provenance(cfg), **act.result(inv, approval, detail=detail)}
+
+
+@mcp.tool(annotations=_DESTRUCTIVE)
+async def type_text(
+    ctx: Context, text: str, confirm: bool = False, profile: str | None = None
+) -> dict:
+    """Type ``text`` on the managed host's console over the HID keyboard. DESTRUCTIVE.
+
+    Requires the operator to enable HID (``KVM_PILOT_MCP_ALLOW_HID``) *and* a
+    per-invocation approval — a human elicitation when the client supports it, else
+    an explicit ``confirm=true`` under the operator's standing policy.
+    """
+    return await _act(
+        ctx, profile, tool="type_text", effect=EffectClass.HID_INPUT, op="hid.type_text",
+        transport="hid.keyboard", args={"text": text}, confirm=confirm,
+        run=lambda kvm: cast("HID", kvm).type_text(text),
+        detail=f"typed {len(text)} character(s)",
+    )
+
+
+@mcp.tool(annotations=_DESTRUCTIVE)
+async def press_key(
+    ctx: Context, key: str, confirm: bool = False, profile: str | None = None
+) -> dict:
+    """Press a single key (a kvmd key code, e.g. ``Enter``/``Escape``/``F2``). DESTRUCTIVE.
+
+    Same gating as ``type_text`` (HID input): ``KVM_PILOT_MCP_ALLOW_HID`` + approval.
+    """
+    return await _act(
+        ctx, profile, tool="press_key", effect=EffectClass.HID_INPUT, op="hid.press_key",
+        transport="hid.keyboard", args={"key": key}, confirm=confirm,
+        run=lambda kvm: cast("HID", kvm).press_key(key),
+        detail=f"pressed {key!r}",
+    )
+
+
+@mcp.tool(annotations=_DESTRUCTIVE)
+async def send_shortcut(
+    ctx: Context, keys: str, confirm: bool = False, profile: str | None = None
+) -> dict:
+    """Send a key chord — comma-separated kvmd key codes, e.g.
+    ``ControlLeft,AltLeft,Delete`` or ``ControlLeft,AltLeft,F2``. DESTRUCTIVE.
+
+    Gated by **effect**, not transport: a reboot/power chord (Ctrl+Alt+Del, Magic
+    SysRq) is classified ``power_soft``/``power_hard`` and needs
+    ``KVM_PILOT_MCP_ALLOW_POWER``; an ordinary session chord is ``hid_control`` and
+    needs ``KVM_PILOT_MCP_ALLOW_HID`` — so a reboot can't slip through the HID gate.
+    """
+    effect = shortcut_effect(keys)
+    return await _act(
+        ctx, profile, tool="send_shortcut", effect=effect, op="hid.send_shortcut",
+        transport="hid.shortcut", args={"keys": keys}, confirm=confirm,
+        run=lambda kvm: cast("HID", kvm).send_shortcut(keys),
+        detail=f"sent shortcut {keys!r}",
+    )
+
+
+@mcp.tool(annotations=_DESTRUCTIVE)
+async def ctrl_alt_delete(
+    ctx: Context, confirm: bool = False, profile: str | None = None
+) -> dict:
+    """Send Ctrl+Alt+Del to the managed host. DESTRUCTIVE.
+
+    A reboot delivered over the keyboard — classified ``power_soft``, so it needs
+    ``KVM_PILOT_MCP_ALLOW_POWER`` (the same gate as the ``power`` tool), never the
+    weaker HID gate.
+    """
+    return await _act(
+        ctx, profile, tool="ctrl_alt_delete", effect=EffectClass.POWER_SOFT,
+        op="hid.send_shortcut", transport="hid.keyboard", args={}, confirm=confirm,
+        run=lambda kvm: cast("HID", kvm).send_shortcut("ControlLeft,AltLeft,Delete"),
+        detail="sent Ctrl+Alt+Del",
+    )
 
 
 @mcp.tool(annotations=_READ_ONLY)

@@ -25,7 +25,11 @@ client/driver code stays stdlib-only; `mcp` is imported only in this subpackage.
 | `snapshot` | `readOnlyHint` | Current screen, returned as a real JPEG **image** content block the model can see |
 | `classify_screen` | `readOnlyHint` | Boot/run phase via the vision backend (Anthropic or a local VLM, see below) |
 | `ssh_reachable` | `readOnlyHint` | Is the **managed host's OS** reachable over SSH (in-band)? Targets the host *behind* the KVM (its own `ssh_host`), not the appliance — use it to prefer remote recovery before physical intervention |
-| `power` | `destructiveHint` | `on` / `off` / `off-hard` / `reset` — **disabled unless the operator opts in** |
+| `power` | `destructiveHint` | `on` / `off` / `off-hard` / `reset` — **disabled unless the operator opts in** (`KVM_PILOT_MCP_ALLOW_POWER`) |
+| `type_text` | `destructiveHint` | Type text on the host console (HID keyboard) — needs `KVM_PILOT_MCP_ALLOW_HID` + per-invocation approval |
+| `press_key` | `destructiveHint` | Press one key (e.g. `Enter`, `F2`) — needs `KVM_PILOT_MCP_ALLOW_HID` + approval |
+| `send_shortcut` | `destructiveHint` | Send a key chord (e.g. `ControlLeft,AltLeft,F2`). Gated **by effect**: a reboot/power chord (Ctrl+Alt+Del, Magic SysRq) needs `ALLOW_POWER`; an ordinary session chord needs `ALLOW_HID` |
+| `ctrl_alt_delete` | `destructiveHint` | Send Ctrl+Alt+Del (a reboot) — classified `power_soft`, so it needs `KVM_PILOT_MCP_ALLOW_POWER`, not the HID gate |
 | `ssh_exec` | `destructiveHint` | Run a command on the managed host's OS over SSH — **disabled unless the operator opts in** (`KVM_PILOT_MCP_ALLOW_SSH`) |
 | `ssh_discover` | `readOnlyHint` | Scan a CIDR for open SSH — **RISKY/opt-in** (active network scan; `confirm=true` required). Only to help find a target the user can't address, on networks they own |
 
@@ -34,6 +38,27 @@ tools always run with a deny-all confirm callback, so a bug in a read path can
 never trip a destructive operation. Drivers are built per call and closed
 afterwards — important for Redfish BMCs, which cap concurrent sessions
 device-side (a leaked session can lock operators out of the BMC).
+
+### Act tools: two guarantees per call (issue #61)
+
+The act tools (`type_text`, `press_key`, `send_shortcut`, `ctrl_alt_delete`)
+require **two** things, not one:
+
+1. **Allowed** — the operator enabled the tool's *effect class* via an env flag in
+   the server's own environment, and the target profile is on `KVM_PILOT_MCP_PROFILES`
+   (if set). Tools are classified by **effect, not transport**: `ctrl_alt_delete`
+   and a Ctrl+Alt+Del / Magic-SysRq chord are reboots, so they need
+   `KVM_PILOT_MCP_ALLOW_POWER` — an agent can't reboot the box through the weaker
+   HID gate by picking a different actuator.
+2. **Approved at run time** — a per-invocation human approval via MCP **elicitation**
+   when the client supports it (*interactive* posture); otherwise an explicit
+   `confirm=true` under the operator's standing policy (*pre-authorized* posture —
+   what an unattended install loop uses, since no human is present to answer).
+
+Denials (gate closed, declined/cancelled, not confirmed, invalidated mid-approval)
+come back as a normal result with `approved: false` and a reason — the agent can
+re-plan, never left hanging. Each result carries a stable `invocation_id` and both
+`transport` and `effect` (the signed/expiring audit receipt is a later step, #72).
 
 ### Which tools work with which driver
 
@@ -51,8 +76,8 @@ the driver kind and the missing capability (it never `AttributeError`s).
 The MCP surface is deliberately small. For anything outside the table, pick the
 right interface (the skill's *Choosing an interface* matrix is the full guide):
 
-- **`firmware-check`/`firmware-update`, `events`, `watch`, `type`/`key`,
-  `mount`/`eject`** → the **CLI** (`kvm-pilot <cmd>`); no MCP tool.
+- **`firmware-check`/`firmware-update`, `events`, `watch`, `mount`/`eject`** →
+  the **CLI** (`kvm-pilot <cmd>`); no MCP tool.
 - **Mouse move/click, MSD mode switching** → the **Python library**.
 - **Reboot the KVM appliance / restart `kvmd`** → **out-of-band SSH** to the
   appliance. No kvm-pilot interface reboots the box; `power` acts on the
@@ -123,8 +148,11 @@ kvm-pilot-mcp                    # start the stdio server (or: python -m kvm_pil
 | `KVM_PILOT_PROFILE` | Default profile from `~/.config/kvm-pilot/config.toml` |
 | `KVM_PILOT_HOST` / `KVM_PILOT_USER` / `KVM_PILOT_PASSWD` / … | Direct device config (see `kvm_pilot.config`); beats file-profile values |
 | `KVM_PILOT_CONFIG` | Path of the config file (default `~/.config/kvm-pilot/config.toml`) |
-| `KVM_PILOT_MCP_ALLOW_POWER` | **Operator-only** opt-in that enables the `power` tool (`1`/`true`/`yes`) |
+| `KVM_PILOT_MCP_ALLOW_POWER` | **Operator-only** opt-in enabling the `power` tool **and** power-effect HID (`ctrl_alt_delete`, reboot chords) (`1`/`true`/`yes`) |
+| `KVM_PILOT_MCP_ALLOW_HID` | **Operator-only** opt-in enabling HID input (`type_text`, `press_key`, ordinary `send_shortcut`) |
 | `KVM_PILOT_MCP_ALLOW_SSH` | **Operator-only** opt-in that enables the `ssh_exec` tool (`1`/`true`/`yes`) |
+| `KVM_PILOT_MCP_PROFILES` | **Fail-closed** allowlist of profile names the server may target (comma-separated). Unset = no allowlist; set-but-empty = allow nothing; a target not on the list is refused (never a fall-back to all configured hosts) |
+| `KVM_PILOT_MCP_ELICIT` | Set to `off` to force the pre-authorized posture (env gate + `confirm=true`) even for elicitation-capable clients; otherwise a per-invocation human approval is requested when the client supports it |
 | `KVM_PILOT_SSH_HOST` / `KVM_PILOT_SSH_USER` / `KVM_PILOT_SSH_PORT` / `KVM_PILOT_SSH_KEY` | The **managed host's** SSH target (a different machine from the KVM) for `ssh_reachable` / `ssh_exec`; also settable per-profile as `ssh_host` etc. |
 | `KVM_PILOT_MCP_DRY_RUN` | Build every driver with `dry_run=True`; destructive calls are logged, never sent |
 | `KVM_PILOT_VISION_BACKEND` | Vision backend for `classify_screen`: `anthropic` (default) or `local` (any OpenAI-compatible VLM: LM Studio, Ollama, vLLM) |

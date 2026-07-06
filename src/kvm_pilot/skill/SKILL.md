@@ -49,7 +49,8 @@ remote before physical**, below).
 | Device info / host power state | **MCP** `info` / `power_state`, or CLI | Either works. |
 | List what the driver supports | **MCP** `capabilities` or CLI `capabilities` | Structural/offline — no network, no preflight. Use it to pick the right interface up front. |
 | **Read the device/host event log** | **MCP** `logs` or **CLI `logs`** | The text diagnostic when video/streamer/power looks wrong — it names a fault (e.g. a stuck encoder behind a `snapshot` 503) a screenshot can't. |
-| firmware-check/update, events, watch, type/key, mount/eject | **CLI only** | The MCP server does not expose these. |
+| Type / press a key / send a shortcut on the host console | **MCP** `type_text` / `press_key` / `send_shortcut` / `ctrl_alt_delete`, or CLI `type` / `key` | HID input, gated by effect: needs `KVM_PILOT_MCP_ALLOW_HID` + per-call approval; a reboot chord (Ctrl+Alt+Del, SysRq) needs `ALLOW_POWER`. |
+| firmware-check/update, events, watch, mount/eject | **CLI only** | The MCP server does not expose these. |
 | Mouse move/click, MSD mode switching | **Python library only** | Not in MCP or CLI. |
 | Change **host** power (on/off/cycle/reset) | **MCP `power`** (gated) or CLI `power` / `power-cycle` | Destructive — confirm each step. MCP `power` is operator-enabled + per-call approval. |
 | Reboot the **KVM appliance** / restart `kvmd` / inspect `/etc/kvmd` | **SSH to the appliance** | No kvm-pilot interface does this — out-of-band only. |
@@ -99,13 +100,19 @@ Prefer remote recovery, in this order, and present the options in this order:
 
 ### Enabling the MCP server
 
-**The 8 tools it exposes**, all named `mcp__kvm-pilot__<tool>`:
-- Read-only: `info`, `power_state`, `capabilities`, `healthcheck`, `logs`
-- `snapshot` — returns a model-visible JPEG of the screen
-- `classify_screen` — boot/run phase (needs a vision backend: `ANTHROPIC_API_KEY`
-  or a local VLM configured in the **server's** env, else it errors)
-- `power` — **destructive**, on/off/cycle/reset of the managed host; disabled
-  unless the operator set `KVM_PILOT_MCP_ALLOW_POWER=1`, and requires `confirm=true`
+**The tools it exposes**, all named `mcp__kvm-pilot__<tool>`:
+- Read-only: `info`, `power_state`, `capabilities`, `healthcheck`, `logs`,
+  `snapshot` (model-visible JPEG), `classify_screen` (boot/run phase — uses a
+  server-side vision backend if configured, else falls back to caller-side
+  classification), `ssh_reachable`
+- **Destructive act tools** — each needs the operator to opt the tool's *effect*
+  in via an env flag **and** a per-invocation approval (a human elicitation, or
+  `confirm=true` under a standing policy):
+  - `power` — on/off/cycle/reset (`KVM_PILOT_MCP_ALLOW_POWER`)
+  - `type_text` / `press_key` / `send_shortcut` — HID input (`KVM_PILOT_MCP_ALLOW_HID`);
+    a reboot chord in `send_shortcut` needs `ALLOW_POWER`
+  - `ctrl_alt_delete` — a reboot, so it needs `ALLOW_POWER` (not the HID gate)
+  - `ssh_exec` — run a command over SSH (`KVM_PILOT_MCP_ALLOW_SSH`)
 
 Every tool takes an optional `profile` argument to pick a device from
 `~/.config/kvm-pilot/config.toml`; omit it to use the server's default profile.
