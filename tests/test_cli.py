@@ -21,6 +21,23 @@ def test_power_subcommand_parsed():
     assert args.dry_run is True
 
 
+def test_ssh_check_forwards_ssh_target_overrides(monkeypatch):
+    # A runtime --ssh-host (e.g. an install-time DHCP IP the profile can't know)
+    # flows through _resolve_cfg into the HostConfig, beating profile/env (#81).
+    # (ssh-check still resolves a full HostConfig, so give it a KVM host.)
+    from kvm_pilot.cli import _resolve_cfg
+
+    monkeypatch.setenv("KVM_PILOT_HOST", "kvm.local")
+    parser = build_parser()
+    args = parser.parse_args(
+        ["ssh-check", "--ssh-host", "10.9.9.9", "--ssh-port", "2222", "--ssh-user", "root"]
+    )
+    cfg = _resolve_cfg(args)
+    assert cfg.ssh_host == "10.9.9.9"
+    assert cfg.ssh_port == 2222
+    assert cfg.ssh_user == "root"
+
+
 def test_watch_requires_phase():
     parser = build_parser()
     args = parser.parse_args(
@@ -101,6 +118,18 @@ def test_driver_fake_needs_no_host_and_lists_boot_progress(capsys):
 def test_driver_fake_power_action_is_dispatched():
     rc = main(["power", "on", "--driver", "fake", "--yes"])
     assert rc == 0
+
+
+def test_ssh_bootstrap_plan_mode(capsys):
+    # Plan mode (no --execute) prints the plan and sends nothing; also proves the
+    # --command flag's dest doesn't collide with the subcommand name.
+    import json
+
+    rc = main(["ssh-bootstrap", "--driver", "fake"])
+    assert rc == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["stage"] == "plan"
+    assert any("send_shortcut" in step["detail"] for step in data["steps"])
 
 
 def test_driver_glkvm_builds_the_glkvm_subclass():

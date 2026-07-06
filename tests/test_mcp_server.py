@@ -36,9 +36,19 @@ EXPECTED_TOOLS = {
     "ssh_reachable",
     "ssh_exec",
     "ssh_discover",
+    "type_text",
+    "press_key",
+    "send_shortcut",
+    "ctrl_alt_delete",
+    "mouse",
+    "mount_iso",
+    "eject",
 }
 # Tools that change state (readOnlyHint=False, destructiveHint=True).
-DESTRUCTIVE_TOOLS = {"power", "ssh_exec"}
+DESTRUCTIVE_TOOLS = {
+    "power", "ssh_exec", "type_text", "press_key", "send_shortcut", "ctrl_alt_delete",
+    "mouse", "mount_iso", "eject",
+}
 
 
 @pytest.fixture()
@@ -85,6 +95,28 @@ def result_json(result) -> dict:
     """Parse a dict-returning tool's JSON text content."""
     assert result.content[0].type == "text"
     return json.loads(result.content[0].text)
+
+
+def run_session_elicit(env, interact, *, action, content=None):
+    """Like ``run_session`` but the client advertises elicitation and answers every
+    approval prompt with a fixed ``(action, content)`` — the interactive posture."""
+    from mcp.types import ElicitResult
+
+    async def elicitation_callback(context, params):
+        return ElicitResult(action=action, content=content)
+
+    async def runner():
+        params = StdioServerParameters(
+            command=sys.executable, args=["-m", "kvm_pilot.mcp.server"], env=env
+        )
+        async with stdio_client(params) as (read, write):
+            async with ClientSession(
+                read, write, elicitation_callback=elicitation_callback
+            ) as session:
+                await session.initialize()
+                return await interact(session)
+
+    return asyncio.run(asyncio.wait_for(runner(), timeout=60))
 
 
 def test_handshake_lists_annotated_tools(config_file):
@@ -149,6 +181,274 @@ def test_power_executes_on_fake_driver_when_fully_gated(config_file):
     assert "DRY-RUN" not in text
 
 
+# -- HID act tools (#61): effect gates, approval posture, receipt shape -------
+
+
+def test_type_text_denied_without_hid_gate(config_file):
+    # A denial comes back through the SAME call path (not a raised error) so the
+    # agent can recover.
+    async def interact(session):
+        return await session.call_tool("type_text", {"text": "hello", "confirm": True})
+
+    parsed = result_json(run_session(server_env(config_file), interact))
+    assert parsed["approved"] is False
+    assert "disabled" in parsed["denied_reason"]
+
+
+def test_type_text_preauthorized_with_confirm(config_file):
+    # No elicitation client -> pre-authorized posture: standing ALLOW_HID + confirm.
+    async def interact(session):
+        return await session.call_tool("type_text", {"text": "root", "confirm": True})
+
+    parsed = result_json(run_session(server_env(config_file, KVM_PILOT_MCP_ALLOW_HID="1"), interact))
+    assert parsed["approved"] is True
+    assert parsed["effect"] == "hid_input"
+    assert parsed["transport"] == "hid.keyboard"
+    assert parsed["op"] == "hid.type_text"
+    assert parsed["invocation_id"]
+    assert parsed["approval"]["args_hash"]
+    assert parsed["approval"]["approver"] == "policy"
+
+
+def test_type_text_denied_without_confirm_in_preauthorized(config_file):
+    async def interact(session):
+        return await session.call_tool("type_text", {"text": "x"})
+
+    parsed = result_json(run_session(server_env(config_file, KVM_PILOT_MCP_ALLOW_HID="1"), interact))
+    assert parsed["approved"] is False
+    assert "confirm=true" in parsed["denied_reason"]
+
+
+def test_ctrl_alt_delete_needs_power_gate_not_hid(config_file):
+    # CAD is classified power_soft: ALLOW_HID must NOT suffice; ALLOW_POWER does.
+    async def interact(session):
+        return await session.call_tool("ctrl_alt_delete", {"confirm": True})
+
+    hid_only = result_json(run_session(server_env(config_file, KVM_PILOT_MCP_ALLOW_HID="1"), interact))
+    assert hid_only["approved"] is False
+    powered = result_json(
+        run_session(server_env(config_file, KVM_PILOT_MCP_ALLOW_POWER="1"), interact)
+    )
+    assert powered["approved"] is True
+    assert powered["effect"] == "power_soft"
+
+
+def test_send_shortcut_cad_cannot_slip_the_hid_gate(config_file):
+    async def interact(session):
+        return await session.call_tool(
+            "send_shortcut", {"keys": "ControlLeft,AltLeft,Delete", "confirm": True}
+        )
+
+    hid_only = result_json(run_session(server_env(config_file, KVM_PILOT_MCP_ALLOW_HID="1"), interact))
+    assert hid_only["approved"] is False  # power_soft chord, HID gate insufficient
+    powered = result_json(
+        run_session(server_env(config_file, KVM_PILOT_MCP_ALLOW_POWER="1"), interact)
+    )
+    assert powered["approved"] is True
+    assert powered["effect"] == "power_soft"
+
+
+def test_send_shortcut_vt_switch_uses_hid_gate(config_file):
+    async def interact(session):
+        return await session.call_tool(
+            "send_shortcut", {"keys": "ControlLeft,AltLeft,F2", "confirm": True}
+        )
+
+    parsed = result_json(run_session(server_env(config_file, KVM_PILOT_MCP_ALLOW_HID="1"), interact))
+    assert parsed["approved"] is True
+    assert parsed["effect"] == "hid_control"
+
+
+def test_act_interactive_elicit_accept(config_file):
+    # An elicitation-capable client uses the interactive posture (no confirm needed).
+    async def interact(session):
+        return await session.call_tool("type_text", {"text": "hi"})
+
+    env = server_env(config_file, KVM_PILOT_MCP_ALLOW_HID="1")
+    parsed = result_json(
+        run_session_elicit(env, interact, action="accept", content={"approve": True, "approver": "alice"})
+    )
+    assert parsed["approved"] is True
+    assert parsed["approval"]["approver"] == "alice"
+
+
+def test_act_interactive_elicit_decline_returns_same_path(config_file):
+    async def interact(session):
+        return await session.call_tool("type_text", {"text": "hi"})
+
+    env = server_env(config_file, KVM_PILOT_MCP_ALLOW_HID="1")
+    parsed = result_json(run_session_elicit(env, interact, action="decline"))
+    assert parsed["approved"] is False
+    assert "decline" in parsed["denied_reason"]
+
+
+def test_act_interactive_elicit_accept_but_not_approved(config_file):
+    async def interact(session):
+        return await session.call_tool("type_text", {"text": "hi"})
+
+    env = server_env(config_file, KVM_PILOT_MCP_ALLOW_HID="1")
+    parsed = result_json(
+        run_session_elicit(env, interact, action="accept", content={"approve": False})
+    )
+    assert parsed["approved"] is False
+
+
+def test_allowlist_refuses_profile_not_listed(config_file):
+    async def interact(session):
+        return await session.call_tool("info", {"profile": "bmc"})
+
+    env = server_env(config_file, KVM_PILOT_MCP_PROFILES="fakebox")
+    result = run_session(env, interact)
+    assert result.isError is True
+    assert "allowlist" in result.content[0].text
+
+
+def test_allowlist_allows_listed_profile(config_file):
+    async def interact(session):
+        return await session.call_tool("info", {})  # default profile 'fakebox' is listed
+
+    env = server_env(config_file, KVM_PILOT_MCP_PROFILES="fakebox")
+    assert run_session(env, interact).isError is False
+
+
+# -- mouse + generation-keyed staleness (#124) -------------------------------
+
+
+def test_snapshot_returns_frame_ref(config_file):
+    async def interact(session):
+        return await session.call_tool("snapshot", {})
+
+    result = run_session(server_env(config_file), interact)
+    assert result.isError is False
+    payload = json.loads(result.content[0].text)
+    assert payload["host"] == "fakebox.local"
+    assert payload["frame_ref"].startswith("fakebox.local:0:")
+    assert any(c.type == "image" for c in result.content)
+
+
+def test_mouse_move_only_needs_no_ref(config_file):
+    async def interact(session):
+        return await session.call_tool("mouse", {"x": 0.5, "y": 0.5, "confirm": True})
+
+    parsed = result_json(run_session(server_env(config_file, KVM_PILOT_MCP_ALLOW_HID="1"), interact))
+    assert parsed["approved"] is True
+    assert parsed["op"] == "hid.mouse_move"
+    assert parsed["coord_space"] == "percent"
+
+
+def test_mouse_click_requires_observed_frame_ref(config_file):
+    async def interact(session):
+        return await session.call_tool(
+            "mouse", {"x": 0.5, "y": 0.5, "button": "left", "confirm": True}
+        )
+
+    parsed = result_json(run_session(server_env(config_file, KVM_PILOT_MCP_ALLOW_HID="1"), interact))
+    assert parsed["approved"] is False
+    assert "observed_frame_ref" in parsed["denied_reason"]
+
+
+def test_mouse_click_with_fresh_ref_is_approved(config_file):
+    async def interact(session):
+        snap = await session.call_tool("snapshot", {})
+        ref = json.loads(snap.content[0].text)["frame_ref"]
+        return await session.call_tool(
+            "mouse",
+            {"x": 0.67, "y": 0.28, "button": "left", "observed_frame_ref": ref, "confirm": True},
+        )
+
+    parsed = result_json(run_session(server_env(config_file, KVM_PILOT_MCP_ALLOW_HID="1"), interact))
+    assert parsed["approved"] is True
+    assert parsed["op"] == "hid.mouse_click"
+
+
+def test_mouse_click_refused_after_generation_bump(config_file):
+    # A reboot (ctrl_alt_delete, power_soft) bumps the frame generation, so a click
+    # planned against the pre-reboot frame is refused rather than landing blind.
+    async def interact(session):
+        snap = await session.call_tool("snapshot", {})
+        ref = json.loads(snap.content[0].text)["frame_ref"]
+        await session.call_tool("ctrl_alt_delete", {"confirm": True})
+        return await session.call_tool(
+            "mouse",
+            {"x": 0.5, "y": 0.5, "button": "left", "observed_frame_ref": ref, "confirm": True},
+        )
+
+    env = server_env(config_file, KVM_PILOT_MCP_ALLOW_HID="1", KVM_PILOT_MCP_ALLOW_POWER="1")
+    parsed = result_json(run_session(env, interact))
+    assert parsed["approved"] is False
+    assert "stale screen" in parsed["denied_reason"]
+
+
+def test_mouse_click_malformed_ref_refused(config_file):
+    async def interact(session):
+        return await session.call_tool(
+            "mouse",
+            {"x": 0.5, "y": 0.5, "button": "left", "observed_frame_ref": "garbage", "confirm": True},
+        )
+
+    parsed = result_json(run_session(server_env(config_file, KVM_PILOT_MCP_ALLOW_HID="1"), interact))
+    assert parsed["approved"] is False
+    assert "valid frame reference" in parsed["denied_reason"]
+
+
+# -- media tools (#61) -------------------------------------------------------
+
+
+def test_mount_iso_denied_without_media_gate(config_file):
+    async def interact(session):
+        return await session.call_tool(
+            "mount_iso", {"source": "/isos/ubuntu.iso", "confirm": True}
+        )
+
+    parsed = result_json(run_session(server_env(config_file), interact))
+    assert parsed["approved"] is False
+    assert "disabled" in parsed["denied_reason"]
+
+
+def test_mount_iso_approved_with_media_gate(config_file):
+    async def interact(session):
+        return await session.call_tool(
+            "mount_iso", {"source": "/isos/ubuntu.iso", "confirm": True}
+        )
+
+    parsed = result_json(
+        run_session(server_env(config_file, KVM_PILOT_MCP_ALLOW_MEDIA="1"), interact)
+    )
+    assert parsed["approved"] is True
+    assert parsed["effect"] == "media"
+    assert parsed["transport"] == "msd"
+    assert parsed["op"] == "msd.connect"
+
+
+def test_eject_approved_with_media_gate(config_file):
+    async def interact(session):
+        return await session.call_tool("eject", {"confirm": True})
+
+    parsed = result_json(
+        run_session(server_env(config_file, KVM_PILOT_MCP_ALLOW_MEDIA="1"), interact)
+    )
+    assert parsed["approved"] is True
+    assert parsed["op"] == "msd.disconnect"
+
+
+def test_mount_iso_bumps_generation_invalidating_mouse_ref(config_file):
+    # Mounting media changes the screen, so a click planned against the pre-mount
+    # frame is refused (proves media effect bumps the frame generation).
+    async def interact(session):
+        snap = await session.call_tool("snapshot", {})
+        ref = json.loads(snap.content[0].text)["frame_ref"]
+        await session.call_tool("mount_iso", {"source": "http://h/x.iso", "confirm": True})
+        return await session.call_tool(
+            "mouse",
+            {"x": 0.5, "y": 0.5, "button": "left", "observed_frame_ref": ref, "confirm": True},
+        )
+
+    env = server_env(config_file, KVM_PILOT_MCP_ALLOW_MEDIA="1", KVM_PILOT_MCP_ALLOW_HID="1")
+    parsed = result_json(run_session(env, interact))
+    assert parsed["approved"] is False
+    assert "stale screen" in parsed["denied_reason"]
+
+
 def test_ssh_exec_errors_without_operator_gate(config_file):
     """The env gate is the floor, checked before anything else (mirrors power)."""
 
@@ -171,6 +471,32 @@ def test_ssh_reachable_errors_when_not_configured(config_file):
     result = run_session(server_env(config_file), interact)
     assert result.isError is True
     assert "not configured" in result.content[0].text
+
+
+def test_ssh_reachable_host_override_unblocks_unconfigured_profile(config_file):
+    """host= lets a caller target a runtime-discovered address even when the
+    profile has no ssh_host — the install-time DHCP case (#81)."""
+
+    async def interact(session):
+        return await session.call_tool("ssh_reachable", {"host": "127.0.0.1"})
+
+    result = run_session(server_env(config_file), interact)
+    assert result.isError is False  # no longer "not configured"
+    parsed = result_json(result)
+    assert parsed["target"] == "127.0.0.1"
+    assert "reachable" in parsed
+
+
+def test_ssh_reachable_rejects_hyphen_host(config_file):
+    """A host starting with '-' is refused (ssh option-injection) — which also
+    proves the host= override flows into channel construction."""
+
+    async def interact(session):
+        return await session.call_tool("ssh_reachable", {"host": "-oProxyCommand=touch /tmp/x"})
+
+    result = run_session(server_env(config_file), interact)
+    assert result.isError is True
+    assert "misparsed" in result.content[0].text
 
 
 def test_ssh_discover_requires_confirm(config_file):
@@ -287,6 +613,71 @@ def test_classify_screen_supports_local_backend(config_file):
     parsed = result_json(result)
     assert parsed["phase"] == "power_off"
     assert parsed["host"] == "fakebox.local"
+    assert parsed["mode"] == "server"
+
+
+def test_classify_screen_cheap_gate_works_without_any_key(config_file):
+    """Keyless deployments (#125) still get structured results for cheap-gate
+    phases: the fake is powered off, so the power gate resolves with no vision
+    credentials and no VLM call — the default anthropic backend is never used."""
+
+    async def interact(session):
+        return await session.call_tool("classify_screen", {})
+
+    # server_env strips ANTHROPIC_API_KEY; the default backend is anthropic.
+    result = run_session(server_env(config_file), interact)
+    assert result.isError is False
+    parsed = result_json(result)
+    assert parsed["mode"] == "server"
+    assert parsed["phase"] == "power_off"
+
+
+def test_classify_fallback_returns_image_and_prompt():
+    """When server-side vision is unavailable, classify_screen hands the caller
+    the screenshot + the prompt/schema to classify it itself (#125). Unit-level
+    because the fake driver over MCP is always powered off (power gate resolves
+    before the backend), so the fallback can't be reached end-to-end there."""
+    from types import SimpleNamespace
+
+    from mcp.server.fastmcp import Image
+
+    from kvm_pilot.drivers import FakeDriver
+    from kvm_pilot.errors import VisionError
+    from kvm_pilot.mcp import server
+
+    cfg = SimpleNamespace(host="fakebox.local", driver="fake")
+    out = server._classify_fallback(
+        cfg, FakeDriver(host="fakebox.local"), "look for a login prompt",
+        VisionError("No Anthropic API key."),
+    )
+    assert isinstance(out, list) and len(out) == 2
+    text, image = out
+    payload = json.loads(text)
+    assert payload["mode"] == "caller_classify"
+    assert payload["host"] == "fakebox.local"
+    assert "No Anthropic API key." in payload["reason"]
+    assert payload["hint"] == "look for a login prompt"
+    assert isinstance(payload["phases"], list) and payload["phases"]
+    assert "phase" in payload["system_prompt"]  # the classification schema prompt
+    assert isinstance(image, Image)
+
+
+def test_classify_fallback_raises_when_snapshot_also_fails():
+    """No image means nothing to delegate -> a clean tool error, not a fallback."""
+    from types import SimpleNamespace
+
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    from kvm_pilot.errors import VisionError
+    from kvm_pilot.mcp import server
+
+    class NoSnapshot:
+        def snapshot(self):
+            raise RuntimeError("streamer offline")
+
+    cfg = SimpleNamespace(host="h", driver="fake")
+    with pytest.raises(ToolError):
+        server._classify_fallback(cfg, NoSnapshot(), "", VisionError("no key"))
 
 
 def test_video_tools_error_cleanly_on_capability_less_driver(config_file):

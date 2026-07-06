@@ -221,6 +221,45 @@ def check_api_reachable(driver: Any) -> CheckResult | None:
     )
 
 
+def check_ssh_reachable(driver: Any) -> CheckResult | None:
+    """The managed host's OS answers on its SSH port. Volatile; self-skips.
+
+    Complements ``recovery-path``: an in-band SSH channel to the target OS is a
+    remote-recovery lever (#81). Only present when the profile configured
+    ``ssh_host`` — the driver factory attaches ``driver.ssh_channel`` then, and
+    this check self-skips otherwise. A host that is down is **INFO, not a
+    warning**: powered-off / pre-network / mid-install hosts normally don't
+    answer, and that must not inflate the report or gate a destructive op.
+    """
+    channel = getattr(driver, "ssh_channel", None)
+    if channel is None:
+        return None  # SSH-to-target not configured for this profile
+    try:
+        up = channel.ssh_reachable()
+    except Exception:  # noqa: BLE001 - a liveness probe must never break the audit
+        up = False
+    if up:
+        return CheckResult(
+            id="ssh-reachable",
+            pillar=Pillar.READINESS,
+            severity=Severity.OK,
+            title="Host SSH reachable",
+            detail=f"{channel.target}:{channel.port} accepts TCP — in-band recovery available.",
+            cacheable=False,
+        )
+    return CheckResult(
+        id="ssh-reachable",
+        pillar=Pillar.READINESS,
+        severity=Severity.INFO,
+        title="Host SSH reachable",
+        detail=(
+            f"{channel.target}:{channel.port} did not answer — the OS may be off, "
+            "pre-network, or firewalled."
+        ),
+        cacheable=False,
+    )
+
+
 def check_recovery_path(driver: Any) -> CheckResult | None:
     """Is there ANY out-of-band reset if the guest hangs? (Stable posture.)
 
@@ -672,6 +711,7 @@ def check_capability_profile(driver: Any) -> CheckResult | None:
 # The registry — each check self-guards, so the same list serves every driver.
 CHECKS: list[Check] = [
     check_api_reachable,
+    check_ssh_reachable,
     check_recovery_path,
     check_video_signal,
     check_msd_online,
@@ -946,6 +986,7 @@ def preflight_once(
 def _is_volatile(check: Check) -> bool:
     return getattr(check, "__name__", "") in {
         "check_api_reachable",
+        "check_ssh_reachable",
         "check_video_signal",
         "check_msd_online",
     }
