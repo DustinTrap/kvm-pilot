@@ -44,16 +44,20 @@ remote before physical**, below).
 | Action | Best interface | Notes / fallback |
 |---|---|---|
 | See the screen as a model-visible image | **MCP** `snapshot` | Returns a real image content block — no screenshot-file round-trip. CLI `snapshot` writes a file. |
-| Classify boot/run phase | **MCP** `classify_screen` | Needs a vision backend (Anthropic key or local VLM). CLI: `classify` / `watch`. |
+| Classify boot/run phase | **MCP** `classify_screen` | Uses the server's vision backend if configured; **with no server key it falls back to caller-side** — hands you the screenshot + prompt to classify yourself (a `[json, image]` result). CLI: `classify` / `watch`. |
 | Preflight audit (run first) | **MCP** `healthcheck` or CLI `healthcheck` | The intake gate — see below. |
 | Device info / host power state | **MCP** `info` / `power_state`, or CLI | Either works. |
 | List what the driver supports | **MCP** `capabilities` or CLI `capabilities` | Structural/offline — no network, no preflight. Use it to pick the right interface up front. |
 | **Read the device/host event log** | **MCP** `logs` or **CLI `logs`** | The text diagnostic when video/streamer/power looks wrong — it names a fault (e.g. a stuck encoder behind a `snapshot` 503) a screenshot can't. |
-| firmware-check/update, events, watch, type/key, mount/eject | **CLI only** | The MCP server does not expose these. |
-| Mouse move/click, MSD mode switching | **Python library only** | Not in MCP or CLI. |
+| Type / press a key / send a shortcut on the host console | **MCP** `type_text` / `press_key` / `send_shortcut` / `ctrl_alt_delete`, or CLI `type` / `key` | HID input, gated by effect: needs `KVM_PILOT_MCP_ALLOW_HID` + per-call approval; a reboot chord (Ctrl+Alt+Del, SysRq) needs `ALLOW_POWER`. |
+| Move / click the mouse (installers, BIOS, desktops) | **MCP** `mouse` | Absolute positioning; `percent` coords by default. A click must carry `observed_frame_ref` from a recent `snapshot` (refused if the host rebooted since). Needs `KVM_PILOT_MCP_ALLOW_HID`. |
+| Mount / eject install media | **MCP** `mount_iso` / `eject`, or CLI `mount` / `eject` | Virtual media (ISO path or URL). MCP needs `KVM_PILOT_MCP_ALLOW_MEDIA` + approval. |
+| firmware-check/update, events, watch | **CLI only** | The MCP server does not expose these. |
+| MSD mode switching | **Python library only** | Not in MCP or CLI. |
 | Change **host** power (on/off/cycle/reset) | **MCP `power`** (gated) or CLI `power` / `power-cycle` | Destructive — confirm each step. MCP `power` is operator-enabled + per-call approval. |
 | Reboot the **KVM appliance** / restart `kvmd` / inspect `/etc/kvmd` | **SSH to the appliance** | No kvm-pilot interface does this — out-of-band only. |
 | Check if the **target host** is reachable / run commands on it once its OS is up | **MCP `ssh_reachable` / `ssh_exec`**, or CLI `ssh-check` / `ssh-exec` (in-band) | Prefer SSH over KVM keystrokes once the OS is up. Configure the target's IP/host/FQDN via `ssh_host` (≠ the KVM's address); `ssh_exec` is gated (operator opt-in `KVM_PILOT_MCP_ALLOW_SSH`). See "Recovery order" below. |
+| Bootstrap SSH during an install (set up the cheap channel over the expensive one) | **CLI `ssh-bootstrap`** | Once an installer is up, switches to a text console, reads the DHCP IP off the screen, starts `sshd`, and hands off to SSH. **Plans by default** — pass `--execute` to run it; add a `--command` that installs a key/password for a usable channel. Guided/conservative (aborts if the console can't be confirmed); not an MCP tool. |
 | View the screen when `snapshot` fails | **WebRTC/Janus stream or the vendor web UI** | The only way to see a unit that streams H.264 at its native resolution. |
 
 **Host vs. appliance — keep these straight.** The `power` tool/CLI acts on the
@@ -99,13 +103,20 @@ Prefer remote recovery, in this order, and present the options in this order:
 
 ### Enabling the MCP server
 
-**The 8 tools it exposes**, all named `mcp__kvm-pilot__<tool>`:
-- Read-only: `info`, `power_state`, `capabilities`, `healthcheck`, `logs`
-- `snapshot` — returns a model-visible JPEG of the screen
-- `classify_screen` — boot/run phase (needs a vision backend: `ANTHROPIC_API_KEY`
-  or a local VLM configured in the **server's** env, else it errors)
-- `power` — **destructive**, on/off/cycle/reset of the managed host; disabled
-  unless the operator set `KVM_PILOT_MCP_ALLOW_POWER=1`, and requires `confirm=true`
+**The tools it exposes**, all named `mcp__kvm-pilot__<tool>`:
+- Read-only: `info`, `power_state`, `capabilities`, `healthcheck`, `logs`,
+  `snapshot` (model-visible JPEG), `classify_screen` (boot/run phase — uses a
+  server-side vision backend if configured, else falls back to caller-side
+  classification), `ssh_reachable`
+- **Destructive act tools** — each needs the operator to opt the tool's *effect*
+  in via an env flag **and** a per-invocation approval (a human elicitation, or
+  `confirm=true` under a standing policy):
+  - `power` — on/off/cycle/reset (`KVM_PILOT_MCP_ALLOW_POWER`)
+  - `type_text` / `press_key` / `send_shortcut` / `mouse` — HID input
+    (`KVM_PILOT_MCP_ALLOW_HID`); a reboot chord in `send_shortcut` needs `ALLOW_POWER`
+  - `ctrl_alt_delete` — a reboot, so it needs `ALLOW_POWER` (not the HID gate)
+  - `mount_iso` / `eject` — virtual media (`KVM_PILOT_MCP_ALLOW_MEDIA`)
+  - `ssh_exec` — run a command over SSH (`KVM_PILOT_MCP_ALLOW_SSH`)
 
 Every tool takes an optional `profile` argument to pick a device from
 `~/.config/kvm-pilot/config.toml`; omit it to use the server's default profile.

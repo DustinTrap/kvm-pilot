@@ -353,6 +353,50 @@ destructive action, which is exactly the risk the invariant guards against. All
 destructive steps keep their `DESTRUCTIVE_OPS` / `safety.guard()` routing, and the
 health preflight gate still runs before the run.
 
+### MCP act tools: classify by effect, gate by effect, approve per invocation (#61)
+The MCP act tools (`type_text`/`press_key`/`send_shortcut`/`ctrl_alt_delete`) are
+authorized by an **effect class** (`EffectClass` in `safety.py`), not by tool name
+or transport. The class layer is **additive over `DESTRUCTIVE_OPS`** — the set and
+`SafetyPolicy.guard` are unchanged, so the driver stays stdlib-only and the client
+transport guard is untouched; `OP_EFFECT`/`effect_of`/`shortcut_effect` are a
+read-only lookup consumed only by the MCP layer (`mcp/act.py`).
+- **Ctrl+Alt+Del is `power_soft`, not HID.** It is a reboot delivered over the
+  keyboard, so it is gated by `KVM_PILOT_MCP_ALLOW_POWER`, and `send_shortcut`
+  computes its class from the chord (CAD, Magic SysRq `b`/`o`) so a reboot can't
+  slip through the weaker HID gate by choosing a different actuator. The result
+  records **both** transport and effect for the same reason.
+- **Two guarantees, two postures.** (a) *allowed* — operator env flag per effect +
+  a fail-closed `KVM_PILOT_MCP_PROFILES` allowlist; (b) *approved at run time* —
+  MCP elicitation when the client supports it (*interactive*), else an explicit
+  `confirm=true` under a standing policy (*pre-authorized*). The pre-authorized
+  posture is **intentional, not a fallback hack**: an unattended install loop has
+  no human to answer an elicitation, so forcing elicitation-only would break the
+  product's headline use case. Denials return through the same call path
+  (`approved:false` + reason) so the agent recovers instead of hanging.
+- **Deferred to #72:** the signed/expiring consent receipt. The MVP result already
+  carries a stable `invocation_id` + effect class so that layer can build on it.
+### SSH bootstrap during install: guided, not blind full-auto (#81)
+The "expensive HID phase sets up the cheap phase" — reading the DHCP IP off the
+installer console and starting `sshd` over KVM HID so the rest of the install runs
+in-band over SSH (`kvm_pilot/bootstrap.py`, CLI `ssh-bootstrap`). It is deliberately
+conservative rather than blind full-auto, because the failure modes are severe:
+- **Plan by default.** `execute=False` sends nothing; it returns the plan. This is
+  the CLI default (like `firmware-update`), with one top-level confirmation before
+  the first keystroke (not a prompt per keystroke).
+- **The IP probe doubles as a console canary.** A marker-wrapped `echo` is typed and
+  OCR'd back; if the marker never echoes, the keystrokes were not consumed by a
+  shell (silently-failed VT-switch, or a graphical/Windows installer), so it
+  **aborts before typing any `sshd` command** — a dropped command must never land in
+  the installer's partitioner. "Marker present but no IP" vs "marker absent"
+  distinguishes retry-with-`--ssh-host` from hard-abort.
+- **Reachability is necessary but not sufficient.** Success requires a trivial
+  `ssh_exec` to actually authenticate — a reachable port is not a working channel.
+  The default bootstrap commands only start `sshd`; the operator adds auth (a key or
+  password) via `--command`, and the auth probe reports if it's still unusable.
+- **Not an MCP tool in v1.** Agents should orchestrate the same flow with
+  `snapshot`/`classify`/`type_text` + `ssh_reachable(host=…)` so a human stays in the
+  loop; a single ungated auto-bootstrap MCP tool is deferred.
+
 ## Process
 
 Most structural choices came from adversarial review passes (find → verify →

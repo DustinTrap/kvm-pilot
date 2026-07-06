@@ -25,6 +25,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
+from enum import StrEnum
 
 from .errors import SafetyError
 
@@ -73,6 +74,112 @@ DESTRUCTIVE_OPS: set[str] = {
     # so every exec is gated. Reachability probes stay ungated (read-only).
     "ssh.exec",
 }
+
+class EffectClass(StrEnum):
+    """What *kind* of effect an operation has, classified by effect not transport.
+
+    This is an additive layer over ``DESTRUCTIVE_OPS`` (which stays the single
+    source of truth for "does this need a confirm/dry-run guard at all"). The
+    MCP server reads the effect class to pick the operator enable-flag and to
+    label the result receipt, so an actuator can't launder a power effect by
+    choosing a different tool — e.g. Ctrl+Alt+Del is ``power_soft`` even though
+    it is delivered over the HID keyboard.
+    """
+
+    OBSERVE = "observe"
+    HID_INPUT = "hid_input"
+    HID_CONTROL = "hid_control"
+    MEDIA = "media"
+    POWER_SOFT = "power_soft"
+    POWER_HARD = "power_hard"
+    CONFIG_MUTATION = "config_mutation"
+
+
+# Effect class for each guarded op id. Every id in DESTRUCTIVE_OPS must appear
+# here (a test enforces it). Ops not in this map are OBSERVE (reads) — mirroring
+# guard()'s "not in DESTRUCTIVE_OPS -> ungated" default.
+OP_EFFECT: dict[str, EffectClass] = {
+    # ATX / power
+    "atx.power_on": EffectClass.POWER_SOFT,
+    "atx.power_off": EffectClass.POWER_SOFT,
+    "atx.power_off_hard": EffectClass.POWER_HARD,
+    "atx.reset_hard": EffectClass.POWER_HARD,
+    "atx.click": EffectClass.POWER_HARD,  # low-level button; may be long-press/reset
+    # Virtual media
+    "msd.set_params": EffectClass.MEDIA,
+    "msd.connect": EffectClass.MEDIA,
+    "msd.disconnect": EffectClass.MEDIA,
+    "msd.remove_image": EffectClass.MEDIA,
+    "msd.reset": EffectClass.MEDIA,
+    "msd.write": EffectClass.MEDIA,
+    "msd.write_remote": EffectClass.MEDIA,
+    # GPIO drives relays / power lines
+    "gpio.switch": EffectClass.POWER_HARD,
+    "gpio.pulse": EffectClass.POWER_HARD,
+    # Redfish (BMC)
+    "redfish.power_action": EffectClass.POWER_HARD,  # generic legacy helper; conservative
+    "redfish.power_on": EffectClass.POWER_SOFT,
+    "redfish.power_off": EffectClass.POWER_SOFT,
+    "redfish.power_off_hard": EffectClass.POWER_HARD,
+    "redfish.reset_hard": EffectClass.POWER_HARD,
+    "redfish.virtual_media_insert": EffectClass.MEDIA,
+    "redfish.virtual_media_eject": EffectClass.MEDIA,
+    # HID input
+    "hid.type_text": EffectClass.HID_INPUT,
+    "hid.press_key": EffectClass.HID_INPUT,
+    "hid.key_event": EffectClass.HID_INPUT,
+    "hid.mouse_click": EffectClass.HID_INPUT,
+    # ctrl_alt_delete is a reboot delivered over the keyboard -> power_soft.
+    "hid.ctrl_alt_delete": EffectClass.POWER_SOFT,
+    # send_shortcut is a generic actuator: this is the default for the op id, but
+    # the shortcut tool computes the real class from the chord via shortcut_effect.
+    "hid.send_shortcut": EffectClass.HID_CONTROL,
+    # Firmware flash reboots the device into a new image — treat as hard power.
+    "firmware.flash": EffectClass.POWER_HARD,
+    # Arbitrary in-band command: can do anything, keeps its own ALLOW_SSH gate.
+    "ssh.exec": EffectClass.HID_CONTROL,
+}
+
+
+def effect_of(op: str) -> EffectClass:
+    """Effect class for a guarded op id; OBSERVE for anything unmapped (reads)."""
+    return OP_EFFECT.get(op, EffectClass.OBSERVE)
+
+
+_CTRL_KEYS = {"controlleft", "controlright"}
+_ALT_KEYS = {"altleft", "altright"}
+_SYSRQ_KEYS = {"printscreen", "sysrq"}
+
+
+def _normalize_chord(keys: str) -> set[str]:
+    """Split a comma-separated kvmd shortcut into a casefolded token set."""
+    return {tok.strip().casefold() for tok in keys.split(",") if tok.strip()}
+
+
+def shortcut_effect(keys: str) -> EffectClass:
+    """Classify a ``send_shortcut`` chord by *effect*, covering power-chord families.
+
+    ``send_shortcut`` is a generic actuator, so the classifier is the whole gate:
+    a reboot chord must not slip through as ordinary ``hid_control``. Recognizes
+    Ctrl+Alt+Del and Magic SysRq (Alt+SysRq/PrintScreen + command key). An
+    unrecognized chord falls back to ``hid_control`` — the literal chord is still
+    surfaced for human/policy sign-off, so it is not a silent bypass.
+    """
+    toks = _normalize_chord(keys)
+    has_ctrl = bool(toks & _CTRL_KEYS)
+    has_alt = bool(toks & _ALT_KEYS)
+    # Ctrl+Alt+Del — soft reboot (any L/R modifier variant).
+    if has_ctrl and has_alt and "delete" in toks:
+        return EffectClass.POWER_SOFT
+    # Magic SysRq: Alt + SysRq/PrintScreen + a command letter.
+    if has_alt and (toks & _SYSRQ_KEYS):
+        cmd = toks - _ALT_KEYS - _SYSRQ_KEYS
+        if cmd & {"keyb", "keyo"}:  # reboot / poweroff — immediate, unclean
+            return EffectClass.POWER_HARD
+        if cmd & {"keyr", "keye", "keyi", "keys", "keyu"}:  # SAK/SIGTERM/SIGKILL/sync/remount-ro
+            return EffectClass.POWER_SOFT
+    return EffectClass.HID_CONTROL
+
 
 # Callback signature: (op_name, human_description) -> bool
 ConfirmCallback = Callable[[str, str], bool]
@@ -136,6 +243,10 @@ class SafetyPolicy:
 __all__ = [
     "SafetyPolicy",
     "DESTRUCTIVE_OPS",
+    "EffectClass",
+    "OP_EFFECT",
+    "effect_of",
+    "shortcut_effect",
     "allow_all",
     "deny_all",
     "interactive_confirm",

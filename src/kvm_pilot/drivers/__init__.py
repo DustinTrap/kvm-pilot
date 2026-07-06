@@ -12,7 +12,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
-from ..errors import KVMPilotError
+from ..errors import CapabilityError, KVMPilotError
 from .base import (
     CAPABILITY_PROTOCOLS,
     GPIO,
@@ -131,22 +131,37 @@ def make_driver_from_config(
     if kind == "fake":
         from .fake import FakeDriver
 
-        return FakeDriver(host=cfg.host, confirm=confirm, dry_run=dry_run)
-    if kind in ("pikvm", "glkvm", "blikvm"):
+        drv: KVMClient | FakeDriver | RedfishDriver = FakeDriver(
+            host=cfg.host, confirm=confirm, dry_run=dry_run
+        )
+    elif kind in ("pikvm", "glkvm", "blikvm"):
         from ..client import PiKVMDriver
         from .pikvm import BliKVMDriver, GLKVMDriver
 
         cls = {"pikvm": PiKVMDriver, "glkvm": GLKVMDriver, "blikvm": BliKVMDriver}[kind]
-        return cls.from_config(cfg, confirm=confirm, dry_run=dry_run)
-    if kind == "redfish":
+        drv = cls.from_config(cfg, confirm=confirm, dry_run=dry_run)
+    elif kind == "redfish":
         from .redfish import RedfishDriver
 
-        return RedfishDriver.from_config(cfg, confirm=confirm, dry_run=dry_run)
-    raise KVMPilotError(
-        f"Driver {kind!r} does not support from-config construction here "
-        "(supported: pikvm, glkvm, blikvm, redfish, fake). Build it directly with "
-        f"make_driver({kind!r}, ...) from the library."
-    )
+        drv = RedfishDriver.from_config(cfg, confirm=confirm, dry_run=dry_run)
+    else:
+        raise KVMPilotError(
+            f"Driver {kind!r} does not support from-config construction here "
+            "(supported: pikvm, glkvm, blikvm, redfish, fake). Build it directly with "
+            f"make_driver({kind!r}, ...) from the library."
+        )
+    # Attach the in-band SSH channel to the managed host's OS when the profile
+    # configures one, so the healthcheck can probe reachability (#81). It adds no
+    # RemoteShell methods, so detect_capabilities is unaffected — SSH-to-target
+    # stays a per-profile channel, not a driver capability.
+    if cfg.ssh_host:
+        from ..ssh import SSHChannel
+
+        try:
+            drv.ssh_channel = SSHChannel.from_config(cfg)  # type: ignore[union-attr]
+        except CapabilityError:
+            pass  # a malformed ssh_host must never break KVM operation
+    return drv
 
 
 def __getattr__(name: str) -> object:

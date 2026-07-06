@@ -5,9 +5,13 @@ import pytest
 from kvm_pilot.errors import SafetyError
 from kvm_pilot.safety import (
     DESTRUCTIVE_OPS,
+    OP_EFFECT,
+    EffectClass,
     SafetyPolicy,
     allow_all,
     deny_all,
+    effect_of,
+    shortcut_effect,
 )
 
 
@@ -68,3 +72,60 @@ def test_hid_and_msd_write_ops_are_destructive():
         "msd.write_remote",
     ):
         assert op in DESTRUCTIVE_OPS
+
+
+# -- effect taxonomy (additive over DESTRUCTIVE_OPS) --------------------------
+
+
+def test_every_destructive_op_has_an_effect_class():
+    # The receipt/gate layer must be able to classify every guarded op.
+    missing = DESTRUCTIVE_OPS - set(OP_EFFECT)
+    assert not missing, f"DESTRUCTIVE_OPS missing an EffectClass: {sorted(missing)}"
+
+
+def test_effect_of_unmapped_op_is_observe():
+    # Mirrors guard(): an op not in the map is a read, ungated.
+    assert effect_of("info.get") is EffectClass.OBSERVE
+    assert effect_of("power_state.read") is EffectClass.OBSERVE
+
+
+def test_ctrl_alt_delete_is_power_soft_not_hid():
+    # CAD is a reboot delivered over the keyboard — must not be ordinary HID.
+    assert effect_of("hid.ctrl_alt_delete") is EffectClass.POWER_SOFT
+
+
+def test_effect_classes_by_family():
+    assert effect_of("hid.type_text") is EffectClass.HID_INPUT
+    assert effect_of("hid.mouse_click") is EffectClass.HID_INPUT
+    assert effect_of("msd.connect") is EffectClass.MEDIA
+    assert effect_of("atx.power_on") is EffectClass.POWER_SOFT
+    assert effect_of("atx.reset_hard") is EffectClass.POWER_HARD
+    assert effect_of("gpio.pulse") is EffectClass.POWER_HARD
+    assert effect_of("ssh.exec") is EffectClass.HID_CONTROL
+
+
+@pytest.mark.parametrize(
+    "keys,expected",
+    [
+        # Ctrl+Alt+Del — both modifier-side variants — is a soft reboot.
+        ("ControlLeft,AltLeft,Delete", EffectClass.POWER_SOFT),
+        ("ControlRight,AltRight,Delete", EffectClass.POWER_SOFT),
+        ("altleft,controlleft,delete", EffectClass.POWER_SOFT),  # order/case insensitive
+        # Magic SysRq reboot / poweroff are *harder* than CAD.
+        ("AltLeft,PrintScreen,KeyB", EffectClass.POWER_HARD),
+        ("AltLeft,PrintScreen,KeyO", EffectClass.POWER_HARD),
+        ("AltLeft,SysRq,KeyB", EffectClass.POWER_HARD),
+        # Other SysRq commands — soft.
+        ("AltLeft,PrintScreen,KeyE", EffectClass.POWER_SOFT),
+        ("AltLeft,PrintScreen,KeyS", EffectClass.POWER_SOFT),
+        # Session shortcuts — hid_control, gated as HID not power.
+        ("ControlLeft,AltLeft,F2", EffectClass.HID_CONTROL),  # VT switch
+        ("AltLeft,F4", EffectClass.HID_CONTROL),  # Windows close
+        ("ControlLeft,AltLeft,Backspace", EffectClass.HID_CONTROL),  # X restart
+        # Unknown chord — loose default, still surfaced for sign-off.
+        ("ControlLeft,KeyT", EffectClass.HID_CONTROL),
+        ("MetaLeft,KeyL", EffectClass.HID_CONTROL),
+    ],
+)
+def test_shortcut_effect_classifies_power_chord_families(keys, expected):
+    assert shortcut_effect(keys) is expected
