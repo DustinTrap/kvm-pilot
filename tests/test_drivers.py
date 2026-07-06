@@ -140,7 +140,7 @@ def test_make_driver_from_config_dispatches_on_cfg_driver() -> None:
 
     from kvm_pilot.config import HostConfig
     from kvm_pilot.drivers import FakeDriver, RedfishDriver, make_driver_from_config
-    from kvm_pilot.drivers.pikvm import GLKVMDriver
+    from kvm_pilot.drivers.glkvm import GLKVMDriver
     from kvm_pilot.errors import KVMPilotError
 
     assert isinstance(make_driver_from_config(HostConfig(host="h", driver="glkvm")), GLKVMDriver)

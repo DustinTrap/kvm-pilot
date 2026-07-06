@@ -192,7 +192,7 @@ def test_ssh_bootstrap_plan_mode(capsys):
 
 def test_driver_glkvm_builds_the_glkvm_subclass():
     from kvm_pilot.cli import _build_client, build_parser
-    from kvm_pilot.drivers.pikvm import GLKVMDriver
+    from kvm_pilot.drivers.glkvm import GLKVMDriver
 
     args = build_parser().parse_args(["info", "--driver", "glkvm", "--host", "h"])
     kvm = _build_client(args)  # construction only; no network

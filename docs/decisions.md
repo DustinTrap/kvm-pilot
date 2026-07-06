@@ -312,6 +312,17 @@ path downscales to ~1/5 resolution (which would break OCR/vision) — there is n
 full-resolution re-encode-at-quality endpoint. The parameter was a no-op lie;
 deleted rather than deprecated while the API is alpha.
 
+### GLKVM owns `drivers/glkvm.py`; `pikvm.py` keeps only no-delta forks (#140)
+The GL fork repeatedly confused agents while it lived in `pikvm.py`: GL-only
+behavior (API disabled by default, the `/api/upgrade/*` flash layer, dual
+version numbers, streamer/ATX quirks) sat in a file whose name promised stock
+PiKVM, and field sessions kept applying stock-PiKVM assumptions to GL units
+(#126/#128 were filed from exactly that gap). GLKVM now has its own module
+whose docstring enumerates the divergences — including that GL firmware
+self-reports as `rpi/rpi4/v3`, so nothing in `/api/info` reveals the fork.
+`pikvm.py` re-exports the moved symbols for one release (the package is on
+PyPI); the public `from kvm_pilot import GLKVMDriver` path never changed.
+
 ## Orchestration — "Reflexes" edge-autonomy release (planned)
 
 These two records are **forward-looking**: the feature (an on-demand playbook

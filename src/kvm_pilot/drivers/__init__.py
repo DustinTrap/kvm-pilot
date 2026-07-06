@@ -37,7 +37,8 @@ if TYPE_CHECKING:
     from ..client import KVMClient
     from ..config import HostConfig
     from .fake import FakeDriver
-    from .pikvm import BliKVMDriver, GLKVMDriver
+    from .glkvm import GLKVMDriver
+    from .pikvm import BliKVMDriver
     from .redfish import RedfishDriver
 
 
@@ -55,7 +56,7 @@ def _make_pikvm(**conf: object) -> KVMDriver:
 
 
 def _make_glkvm(**conf: object) -> KVMDriver:
-    from .pikvm import GLKVMDriver
+    from .glkvm import GLKVMDriver
 
     return GLKVMDriver(**conf)  # type: ignore[arg-type]
 
@@ -136,7 +137,8 @@ def make_driver_from_config(
         )
     elif kind in ("pikvm", "glkvm", "blikvm"):
         from ..client import PiKVMDriver
-        from .pikvm import BliKVMDriver, GLKVMDriver
+        from .glkvm import GLKVMDriver
+        from .pikvm import BliKVMDriver
 
         cls = {"pikvm": PiKVMDriver, "glkvm": GLKVMDriver, "blikvm": BliKVMDriver}[kind]
         drv = cls.from_config(cfg, confirm=confirm, dry_run=dry_run)
@@ -176,10 +178,14 @@ def __getattr__(name: str) -> object:
         from .redfish import RedfishDriver
 
         return RedfishDriver
-    if name in ("GLKVMDriver", "BliKVMDriver"):
-        from . import pikvm
+    if name == "GLKVMDriver":
+        from .glkvm import GLKVMDriver
 
-        return getattr(pikvm, name)
+        return GLKVMDriver
+    if name == "BliKVMDriver":
+        from .pikvm import BliKVMDriver
+
+        return BliKVMDriver
     raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
 
 
