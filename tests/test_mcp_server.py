@@ -36,9 +36,15 @@ EXPECTED_TOOLS = {
     "ssh_reachable",
     "ssh_exec",
     "ssh_discover",
+    "type_text",
+    "press_key",
+    "send_shortcut",
+    "ctrl_alt_delete",
 }
 # Tools that change state (readOnlyHint=False, destructiveHint=True).
-DESTRUCTIVE_TOOLS = {"power", "ssh_exec"}
+DESTRUCTIVE_TOOLS = {
+    "power", "ssh_exec", "type_text", "press_key", "send_shortcut", "ctrl_alt_delete",
+}
 
 
 @pytest.fixture()
@@ -85,6 +91,28 @@ def result_json(result) -> dict:
     """Parse a dict-returning tool's JSON text content."""
     assert result.content[0].type == "text"
     return json.loads(result.content[0].text)
+
+
+def run_session_elicit(env, interact, *, action, content=None):
+    """Like ``run_session`` but the client advertises elicitation and answers every
+    approval prompt with a fixed ``(action, content)`` — the interactive posture."""
+    from mcp.types import ElicitResult
+
+    async def elicitation_callback(context, params):
+        return ElicitResult(action=action, content=content)
+
+    async def runner():
+        params = StdioServerParameters(
+            command=sys.executable, args=["-m", "kvm_pilot.mcp.server"], env=env
+        )
+        async with stdio_client(params) as (read, write):
+            async with ClientSession(
+                read, write, elicitation_callback=elicitation_callback
+            ) as session:
+                await session.initialize()
+                return await interact(session)
+
+    return asyncio.run(asyncio.wait_for(runner(), timeout=60))
 
 
 def test_handshake_lists_annotated_tools(config_file):
@@ -147,6 +175,136 @@ def test_power_executes_on_fake_driver_when_fully_gated(config_file):
     text = result.content[0].text
     assert "requested on host 'fakebox.local' (fake)" in text
     assert "DRY-RUN" not in text
+
+
+# -- HID act tools (#61): effect gates, approval posture, receipt shape -------
+
+
+def test_type_text_denied_without_hid_gate(config_file):
+    # A denial comes back through the SAME call path (not a raised error) so the
+    # agent can recover.
+    async def interact(session):
+        return await session.call_tool("type_text", {"text": "hello", "confirm": True})
+
+    parsed = result_json(run_session(server_env(config_file), interact))
+    assert parsed["approved"] is False
+    assert "disabled" in parsed["denied_reason"]
+
+
+def test_type_text_preauthorized_with_confirm(config_file):
+    # No elicitation client -> pre-authorized posture: standing ALLOW_HID + confirm.
+    async def interact(session):
+        return await session.call_tool("type_text", {"text": "root", "confirm": True})
+
+    parsed = result_json(run_session(server_env(config_file, KVM_PILOT_MCP_ALLOW_HID="1"), interact))
+    assert parsed["approved"] is True
+    assert parsed["effect"] == "hid_input"
+    assert parsed["transport"] == "hid.keyboard"
+    assert parsed["op"] == "hid.type_text"
+    assert parsed["invocation_id"]
+    assert parsed["approval"]["args_hash"]
+    assert parsed["approval"]["approver"] == "policy"
+
+
+def test_type_text_denied_without_confirm_in_preauthorized(config_file):
+    async def interact(session):
+        return await session.call_tool("type_text", {"text": "x"})
+
+    parsed = result_json(run_session(server_env(config_file, KVM_PILOT_MCP_ALLOW_HID="1"), interact))
+    assert parsed["approved"] is False
+    assert "confirm=true" in parsed["denied_reason"]
+
+
+def test_ctrl_alt_delete_needs_power_gate_not_hid(config_file):
+    # CAD is classified power_soft: ALLOW_HID must NOT suffice; ALLOW_POWER does.
+    async def interact(session):
+        return await session.call_tool("ctrl_alt_delete", {"confirm": True})
+
+    hid_only = result_json(run_session(server_env(config_file, KVM_PILOT_MCP_ALLOW_HID="1"), interact))
+    assert hid_only["approved"] is False
+    powered = result_json(
+        run_session(server_env(config_file, KVM_PILOT_MCP_ALLOW_POWER="1"), interact)
+    )
+    assert powered["approved"] is True
+    assert powered["effect"] == "power_soft"
+
+
+def test_send_shortcut_cad_cannot_slip_the_hid_gate(config_file):
+    async def interact(session):
+        return await session.call_tool(
+            "send_shortcut", {"keys": "ControlLeft,AltLeft,Delete", "confirm": True}
+        )
+
+    hid_only = result_json(run_session(server_env(config_file, KVM_PILOT_MCP_ALLOW_HID="1"), interact))
+    assert hid_only["approved"] is False  # power_soft chord, HID gate insufficient
+    powered = result_json(
+        run_session(server_env(config_file, KVM_PILOT_MCP_ALLOW_POWER="1"), interact)
+    )
+    assert powered["approved"] is True
+    assert powered["effect"] == "power_soft"
+
+
+def test_send_shortcut_vt_switch_uses_hid_gate(config_file):
+    async def interact(session):
+        return await session.call_tool(
+            "send_shortcut", {"keys": "ControlLeft,AltLeft,F2", "confirm": True}
+        )
+
+    parsed = result_json(run_session(server_env(config_file, KVM_PILOT_MCP_ALLOW_HID="1"), interact))
+    assert parsed["approved"] is True
+    assert parsed["effect"] == "hid_control"
+
+
+def test_act_interactive_elicit_accept(config_file):
+    # An elicitation-capable client uses the interactive posture (no confirm needed).
+    async def interact(session):
+        return await session.call_tool("type_text", {"text": "hi"})
+
+    env = server_env(config_file, KVM_PILOT_MCP_ALLOW_HID="1")
+    parsed = result_json(
+        run_session_elicit(env, interact, action="accept", content={"approve": True, "approver": "alice"})
+    )
+    assert parsed["approved"] is True
+    assert parsed["approval"]["approver"] == "alice"
+
+
+def test_act_interactive_elicit_decline_returns_same_path(config_file):
+    async def interact(session):
+        return await session.call_tool("type_text", {"text": "hi"})
+
+    env = server_env(config_file, KVM_PILOT_MCP_ALLOW_HID="1")
+    parsed = result_json(run_session_elicit(env, interact, action="decline"))
+    assert parsed["approved"] is False
+    assert "decline" in parsed["denied_reason"]
+
+
+def test_act_interactive_elicit_accept_but_not_approved(config_file):
+    async def interact(session):
+        return await session.call_tool("type_text", {"text": "hi"})
+
+    env = server_env(config_file, KVM_PILOT_MCP_ALLOW_HID="1")
+    parsed = result_json(
+        run_session_elicit(env, interact, action="accept", content={"approve": False})
+    )
+    assert parsed["approved"] is False
+
+
+def test_allowlist_refuses_profile_not_listed(config_file):
+    async def interact(session):
+        return await session.call_tool("info", {"profile": "bmc"})
+
+    env = server_env(config_file, KVM_PILOT_MCP_PROFILES="fakebox")
+    result = run_session(env, interact)
+    assert result.isError is True
+    assert "allowlist" in result.content[0].text
+
+
+def test_allowlist_allows_listed_profile(config_file):
+    async def interact(session):
+        return await session.call_tool("info", {})  # default profile 'fakebox' is listed
+
+    env = server_env(config_file, KVM_PILOT_MCP_PROFILES="fakebox")
+    assert run_session(env, interact).isError is False
 
 
 def test_ssh_exec_errors_without_operator_gate(config_file):
