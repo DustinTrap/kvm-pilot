@@ -32,6 +32,7 @@ from .errors import (
     AuthError,
     CapabilityError,
     KVMPilotError,
+    SnapshotFormatError,
     TimeoutError,
 )
 from .http import HTTP
@@ -260,8 +261,20 @@ class PiKVMDriver(PowerMixin, CapabilityMixin):
         No quality knob: kvmd's ``preview_quality`` applies only to its
         downscaled preview (which would break OCR/vision), and the full-size
         snapshot has no re-encode-at-quality path.
+
+        The bytes are validated to actually be a JPEG (SOI header): GL RM1PE
+        firmware has returned raw H.264 with a JPEG content type (#107), which
+        would silently feed garbage to OCR/vision and remote agents.
         """
-        return self._http.get("/api/streamer/snapshot", raw_response=True)
+        data = self._http.get("/api/streamer/snapshot", raw_response=True)
+        if not data.startswith(b"\xff\xd8\xff"):
+            raise SnapshotFormatError(
+                f"snapshot returned non-JPEG bytes (header {data[:4]!r}) — the "
+                "streamer is likely emitting H.264/raw frames at this resolution "
+                "(#107); try a different capture resolution or the device's "
+                "native snapshot endpoint"
+            )
+        return data
 
     def snapshot_save(self, path: str) -> Path:
         out = Path(path)
