@@ -54,6 +54,7 @@ remote before physical**, below).
 | Change **host** power (on/off/cycle/reset) | **MCP `power`** (gated) or CLI `power` / `power-cycle` | Destructive — confirm each step. MCP `power` is operator-enabled + per-call approval. |
 | Reboot the **KVM appliance** / restart `kvmd` / inspect `/etc/kvmd` | **SSH to the appliance** | No kvm-pilot interface does this — out-of-band only. |
 | Check if the **target host** is reachable / run commands on it once its OS is up | **MCP `ssh_reachable` / `ssh_exec`**, or CLI `ssh-check` / `ssh-exec` (in-band) | Prefer SSH over KVM keystrokes once the OS is up. Configure the target's IP/host/FQDN via `ssh_host` (≠ the KVM's address); `ssh_exec` is gated (operator opt-in `KVM_PILOT_MCP_ALLOW_SSH`). See "Recovery order" below. |
+| Bootstrap SSH during an install (set up the cheap channel over the expensive one) | **CLI `ssh-bootstrap`** | Once an installer is up, switches to a text console, reads the DHCP IP off the screen, starts `sshd`, and hands off to SSH. **Plans by default** — pass `--execute` to run it; add a `--command` that installs a key/password for a usable channel. Guided/conservative (aborts if the console can't be confirmed); not an MCP tool. |
 | View the screen when `snapshot` fails | **WebRTC/Janus stream or the vendor web UI** | The only way to see a unit that streams H.264 at its native resolution. |
 
 **Host vs. appliance — keep these straight.** The `power` tool/CLI acts on the
