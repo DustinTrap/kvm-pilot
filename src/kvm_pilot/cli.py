@@ -369,6 +369,32 @@ def cmd_key(args) -> int:
     return 0
 
 
+def _mouse_to(kvm, x: float, y: float, space: str) -> None:
+    if space == "percent":
+        kvm.mouse_move_percent(x, y)
+    elif space == "pixel":
+        kvm.mouse_move_pixels(int(x), int(y))
+    else:  # raw kvmd -32768..32767, (0, 0) at screen center
+        kvm.mouse_move(int(x), int(y))
+
+
+def cmd_mouse_move(args) -> int:
+    kvm = _rich_client(args, Capability.HID)
+    _mouse_to(kvm, args.x, args.y, args.space)
+    print(f"mouse: moved to ({args.x}, {args.y}) [{args.space}]")
+    return 0
+
+
+def cmd_click(args) -> int:
+    kvm = _rich_client(args, Capability.HID)
+    if args.at:
+        _mouse_to(kvm, args.at[0], args.at[1], args.space)
+    kvm.mouse_click(args.button, double=args.double)
+    where = f" at ({args.at[0]}, {args.at[1]}) [{args.space}]" if args.at else ""
+    print(f"mouse: {args.button} {'double-click' if args.double else 'click'}{where}")
+    return 0
+
+
 def cmd_media_list(args) -> int:
     # Check this before telling anyone to download/upload an ISO — the image
     # may already be on the device from an earlier job (#127).
@@ -865,6 +891,27 @@ def build_parser() -> argparse.ArgumentParser:
                         "(e.g. ControlLeft+AltLeft+F2)")
     _add_common(p)
     p.set_defaults(func=cmd_key, _preflight=True)
+
+    p = sub.add_parser("mouse-move",
+                       help="Move the mouse (absolute) — percent of screen by default")
+    p.add_argument("x", type=float)
+    p.add_argument("y", type=float)
+    p.add_argument("--space", choices=["percent", "pixel", "raw"], default="percent",
+                   help="Coordinate space: percent 0.0-1.0 (default, resolution-proof), "
+                        "screen pixels, or raw kvmd -32768..32767")
+    _add_common(p)
+    p.set_defaults(func=cmd_mouse_move, _preflight=True)
+
+    p = sub.add_parser("click", help="Click the mouse (move first with --at X Y)")
+    p.add_argument("button", nargs="?", default="left",
+                   choices=["left", "right", "middle"])
+    p.add_argument("--at", nargs=2, type=float, metavar=("X", "Y"),
+                   help="Move here first (in --space coordinates)")
+    p.add_argument("--space", choices=["percent", "pixel", "raw"], default="percent",
+                   help="Coordinate space for --at (default percent 0.0-1.0)")
+    p.add_argument("--double", action="store_true", help="Double-click")
+    _add_common(p)
+    p.set_defaults(func=cmd_click, _preflight=True)
 
     p = sub.add_parser("media-list",
                        help="List images already on the KVM's virtual-media storage (read-only)")
