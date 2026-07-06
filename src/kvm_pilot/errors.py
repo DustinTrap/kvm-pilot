@@ -59,6 +59,24 @@ class ApiDisabledError(KVMPilotError):
     """
 
 
+class SnapshotFormatError(KVMPilotError):
+    """The snapshot endpoint returned bytes that are not a JPEG.
+
+    Observed on GL RM1PE firmware where ``/api/streamer/snapshot`` returns raw
+    H.264 with a JPEG content type (#107) — trusting the Content-Type would feed
+    garbage to OCR/vision, so callers get this typed error instead.
+    """
+
+
+class MediaOfflineError(KVMPilotError):
+    """Virtual media was attached but the device reports it offline.
+
+    Observed on GLKVM: the mount API accepts the request (``enabled/connected:
+    true``) while ``online`` stays ``false`` and the host sees no device (#77) —
+    usually the GL-side MSD/virtual-media toggle in the device web UI is off.
+    """
+
+
 __all__ = [
     "KVMPilotError",
     "AuthError",
@@ -70,4 +88,6 @@ __all__ = [
     "VisionError",
     "CapabilityError",
     "ApiDisabledError",
+    "SnapshotFormatError",
+    "MediaOfflineError",
 ]

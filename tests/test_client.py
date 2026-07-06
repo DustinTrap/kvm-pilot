@@ -3,15 +3,25 @@
 import pytest
 
 from kvm_pilot.client import KVMClient
-from kvm_pilot.errors import SafetyError
+from kvm_pilot.errors import SafetyError, SnapshotFormatError
 from kvm_pilot.safety import allow_all, deny_all
 
 
 def test_snapshot_hits_streamer(client, fake_http):
-    fake_http.results["/api/streamer/snapshot"] = b"\xff\xd8jpeg"
+    fake_http.results["/api/streamer/snapshot"] = b"\xff\xd8\xffjpeg"
     data = client.snapshot()
-    assert data == b"\xff\xd8jpeg"
+    assert data == b"\xff\xd8\xffjpeg"
     assert "/api/streamer/snapshot" in fake_http.paths()
+
+
+def test_snapshot_rejects_non_jpeg_bytes(client, fake_http):
+    # Regression (#107): RM1PE firmware has returned raw H.264 with a JPEG
+    # content type. Trusting the Content-Type feeds garbage to OCR/vision, so
+    # non-JPEG bytes must raise a typed error, not be returned.
+    fake_http.results["/api/streamer/snapshot"] = b"\x00\x00\x00\x01h264-nal"
+    with pytest.raises(SnapshotFormatError) as ei:
+        client.snapshot()
+    assert "non-JPEG" in str(ei.value)
 
 
 def test_power_off_hard_gated_by_confirm(fake_http):
@@ -169,7 +179,7 @@ def test_is_powered_on_fails_open_without_atx(client, fake_http):
 def test_snapshot_sends_no_quality_params(client, fake_http):
     # kvmd ignores preview_quality without preview=1 (and the preview would be
     # downscaled anyway) — the snapshot request must carry no params at all.
-    fake_http.results["/api/streamer/snapshot"] = b"\xff\xd8jpeg"
+    fake_http.results["/api/streamer/snapshot"] = b"\xff\xd8\xffjpeg"
     client.snapshot()
     call = [c for c in fake_http.calls if c["path"] == "/api/streamer/snapshot"][0]
     assert not call.get("params")
