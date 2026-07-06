@@ -293,6 +293,34 @@ def cmd_ssh_discover(args) -> int:
     return 0 if found else 1
 
 
+def cmd_ssh_bootstrap(args) -> int:
+    """Bootstrap SSH on an installer host over KVM HID, then hand off (issue #81)."""
+    from .bootstrap import DEFAULT_BOOTSTRAP_COMMANDS, ssh_bootstrap
+
+    kvm = _rich_client(args, Capability.HID)
+    if args.execute and not getattr(args, "yes", False):
+        # One top-level confirmation for the whole composite, not per keystroke.
+        print(
+            "SSH bootstrap will switch the host to a text console and TYPE commands on it "
+            "over KVM HID. Only do this against an installer/console you expect.",
+            file=sys.stderr,
+        )
+        if not interactive_confirm("bootstrap.run", "Proceed with SSH bootstrap?"):
+            print("aborted", file=sys.stderr)
+            return 1
+        kvm.safety.confirm = allow_all  # consented to the run; don't re-prompt per keystroke
+    cfg = _resolve_cfg(args)
+    analyzer = _make_analyzer(kvm, args)
+    commands = args.bootstrap_command or list(DEFAULT_BOOTSTRAP_COMMANDS)
+    result = ssh_bootstrap(
+        kvm, cfg, analyzer=analyzer, execute=args.execute, vt_shortcut=args.vt,
+        ip_region=args.ip_region, commands=commands,
+        require_installer=not args.no_installer_check,
+    )
+    print(json.dumps(result.to_dict(), indent=2))
+    return 0 if result.ok else 1
+
+
 def cmd_snapshot(args) -> int:
     kvm = _rich_client(args, Capability.VIDEO)
     out = kvm.snapshot_save(args.output)
@@ -747,6 +775,25 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("cidr", help="CIDR to scan, e.g. 10.0.1.0/24")
     p.add_argument("--ssh-port", type=int, default=22, help="SSH port to probe (default 22)")
     p.set_defaults(func=cmd_ssh_discover)
+
+    p = sub.add_parser(
+        "ssh-bootstrap",
+        help="Bootstrap SSH on an installer host over KVM HID, then hand off (#81)")
+    p.add_argument("--execute", action="store_true",
+                   help="Actually perform it (default: print the plan and send nothing)")
+    p.add_argument("--vt", default="ControlLeft,AltLeft,F2",
+                   help="VT-switch shortcut to reach a text console (default Ctrl+Alt+F2)")
+    p.add_argument("--ip-region", dest="ip_region", nargs=4, type=int,
+                   metavar=("L", "T", "R", "B"),
+                   help="OCR bounding box for reading the IP (optional; default full screen)")
+    p.add_argument("--command", action="append", dest="bootstrap_command",
+                   help="A bootstrap command to type (repeatable; overrides the defaults). "
+                        "Add one that installs a key or sets a password for a usable channel.")
+    p.add_argument("--no-installer-check", dest="no_installer_check", action="store_true",
+                   help="Skip the 'is an installer on screen?' precondition (risky)")
+    _add_common(p)
+    _add_vision(p)
+    p.set_defaults(func=cmd_ssh_bootstrap, _preflight=True)
 
     p = sub.add_parser("boot-progress", help="Structured boot phase (BMC BootProgress)")
     _add_common(p)
