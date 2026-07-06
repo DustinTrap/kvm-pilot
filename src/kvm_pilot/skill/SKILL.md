@@ -43,7 +43,7 @@ remote before physical**, below).
 
 | Action | Best interface | Notes / fallback |
 |---|---|---|
-| See the screen as a model-visible image | **MCP** `snapshot` | Returns a real image content block — no screenshot-file round-trip. CLI `snapshot` writes a file. |
+| See the screen as a model-visible image | **MCP** `snapshot` | Returns a real image content block — no screenshot-file round-trip. CLI `snapshot` writes a file. The JSON payload carries `signal` (online/resolution/fps/format) and `unchanged_since_last_snapshot` — a byte-identical frame when the screen should have changed means stale/cached pixels: check `signal` + `logs` before trusting or acting on it. |
 | Classify boot/run phase | **MCP** `classify_screen` | Uses the server's vision backend if configured; **with no server key it falls back to caller-side** — hands you the screenshot + prompt to classify yourself (a `[json, image]` result). CLI: `classify` / `watch`. |
 | Preflight audit (run first) | **MCP** `healthcheck` or CLI `healthcheck` | The intake gate — see below. |
 | Device info / host power state | **MCP** `info` / `power_state`, or CLI | Either works. |

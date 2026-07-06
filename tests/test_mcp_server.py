@@ -607,6 +607,24 @@ def test_snapshot_returns_a_real_image(config_file):
     assert "fakebox.local" in result.content[0].text  # provenance note
 
 
+def test_snapshot_reports_signal_and_flags_unchanged_frames(config_file):
+    """#141/#143: the payload carries live signal state, and a byte-identical
+    repeat frame is flagged so agents can spot stale/cached pixels."""
+
+    async def interact(session):
+        first = await session.call_tool("snapshot", {})
+        second = await session.call_tool("snapshot", {})
+        return first, second
+
+    first, second = run_session(server_env(config_file), interact)
+    p1, p2 = json.loads(first.content[0].text), json.loads(second.content[0].text)
+    assert p1["signal"]["online"] is True and p1["signal"]["width"] == 1920
+    assert p1["unchanged_since_last_snapshot"] is False
+    # The fake driver returns a constant image, so the repeat is byte-identical.
+    assert p2["unchanged_since_last_snapshot"] is True
+    assert "stale" in p2["staleness_note"]
+
+
 def test_classify_screen_supports_local_backend(config_file):
     """The 'local' vision backend is selectable via the CLI's env var names.
 

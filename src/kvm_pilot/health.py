@@ -370,13 +370,23 @@ def check_video_signal(driver: Any) -> CheckResult | None:
         alive = bool(fn())
     except KVMPilotError:
         alive = False
+    # Resolution/online/format detail turns "video looks wrong" from a guess
+    # into a diagnosis (#143) — no-signal vs bad-format vs subsystem-down.
+    detail_fn = getattr(driver, "video_signal_info", None)
+    sig = ""
+    if detail_fn is not None:
+        try:
+            info = detail_fn()
+            sig = ", ".join(f"{k}={v}" for k, v in info.items() if v is not None)
+        except KVMPilotError:
+            sig = ""
     if alive:
         return CheckResult(
             id="video-signal",
             pillar=Pillar.READINESS,
             severity=Severity.OK,
             title="Video signal",
-            detail="Capture stream is live.",
+            detail="Capture stream is live" + (f" ({sig})." if sig else "."),
             cacheable=False,
         )
     return CheckResult(
@@ -384,7 +394,7 @@ def check_video_signal(driver: Any) -> CheckResult | None:
         pillar=Pillar.READINESS,
         severity=Severity.WARNING,
         title="Video signal",
-        detail="No video signal from the host.",
+        detail="No video signal from the host" + (f" ({sig})." if sig else "."),
         remediation="Host may be powered off or the HDMI capture is disconnected.",
         cacheable=False,
     )

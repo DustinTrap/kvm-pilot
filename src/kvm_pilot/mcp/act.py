@@ -341,6 +341,21 @@ def frame_ref(host: str, image: bytes) -> str:
     return f"{host}:{generation(host)}:{hashlib.sha256(image).hexdigest()[:16]}"
 
 
+# Last content hash returned per host — the #141 staleness tell: a byte-identical
+# frame across a real screen change means the pixels are stale/cached, which the
+# generation mechanism (media/power effects only) cannot catch.
+_LAST_FRAME_HASH: dict[str, str] = {}
+
+
+def note_frame(host: str, ref: str) -> bool:
+    """Record a snapshot's content hash; True if byte-identical to the previous one."""
+    content_hash = ref.rsplit(":", 1)[-1]
+    with _gen_lock:
+        same = _LAST_FRAME_HASH.get(host) == content_hash
+        _LAST_FRAME_HASH[host] = content_hash
+    return same
+
+
 def frame_ref_generation(ref: str) -> int | None:
     """Parse the generation segment of a frame_ref, or None if malformed.
 

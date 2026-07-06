@@ -162,6 +162,10 @@ class FakeDriver(PowerMixin, CapabilityMixin):
     def has_video_signal(self) -> bool:
         return self.video_signal
 
+    def video_signal_info(self) -> dict:
+        return {"online": self.video_signal, "width": 1920, "height": 1080,
+                "fps": 30, "format": "JPEG"}
+
     # -- VirtualMedia (gated) --------------------------------------------
 
     def mount_iso(

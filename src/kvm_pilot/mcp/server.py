@@ -48,7 +48,7 @@ from mcp.types import ToolAnnotations
 from kvm_pilot import resolve_host
 from kvm_pilot.config import HostConfig
 from kvm_pilot.drivers import Capability, KVMDriver, make_driver_from_config
-from kvm_pilot.errors import CapabilityError, VisionError
+from kvm_pilot.errors import CapabilityError, KVMPilotError, VisionError
 from kvm_pilot.mcp import act
 from kvm_pilot.safety import EffectClass, allow_all, deny_all, shortcut_effect
 from kvm_pilot.vision import (
@@ -280,13 +280,35 @@ def snapshot(profile: str | None = None):
     (``host:generation:hash``) — pass it back to the ``mouse`` tool as
     ``observed_frame_ref`` so an absolute click can be refused if the host rebooted
     or swapped media since you looked.
+
+    It also carries the live ``signal`` state (online/resolution/fps/format,
+    #143) and ``unchanged_since_last_snapshot`` (#141): a byte-identical frame
+    when the screen should have changed means the pixels are stale/cached — do
+    NOT trust them as ground truth; check ``signal`` and ``logs`` instead.
     """
     with _driver(profile, confirm=deny_all, capability=Capability.VIDEO) as (cfg, kvm):
         img = cast("Video", kvm).snapshot()
         note = f"screen of host '{cfg.host}' via the '{cfg.driver}' driver"
         if _dry_run():
             note += " (dry-run session)"
-        payload = {**_provenance(cfg), "frame_ref": act.frame_ref(cfg.host, img), "note": note}
+        ref = act.frame_ref(cfg.host, img)
+        payload = {
+            **_provenance(cfg),
+            "frame_ref": ref,
+            "unchanged_since_last_snapshot": act.note_frame(cfg.host, ref),
+            "note": note,
+        }
+        if payload["unchanged_since_last_snapshot"]:
+            payload["staleness_note"] = (
+                "byte-identical to the previous snapshot — if the screen should "
+                "have changed since, treat this frame as possibly stale/cached "
+                "(#141) and verify via `signal` + `logs` before acting on it"
+            )
+        if hasattr(kvm, "video_signal_info"):
+            try:
+                payload["signal"] = kvm.video_signal_info()
+            except KVMPilotError:
+                payload["signal"] = None  # snapshot worked; a state probe must not fail it
         return [json.dumps(payload), Image(data=img, format="jpeg")]
 
 

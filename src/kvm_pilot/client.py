@@ -35,6 +35,7 @@ from .errors import (
     MediaOfflineError,
     SnapshotFormatError,
     TimeoutError,
+    UnavailableError,
 )
 from .http import HTTP
 from .safety import SafetyPolicy
@@ -267,8 +268,18 @@ class PiKVMDriver(PowerMixin, CapabilityMixin):
         The bytes are validated to actually be a JPEG (SOI header): GL RM1PE
         firmware has returned raw H.264 with a JPEG content type (#107), which
         would silently feed garbage to OCR/vision and remote agents.
+
+        A 503 (after the transport's own bounded retries) is re-raised with the
+        live streamer state attached (#142/#143), so "no signal" is
+        distinguishable from "signal fine but the JPEG encoder is wedged or
+        re-initializing".
         """
-        data = self._http.get("/api/streamer/snapshot", raw_response=True)
+        try:
+            data = self._http.get("/api/streamer/snapshot", raw_response=True)
+        except UnavailableError as exc:
+            raise UnavailableError(
+                self._snapshot_unavailable_detail(exc), exc.status_code
+            ) from exc
         if not data.startswith(b"\xff\xd8\xff"):
             raise SnapshotFormatError(
                 f"snapshot returned non-JPEG bytes (header {data[:4]!r}) — the "
@@ -277,6 +288,30 @@ class PiKVMDriver(PowerMixin, CapabilityMixin):
                 "native snapshot endpoint"
             )
         return data
+
+    def _snapshot_unavailable_detail(self, exc: UnavailableError) -> str:
+        """Explain a snapshot 503 using the streamer state (#142/#143)."""
+        try:
+            sig = self.video_signal_info()
+        except Exception:  # noqa: BLE001 - the original 503 is the real story
+            return (
+                f"{exc} — the streamer state endpoint is also unreachable, so the "
+                "video subsystem looks down. Check `logs`, or power-cycle/reboot "
+                "the KVM appliance."
+            )
+        state = ", ".join(f"{k}={v}" for k, v in sig.items() if v is not None) or "no detail"
+        if sig.get("online") is False:
+            return (
+                f"{exc} — the capture source reports offline ({state}): there is "
+                "no video signal. The host may be powered off or the HDMI input "
+                "disconnected; this is not a kvm-pilot fault."
+            )
+        return (
+            f"{exc} — but the capture source looks live ({state}), so the JPEG "
+            "snapshot path itself is failing: typically the encoder is "
+            "re-initializing (retry in a few seconds) or wedged (#142). Check "
+            "`logs`; the video feed in the device web UI may still work."
+        )
 
     def snapshot_save(self, path: str) -> Path:
         out = Path(path)
@@ -299,6 +334,34 @@ class PiKVMDriver(PowerMixin, CapabilityMixin):
     def get_streamer_state(self) -> dict:
         return self._http.get("/api/streamer")
 
+    @staticmethod
+    def _streamer_source(state: dict) -> dict:
+        """The ``source`` block of ``/api/streamer``, tolerating both shapes."""
+        source = state.get("source") or {}
+        if not source and isinstance(state.get("streamer"), dict):
+            source = state["streamer"].get("source") or {}
+        return source if isinstance(source, dict) else {}
+
+    def video_signal_info(self) -> dict:
+        """Normalized live-capture state: ``{online, width, height, fps, format}``.
+
+        The cheap readout that distinguishes the three very different snapshot
+        failure modes — no signal, a format the JPEG path can't serve (#107),
+        and a wedged/re-initializing subsystem (#142) — so agents and the
+        healthcheck reason from data instead of guessing (#143). Fields the
+        firmware doesn't report are ``None``.
+        """
+        source = self._streamer_source(self.get_streamer_state())
+        res = source.get("resolution")
+        res = res if isinstance(res, dict) else {}
+        return {
+            "online": source.get("online"),
+            "width": res.get("width"),
+            "height": res.get("height"),
+            "fps": source.get("captured_fps", source.get("fps")),
+            "format": source.get("format"),
+        }
+
     def has_video_signal(self) -> bool:
         """True if the capture pipeline reports a live video source.
 
@@ -312,10 +375,7 @@ class PiKVMDriver(PowerMixin, CapabilityMixin):
             state = self.get_streamer_state()
         except Exception:  # noqa: BLE001 - a liveness probe must never raise
             return True
-        source = state.get("source") or {}
-        if not source and isinstance(state.get("streamer"), dict):
-            source = state["streamer"].get("source") or {}
-        online = source.get("online") if isinstance(source, dict) else None
+        online = self._streamer_source(state).get("online")
         return True if online is None else bool(online)
 
     # -- HID: keyboard ---------------------------------------------------

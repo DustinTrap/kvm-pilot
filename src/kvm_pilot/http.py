@@ -218,11 +218,13 @@ class HTTP:
 
     @staticmethod
     def _is_retryable(exc: Exception, method: str) -> bool:
-        # 409/503 are definitive device responses (the op was rejected, not
-        # applied) — always safe to retry. A ConnectionError is only safe when
-        # the request never reached the device (connect-phase failure) or the
-        # method is read-only: re-firing a power/HID/MSD POST whose response was
-        # lost mid-read could execute the destructive action twice.
+        # 409/503 ARE retried (bounded, with backoff): they are definitive in the
+        # sense that the device rejected the op WITHOUT applying it, so re-firing
+        # is always safe — busy/unavailable subsystems often recover within the
+        # retry window. A ConnectionError is only safe when the request never
+        # reached the device (connect-phase failure) or the method is read-only:
+        # re-firing a power/HID/MSD POST whose response was lost mid-read could
+        # execute the destructive action twice.
         if isinstance(exc, (BusyError, UnavailableError)):
             return True
         if isinstance(exc, ConnectionError):
