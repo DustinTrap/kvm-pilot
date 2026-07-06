@@ -86,6 +86,14 @@ class SSHChannel:
         timeout: float = 30.0,
         safety: SafetyPolicy | None = None,
     ):
+        # A host beginning with '-' can be misparsed by the ssh binary (and by
+        # socket tooling) as an option flag — e.g. '-oProxyCommand=…'. Reject it
+        # rather than pass an attacker-influenced runtime override into argv.
+        if host.startswith("-"):
+            raise CapabilityError(
+                f"Refusing SSH host {host!r}: a leading '-' can be misparsed as an "
+                "ssh option. Provide a hostname or IP address."
+            )
         self.host = host
         self.user = user
         self.port = port

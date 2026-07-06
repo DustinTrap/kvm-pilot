@@ -24,9 +24,9 @@ client/driver code stays stdlib-only; `mcp` is imported only in this subpackage.
 | `logs` | `readOnlyHint` | Device/host event log as text (`seek` = seconds of lookback). The text diagnostic when video/streamer/power looks wrong — it names a fault (e.g. a stuck encoder behind a `snapshot` 503) a screenshot can't |
 | `snapshot` | `readOnlyHint` | Current screen, returned as a real JPEG **image** content block the model can see |
 | `classify_screen` | `readOnlyHint` | Boot/run phase via the vision backend (Anthropic or a local VLM, see below) |
-| `ssh_reachable` | `readOnlyHint` | Is the **managed host's OS** reachable over SSH (in-band)? Targets the host *behind* the KVM (its own `ssh_host`), not the appliance — use it to prefer remote recovery before physical intervention |
+| `ssh_reachable` | `readOnlyHint` | Is the **managed host's OS** reachable over SSH (in-band)? Targets the host *behind* the KVM (its own `ssh_host`), not the appliance — use it to prefer remote recovery before physical intervention. Pass `host=` to override the target at runtime (e.g. an install-time DHCP address the profile can't know); also surfaced as an `ssh-reachable` healthcheck when `ssh_host` is configured |
 | `power` | `destructiveHint` | `on` / `off` / `off-hard` / `reset` — **disabled unless the operator opts in** |
-| `ssh_exec` | `destructiveHint` | Run a command on the managed host's OS over SSH — **disabled unless the operator opts in** (`KVM_PILOT_MCP_ALLOW_SSH`) |
+| `ssh_exec` | `destructiveHint` | Run a command on the managed host's OS over SSH — **disabled unless the operator opts in** (`KVM_PILOT_MCP_ALLOW_SSH`). `host=` overrides the target at runtime |
 | `ssh_discover` | `readOnlyHint` | Scan a CIDR for open SSH — **RISKY/opt-in** (active network scan; `confirm=true` required). Only to help find a target the user can't address, on networks they own |
 
 Every tool result names the **host and driver it acted on**, and read-only

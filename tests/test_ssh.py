@@ -52,6 +52,16 @@ def test_from_config_carries_target_fields():
     assert ch.target == "root@10.0.0.2"
 
 
+def test_reject_hyphen_prefixed_host():
+    # A host beginning with '-' can be misparsed by the ssh binary as an option
+    # (e.g. -oProxyCommand=…). A runtime host override must not smuggle one in.
+    with pytest.raises(CapabilityError, match="misparsed"):
+        SSHChannel("-oProxyCommand=touch /tmp/pwn")
+    # The from_config path (how the CLI/MCP runtime override funnels in) too.
+    with pytest.raises(CapabilityError):
+        SSHChannel.from_config(_cfg(ssh_host="-badhost"))
+
+
 # -- reachability ------------------------------------------------------------
 
 def test_reachable_true_when_socket_connects():

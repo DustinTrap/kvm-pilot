@@ -154,6 +154,28 @@ def test_make_driver_from_config_dispatches_on_cfg_driver() -> None:
         make_driver_from_config(HostConfig(host="h", driver="ipmi"))
 
 
+def test_factory_attaches_ssh_channel_when_configured() -> None:
+    # A profile with ssh_host gets an in-band SSH channel to the target OS (#81),
+    # so the healthcheck can probe reachability. It's a per-profile channel, not a
+    # driver capability, so it must not change detect_capabilities.
+    from kvm_pilot.config import HostConfig
+    from kvm_pilot.drivers import make_driver_from_config
+    from kvm_pilot.drivers.base import Capability, detect_capabilities
+
+    cfg = HostConfig(host="fakebox.local", driver="fake", ssh_host="10.0.0.2", ssh_user="root")
+    drv = make_driver_from_config(cfg)
+    assert drv.ssh_channel.host == "10.0.0.2"  # type: ignore[attr-defined]
+    assert Capability.SSH not in detect_capabilities(drv)  # not a driver capability
+
+
+def test_factory_no_ssh_channel_when_unconfigured() -> None:
+    from kvm_pilot.config import HostConfig
+    from kvm_pilot.drivers import make_driver_from_config
+
+    drv = make_driver_from_config(HostConfig(host="fakebox.local", driver="fake"))
+    assert getattr(drv, "ssh_channel", None) is None
+
+
 # -- shared PowerMixin.hard_cycle (#63) ------------------------------------
 
 def test_hard_cycle_is_shared_from_power_mixin():
