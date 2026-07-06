@@ -41,10 +41,13 @@ EXPECTED_TOOLS = {
     "send_shortcut",
     "ctrl_alt_delete",
     "mouse",
+    "mount_iso",
+    "eject",
 }
 # Tools that change state (readOnlyHint=False, destructiveHint=True).
 DESTRUCTIVE_TOOLS = {
-    "power", "ssh_exec", "type_text", "press_key", "send_shortcut", "ctrl_alt_delete", "mouse",
+    "power", "ssh_exec", "type_text", "press_key", "send_shortcut", "ctrl_alt_delete",
+    "mouse", "mount_iso", "eject",
 }
 
 
@@ -386,6 +389,64 @@ def test_mouse_click_malformed_ref_refused(config_file):
     parsed = result_json(run_session(server_env(config_file, KVM_PILOT_MCP_ALLOW_HID="1"), interact))
     assert parsed["approved"] is False
     assert "valid frame reference" in parsed["denied_reason"]
+
+
+# -- media tools (#61) -------------------------------------------------------
+
+
+def test_mount_iso_denied_without_media_gate(config_file):
+    async def interact(session):
+        return await session.call_tool(
+            "mount_iso", {"source": "/isos/ubuntu.iso", "confirm": True}
+        )
+
+    parsed = result_json(run_session(server_env(config_file), interact))
+    assert parsed["approved"] is False
+    assert "disabled" in parsed["denied_reason"]
+
+
+def test_mount_iso_approved_with_media_gate(config_file):
+    async def interact(session):
+        return await session.call_tool(
+            "mount_iso", {"source": "/isos/ubuntu.iso", "confirm": True}
+        )
+
+    parsed = result_json(
+        run_session(server_env(config_file, KVM_PILOT_MCP_ALLOW_MEDIA="1"), interact)
+    )
+    assert parsed["approved"] is True
+    assert parsed["effect"] == "media"
+    assert parsed["transport"] == "msd"
+    assert parsed["op"] == "msd.connect"
+
+
+def test_eject_approved_with_media_gate(config_file):
+    async def interact(session):
+        return await session.call_tool("eject", {"confirm": True})
+
+    parsed = result_json(
+        run_session(server_env(config_file, KVM_PILOT_MCP_ALLOW_MEDIA="1"), interact)
+    )
+    assert parsed["approved"] is True
+    assert parsed["op"] == "msd.disconnect"
+
+
+def test_mount_iso_bumps_generation_invalidating_mouse_ref(config_file):
+    # Mounting media changes the screen, so a click planned against the pre-mount
+    # frame is refused (proves media effect bumps the frame generation).
+    async def interact(session):
+        snap = await session.call_tool("snapshot", {})
+        ref = json.loads(snap.content[0].text)["frame_ref"]
+        await session.call_tool("mount_iso", {"source": "http://h/x.iso", "confirm": True})
+        return await session.call_tool(
+            "mouse",
+            {"x": 0.5, "y": 0.5, "button": "left", "observed_frame_ref": ref, "confirm": True},
+        )
+
+    env = server_env(config_file, KVM_PILOT_MCP_ALLOW_MEDIA="1", KVM_PILOT_MCP_ALLOW_HID="1")
+    parsed = result_json(run_session(env, interact))
+    assert parsed["approved"] is False
+    assert "stale screen" in parsed["denied_reason"]
 
 
 def test_ssh_exec_errors_without_operator_gate(config_file):

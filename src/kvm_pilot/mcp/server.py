@@ -57,7 +57,7 @@ if TYPE_CHECKING:
     # ``_driver(capability=…)`` guarantees the driver supports the capability at
     # runtime; narrow to the owning protocol for the capability-specific calls
     # (mirrors the ``cast`` pattern in cli.py).
-    from kvm_pilot.drivers.base import HID, Logs, Power, SystemInfo, Video
+    from kvm_pilot.drivers.base import HID, Logs, Power, SystemInfo, Video, VirtualMedia
 
 mcp = FastMCP("kvm-pilot")
 _log = logging.getLogger("kvm_pilot.mcp")
@@ -341,7 +341,7 @@ async def _act(
     transport: str,
     args: dict,
     confirm: bool,
-    run: Callable[[KVMDriver], None],
+    run: Callable[[KVMDriver], object],  # return (if any) is ignored
     detail: str,
     capability: Capability = Capability.HID,
 ) -> dict:
@@ -518,6 +518,46 @@ async def mouse(
             **_provenance(cfg),
             **act.result(inv, approval, detail=detail, extra={"coord_space": coord_space}),
         }
+
+
+@mcp.tool(annotations=_DESTRUCTIVE)
+async def mount_iso(
+    ctx: Context,
+    source: str,
+    name: str | None = None,
+    usb: bool = False,
+    confirm: bool = False,
+    profile: str | None = None,
+) -> dict:
+    """Mount an ISO as virtual media on the host. DESTRUCTIVE (media).
+
+    ``source`` is a local path or an ``http(s)://`` URL; ``usb=true`` attaches as a
+    USB flash drive instead of a CD-ROM. Needs ``KVM_PILOT_MCP_ALLOW_MEDIA`` +
+    per-invocation approval. Mounting bumps the frame generation, so a mouse click
+    planned against the pre-mount screen is invalidated.
+    """
+    return await _act(
+        ctx, profile, tool="mount_iso", effect=EffectClass.MEDIA, op="msd.connect",
+        transport="msd", args={"source": source, "name": name, "usb": usb}, confirm=confirm,
+        run=lambda kvm: cast("VirtualMedia", kvm).mount_iso(source, image_name=name, cdrom=not usb),
+        detail=f"mounted {source!r}",
+        capability=Capability.VIRTUAL_MEDIA,
+    )
+
+
+@mcp.tool(annotations=_DESTRUCTIVE)
+async def eject(ctx: Context, confirm: bool = False, profile: str | None = None) -> dict:
+    """Detach virtual media (the inverse of ``mount_iso``). DESTRUCTIVE (media).
+
+    Needs ``KVM_PILOT_MCP_ALLOW_MEDIA`` + per-invocation approval.
+    """
+    return await _act(
+        ctx, profile, tool="eject", effect=EffectClass.MEDIA, op="msd.disconnect",
+        transport="msd", args={}, confirm=confirm,
+        run=lambda kvm: cast("VirtualMedia", kvm).msd_disconnect(),
+        detail="ejected virtual media",
+        capability=Capability.VIRTUAL_MEDIA,
+    )
 
 
 @mcp.tool(annotations=_READ_ONLY)
