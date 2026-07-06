@@ -66,6 +66,28 @@ def test_retry_on_503_then_succeeds(emu):
     assert info["hw"]["platform"]["base"] == "fake"
 
 
+def test_mount_iso_verifies_media_online(emu, tmp_path):
+    iso = tmp_path / "boot.iso"
+    iso.write_bytes(b"\x00" * 1024)
+    name = _client(emu, confirm=allow_all).mount_iso(str(iso))
+    assert name == "boot.iso"
+    assert emu.state.msd["online"] is True
+
+
+def test_mount_iso_raises_when_media_stays_offline(emu, tmp_path):
+    # Regression (#77): GLKVM accepts set_params/set_connected while the host
+    # sees no device (online stays false) — e.g. the GL-side MSD toggle is off.
+    # The mount must fail loudly instead of reporting success.
+    from kvm_pilot.errors import MediaOfflineError
+
+    emu.state.msd_stays_offline = True
+    iso = tmp_path / "boot.iso"
+    iso.write_bytes(b"\x00" * 1024)
+    with pytest.raises(MediaOfflineError) as ei:
+        _client(emu, confirm=allow_all).mount_iso(str(iso), verify_timeout=0.6)
+    assert "online=false" in str(ei.value)
+
+
 def test_msd_upload_streams_correct_bytes(emu, tmp_path):
     # Over the real transport: the streamed file arrives intact, with a pinned
     # Content-Length matching the byte count (proving no chunked fallback and no
