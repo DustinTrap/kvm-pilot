@@ -51,7 +51,8 @@ remote before physical**, below).
 | **Read the device/host event log** | **MCP** `logs` or **CLI `logs`** | The text diagnostic when video/streamer/power looks wrong — it names a fault (e.g. a stuck encoder behind a `snapshot` 503) a screenshot can't. |
 | Type / press a key / send a shortcut on the host console | **MCP** `type_text` / `press_key` / `send_shortcut` / `ctrl_alt_delete`, or CLI `type` / `key` | HID input, gated by effect: needs `KVM_PILOT_MCP_ALLOW_HID` + per-call approval; a reboot chord (Ctrl+Alt+Del, SysRq) needs `ALLOW_POWER`. |
 | Move / click the mouse (installers, BIOS, desktops) | **MCP** `mouse` | Absolute positioning; `percent` coords by default. A click must carry `observed_frame_ref` from a recent `snapshot` (refused if the host rebooted since). Needs `KVM_PILOT_MCP_ALLOW_HID`. |
-| firmware-check/update, events, watch, mount/eject | **CLI only** | The MCP server does not expose these. |
+| Mount / eject install media | **MCP** `mount_iso` / `eject`, or CLI `mount` / `eject` | Virtual media (ISO path or URL). MCP needs `KVM_PILOT_MCP_ALLOW_MEDIA` + approval. |
+| firmware-check/update, events, watch | **CLI only** | The MCP server does not expose these. |
 | MSD mode switching | **Python library only** | Not in MCP or CLI. |
 | Change **host** power (on/off/cycle/reset) | **MCP `power`** (gated) or CLI `power` / `power-cycle` | Destructive — confirm each step. MCP `power` is operator-enabled + per-call approval. |
 | Reboot the **KVM appliance** / restart `kvmd` / inspect `/etc/kvmd` | **SSH to the appliance** | No kvm-pilot interface does this — out-of-band only. |
@@ -110,9 +111,10 @@ Prefer remote recovery, in this order, and present the options in this order:
   in via an env flag **and** a per-invocation approval (a human elicitation, or
   `confirm=true` under a standing policy):
   - `power` — on/off/cycle/reset (`KVM_PILOT_MCP_ALLOW_POWER`)
-  - `type_text` / `press_key` / `send_shortcut` — HID input (`KVM_PILOT_MCP_ALLOW_HID`);
-    a reboot chord in `send_shortcut` needs `ALLOW_POWER`
+  - `type_text` / `press_key` / `send_shortcut` / `mouse` — HID input
+    (`KVM_PILOT_MCP_ALLOW_HID`); a reboot chord in `send_shortcut` needs `ALLOW_POWER`
   - `ctrl_alt_delete` — a reboot, so it needs `ALLOW_POWER` (not the HID gate)
+  - `mount_iso` / `eject` — virtual media (`KVM_PILOT_MCP_ALLOW_MEDIA`)
   - `ssh_exec` — run a command over SSH (`KVM_PILOT_MCP_ALLOW_SSH`)
 
 Every tool takes an optional `profile` argument to pick a device from

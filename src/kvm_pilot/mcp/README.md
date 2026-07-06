@@ -31,6 +31,8 @@ client/driver code stays stdlib-only; `mcp` is imported only in this subpackage.
 | `send_shortcut` | `destructiveHint` | Send a key chord (e.g. `ControlLeft,AltLeft,F2`). Gated **by effect**: a reboot/power chord (Ctrl+Alt+Del, Magic SysRq) needs `ALLOW_POWER`; an ordinary session chord needs `ALLOW_HID` |
 | `ctrl_alt_delete` | `destructiveHint` | Send Ctrl+Alt+Del (a reboot) — classified `power_soft`, so it needs `KVM_PILOT_MCP_ALLOW_POWER`, not the HID gate |
 | `mouse` | `destructiveHint` | Move (and optionally click) the mouse. Coords in `percent` (0.0-1.0, default), `pixel`, or `raw` kvmd. A **click** must carry `observed_frame_ref` from a prior `snapshot`; it's refused if the host rebooted/swapped media since (generation changed) so it can't land on a stale screen. Needs `KVM_PILOT_MCP_ALLOW_HID` |
+| `mount_iso` | `destructiveHint` | Mount an ISO (local path or URL; `usb=true` for a flash drive) as virtual media — needs `KVM_PILOT_MCP_ALLOW_MEDIA` + approval |
+| `eject` | `destructiveHint` | Detach virtual media (inverse of `mount_iso`) — needs `KVM_PILOT_MCP_ALLOW_MEDIA` + approval |
 | `ssh_exec` | `destructiveHint` | Run a command on the managed host's OS over SSH — **disabled unless the operator opts in** (`KVM_PILOT_MCP_ALLOW_SSH`) |
 | `ssh_discover` | `readOnlyHint` | Scan a CIDR for open SSH — **RISKY/opt-in** (active network scan; `confirm=true` required). Only to help find a target the user can't address, on networks they own |
 
@@ -77,8 +79,8 @@ the driver kind and the missing capability (it never `AttributeError`s).
 The MCP surface is deliberately small. For anything outside the table, pick the
 right interface (the skill's *Choosing an interface* matrix is the full guide):
 
-- **`firmware-check`/`firmware-update`, `events`, `watch`, `mount`/`eject`** →
-  the **CLI** (`kvm-pilot <cmd>`); no MCP tool.
+- **`firmware-check`/`firmware-update`, `events`, `watch`** → the **CLI**
+  (`kvm-pilot <cmd>`); no MCP tool.
 - **MSD mode switching** → the **Python library**.
 - **Reboot the KVM appliance / restart `kvmd`** → **out-of-band SSH** to the
   appliance. No kvm-pilot interface reboots the box; `power` acts on the
@@ -150,7 +152,8 @@ kvm-pilot-mcp                    # start the stdio server (or: python -m kvm_pil
 | `KVM_PILOT_HOST` / `KVM_PILOT_USER` / `KVM_PILOT_PASSWD` / … | Direct device config (see `kvm_pilot.config`); beats file-profile values |
 | `KVM_PILOT_CONFIG` | Path of the config file (default `~/.config/kvm-pilot/config.toml`) |
 | `KVM_PILOT_MCP_ALLOW_POWER` | **Operator-only** opt-in enabling the `power` tool **and** power-effect HID (`ctrl_alt_delete`, reboot chords) (`1`/`true`/`yes`) |
-| `KVM_PILOT_MCP_ALLOW_HID` | **Operator-only** opt-in enabling HID input (`type_text`, `press_key`, ordinary `send_shortcut`) |
+| `KVM_PILOT_MCP_ALLOW_HID` | **Operator-only** opt-in enabling HID input (`type_text`, `press_key`, `mouse`, ordinary `send_shortcut`) |
+| `KVM_PILOT_MCP_ALLOW_MEDIA` | **Operator-only** opt-in enabling virtual media (`mount_iso`, `eject`) |
 | `KVM_PILOT_MCP_ALLOW_SSH` | **Operator-only** opt-in that enables the `ssh_exec` tool (`1`/`true`/`yes`) |
 | `KVM_PILOT_MCP_PROFILES` | **Fail-closed** allowlist of profile names the server may target (comma-separated). Unset = no allowlist; set-but-empty = allow nothing; a target not on the list is refused (never a fall-back to all configured hosts) |
 | `KVM_PILOT_MCP_ELICIT` | Set to `off` to force the pre-authorized posture (env gate + `confirm=true`) even for elicitation-capable clients; otherwise a per-invocation human approval is requested when the client supports it |
