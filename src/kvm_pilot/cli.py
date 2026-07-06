@@ -364,6 +364,17 @@ def cmd_key(args) -> int:
     return 0
 
 
+def cmd_media_list(args) -> int:
+    # Check this before telling anyone to download/upload an ISO — the image
+    # may already be on the device from an earlier job (#127).
+    kvm = _client(args, Capability.VIRTUAL_MEDIA)
+    if not hasattr(kvm, "get_msd_state"):
+        print("this driver does not expose MSD storage inventory", file=sys.stderr)
+        return 1
+    print(json.dumps(kvm.get_msd_state(), indent=2, default=str))
+    return 0
+
+
 def cmd_mount(args) -> int:
     kvm = _client(args, Capability.VIRTUAL_MEDIA)
     name = kvm.mount_iso(args.source, image_name=args.name, cdrom=not args.usb)
@@ -847,6 +858,11 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("key")
     _add_common(p)
     p.set_defaults(func=cmd_key, _preflight=True)
+
+    p = sub.add_parser("media-list",
+                       help="List images already on the KVM's virtual-media storage (read-only)")
+    _add_common(p)
+    p.set_defaults(func=cmd_media_list)
 
     p = sub.add_parser("mount", help="Mount an ISO (local path or URL)")
     p.add_argument("source")
