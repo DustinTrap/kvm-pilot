@@ -206,6 +206,7 @@ def test_mount_iso_sequence(fake_http, tmp_path):
     iso.write_bytes(b"data")
     c = KVMClient("fake", confirm=allow_all)
     c._http = fake_http
+    fake_http.results["/api/msd"] = {"online": True}  # verify step (#77) sees it attach
     name = c.mount_iso(str(iso))
     assert name == "x.iso"
     paths = fake_http.paths()
