@@ -26,6 +26,7 @@ jobs:
         uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
 
       - name: Install
         run: |
@@ -49,6 +50,12 @@ jobs:
           path: coverage.xml
           if-no-files-found: ignore
 
+      - name: Wiki build smoke (#56)
+        # The wiki-sync workflow only runs on main, so a docs change that breaks
+        # build_wiki.py would otherwise land unnoticed and redden main.
+        if: matrix.python-version == '3.12'
+        run: python .github/scripts/build_wiki.py --out "$RUNNER_TEMP/wiki-smoke"
+
   smoke-install:
     # Clean-room `pip install --pre` of the built wheel in a fresh venv — the exact
     # path a user takes (kvm-pilot is a pre-release, so `--pre` is required, and it
@@ -65,6 +72,7 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
+          cache: pip
       - name: Build the wheel
         run: |
           python -m pip install --upgrade pip
@@ -95,6 +103,7 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
+          cache: pip
       - name: Install project + external Redfish emulator
         run: |
           python -m pip install --upgrade pip
@@ -112,6 +121,7 @@ jobs:
       - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
         with:
           python-version: "3.12"
+          cache: pip
       - name: Install
         run: |
           python -m pip install --upgrade pip

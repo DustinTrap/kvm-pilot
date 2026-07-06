@@ -77,6 +77,11 @@ markers = [
 source = ["kvm_pilot"]
 branch = true
 
+[tool.coverage.report]
+# CI gate (#56): the suite sits at ~81% (branch); 75 catches a real coverage
+# collapse without being brittle about single-file refactors.
+fail_under = 75
+
 [tool.ruff]
 line-length = 100
 target-version = "py311"
