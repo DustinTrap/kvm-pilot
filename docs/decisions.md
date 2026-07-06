@@ -375,6 +375,27 @@ read-only lookup consumed only by the MCP layer (`mcp/act.py`).
   (`approved:false` + reason) so the agent recovers instead of hanging.
 - **Deferred to #72:** the signed/expiring consent receipt. The MVP result already
   carries a stable `invocation_id` + effect class so that layer can build on it.
+### SSH bootstrap during install: guided, not blind full-auto (#81)
+The "expensive HID phase sets up the cheap phase" — reading the DHCP IP off the
+installer console and starting `sshd` over KVM HID so the rest of the install runs
+in-band over SSH (`kvm_pilot/bootstrap.py`, CLI `ssh-bootstrap`). It is deliberately
+conservative rather than blind full-auto, because the failure modes are severe:
+- **Plan by default.** `execute=False` sends nothing; it returns the plan. This is
+  the CLI default (like `firmware-update`), with one top-level confirmation before
+  the first keystroke (not a prompt per keystroke).
+- **The IP probe doubles as a console canary.** A marker-wrapped `echo` is typed and
+  OCR'd back; if the marker never echoes, the keystrokes were not consumed by a
+  shell (silently-failed VT-switch, or a graphical/Windows installer), so it
+  **aborts before typing any `sshd` command** — a dropped command must never land in
+  the installer's partitioner. "Marker present but no IP" vs "marker absent"
+  distinguishes retry-with-`--ssh-host` from hard-abort.
+- **Reachability is necessary but not sufficient.** Success requires a trivial
+  `ssh_exec` to actually authenticate — a reachable port is not a working channel.
+  The default bootstrap commands only start `sshd`; the operator adds auth (a key or
+  password) via `--command`, and the auth probe reports if it's still unusable.
+- **Not an MCP tool in v1.** Agents should orchestrate the same flow with
+  `snapshot`/`classify`/`type_text` + `ssh_reachable(host=…)` so a human stays in the
+  loop; a single ungated auto-bootstrap MCP tool is deferred.
 
 ## Process
 
