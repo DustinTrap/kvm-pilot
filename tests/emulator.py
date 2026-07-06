@@ -54,6 +54,11 @@ class FakeKVMState:
         self.upgrade_version: dict[str, object] = {
             "model": "GL-RM1PE", "version": "V1.5.1 release2"}
         self.upgrade_image_size = 307581578
+        # A conformant device enters an upgrade state after POST /api/upgrade/start
+        # (status grows "status": "upgrading"). upgrade_start_noop reproduces the
+        # real-RM1PE #94 failure: start 200s but the state never changes.
+        self.upgrade_started = False
+        self.upgrade_start_noop = False
         # Real kvmd 401s /api/* without valid X-KVMD-User/Passwd (or auth_token
         # cookie). Enforced by default so a dropped-credential regression fails.
         self.expected_user = "admin"
@@ -160,7 +165,10 @@ class _Handler(BaseHTTPRequestHandler):
         elif path.startswith("/api/upgrade/") and self._state.upgrade_present:
             # GL's proprietary remote-firmware surface (read-only endpoints).
             if path == "/api/upgrade/status":
-                self._json({"enabled": self._state.upgrade_enabled})
+                st: dict[str, object] = {"enabled": self._state.upgrade_enabled}
+                if self._state.upgrade_started:
+                    st["status"] = "upgrading"
+                self._json(st)
             elif path == "/api/upgrade/version":
                 self._json(self._state.upgrade_version)
             elif path == "/api/upgrade/download":
@@ -178,6 +186,10 @@ class _Handler(BaseHTTPRequestHandler):
             self._send(b'{"ok": true}', cookie="auth_token=fake-token-123; Path=/")
         elif path == "/api/atx/power":
             self._state.powered_on = True
+            self._json({})
+        elif path == "/api/upgrade/start":
+            if not self._state.upgrade_start_noop:
+                self._state.upgrade_started = True
             self._json({})
         elif path in _VALID_POST_PATHS:
             self._json({})  # generic OK for a real hid/msd/gpio route

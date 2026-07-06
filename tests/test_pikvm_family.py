@@ -211,7 +211,21 @@ def test_apply_firmware_update_executes_start_when_confirmed(emu):
     emu.state.upgrade_present = True
     res = gl(emu).apply_firmware_update(dry_run=False)  # default confirm = allow_all
     assert res["sent"] is True
+    assert res["verified"] == "upgrade-state"  # not just a 200 on start (#94)
     assert ("POST", "/api/upgrade/start") in emu.state.calls
+
+
+def test_apply_firmware_update_reports_failure_when_start_noops(emu):
+    # Regression (#94): on a real RM1PE POST /api/upgrade/start can 200 and do
+    # nothing. Success requires an observed state transition, not a returned call.
+    emu.state.upgrade_present = True
+    emu.state.upgrade_start_noop = True
+    res = gl(emu).apply_firmware_update(
+        dry_run=False, verify_timeout=0.2, poll_interval=0.02)
+    assert res["sent"] is False
+    assert "did not enter upgrade state" in res["error"]
+    assert ("POST", "/api/upgrade/start") in emu.state.calls  # it tried
+    assert "result" in res  # raw start response surfaced for the operator
 
 
 def test_apply_firmware_update_denied_raises_and_sends_nothing(emu):
