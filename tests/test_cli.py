@@ -120,6 +120,18 @@ def test_driver_fake_power_action_is_dispatched():
     assert rc == 0
 
 
+def test_ssh_bootstrap_plan_mode(capsys):
+    # Plan mode (no --execute) prints the plan and sends nothing; also proves the
+    # --command flag's dest doesn't collide with the subcommand name.
+    import json
+
+    rc = main(["ssh-bootstrap", "--driver", "fake"])
+    assert rc == 0
+    data = json.loads(capsys.readouterr().out)
+    assert data["stage"] == "plan"
+    assert any("send_shortcut" in step["detail"] for step in data["steps"])
+
+
 def test_driver_glkvm_builds_the_glkvm_subclass():
     from kvm_pilot.cli import _build_client, build_parser
     from kvm_pilot.drivers.pikvm import GLKVMDriver
