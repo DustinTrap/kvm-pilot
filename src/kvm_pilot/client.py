@@ -56,9 +56,10 @@ class PiKVMDriver(PowerMixin, CapabilityMixin):
     """Full PiKVM-family REST driver (canonical base of the PiKVM/GLKVM/BliKVM family).
 
     This is the concrete client for stock PiKVM and any API-compatible device.
-    ``GLKVMDriver`` / ``BliKVMDriver`` (in ``kvm_pilot.drivers.pikvm``) subclass it
-    and override only the deltas. ``KVMClient`` and ``PiKVMClient`` are kept as
-    back-compatible aliases of this class.
+    ``GLKVMDriver`` (in ``kvm_pilot.drivers.glkvm``) and ``BliKVMDriver`` (in
+    ``kvm_pilot.drivers.pikvm``) subclass it and override only the deltas.
+    ``KVMClient`` and ``PiKVMClient`` are kept as back-compatible aliases of
+    this class.
 
     Args:
         host: IP or hostname of the KVM device.

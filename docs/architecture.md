@@ -112,10 +112,13 @@ second device family lands.)
 - [x] **Step 3 — driver registry + PiKVM family.** `make_driver(kind, **conf)` +
       `register_driver()` ([`drivers/__init__.py`](../src/kvm_pilot/drivers/__init__.py)),
       a `--driver` CLI flag, and `HostConfig.driver` (+ `KVM_PILOT_DRIVER`). `KVMClient`
-      was split into a canonical `PiKVMDriver` base with thin `GLKVMDriver` /
-      `BliKVMDriver` subclasses ([`drivers/pikvm.py`](../src/kvm_pilot/drivers/pikvm.py));
+      was split into a canonical `PiKVMDriver` base with fork subclasses:
+      `GLKVMDriver` ([`drivers/glkvm.py`](../src/kvm_pilot/drivers/glkvm.py) — the GL
+      fork diverges enough to own a module, #140) and `BliKVMDriver`
+      ([`drivers/pikvm.py`](../src/kvm_pilot/drivers/pikvm.py));
       `KVMClient`/`PiKVMClient` stay as aliases. `GLKVMDriver` detects the GL
-      "API disabled" 404 (→ `ApiDisabledError`) and tracks per-firmware quirks.
+      "API disabled" 404 (→ `ApiDisabledError`), tracks per-firmware quirks, and
+      carries GL's proprietary `/api/upgrade/*` flash layer.
       (Moving `PiKVMDriver` out of `client.py` into `drivers/pikvm/` is deferred.)
 - [x] **Step 4 — drivers.** Two concrete non-PiKVM drivers have landed:
       `FakeDriver` ([`drivers/fake.py`](../src/kvm_pilot/drivers/fake.py)) — in-process,

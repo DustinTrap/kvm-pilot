@@ -79,7 +79,9 @@ Optimize for the next person reading this, not for cleverness.
 - `src/kvm_pilot/http.py` — stdlib HTTP transport (retry/backoff, secret redaction).
 - `src/kvm_pilot/safety.py` — `SafetyPolicy`, `DESTRUCTIVE_OPS`.
 - `src/kvm_pilot/drivers/` — capability protocols (`base.py`), the `make_driver()` registry
-  (`__init__.py`), and drivers: `pikvm.py` (`GLKVMDriver`/`BliKVMDriver`), `fake.py`, `redfish/`.
+  (`__init__.py`), and drivers: `glkvm.py` (the GL.iNet fork — GL-specific behavior and
+  quirks go HERE, #140), `pikvm.py` (other API-compatible forks, currently BliKVM),
+  `fake.py`, `redfish/`.
 - `src/kvm_pilot/vision/` — pluggable vision backends + `ScreenAnalyzer`.
 - `src/kvm_pilot/{config,errors,cli}.py` — config resolution, exceptions, CLI.
 - `tests/` — unit tests (HTTP + vision mocked, `tests/conftest.py`) plus pure-stdlib
