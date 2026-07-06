@@ -120,6 +120,32 @@ def test_driver_fake_power_action_is_dispatched():
     assert rc == 0
 
 
+def test_key_routes_chords_to_send_shortcut(monkeypatch):
+    # #112: `key` accepts a +/,-separated chord and sends it as one shortcut
+    # (kvmd comma form) instead of failing on "single keys only".
+    from kvm_pilot.drivers.fake import FakeDriver
+
+    sent = {}
+    monkeypatch.setattr(
+        FakeDriver, "send_shortcut", lambda self, keys: sent.setdefault("keys", keys)
+    )
+    rc = main(["key", "ControlLeft+AltLeft+F2", "--driver", "fake", "--yes"])
+    assert rc == 0
+    assert sent["keys"] == "ControlLeft,AltLeft,F2"
+
+
+def test_key_single_key_still_pressed(monkeypatch):
+    from kvm_pilot.drivers.fake import FakeDriver
+
+    pressed = {}
+    monkeypatch.setattr(
+        FakeDriver, "press_key", lambda self, key, **kw: pressed.setdefault("key", key)
+    )
+    rc = main(["key", "F2", "--driver", "fake", "--yes"])
+    assert rc == 0
+    assert pressed["key"] == "F2"
+
+
 def test_ssh_bootstrap_plan_mode(capsys):
     # Plan mode (no --execute) prints the plan and sends nothing; also proves the
     # --command flag's dest doesn't collide with the subcommand name.
