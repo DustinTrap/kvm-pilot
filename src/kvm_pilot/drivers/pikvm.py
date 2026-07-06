@@ -20,6 +20,7 @@ findings as the GL-RM1PE (the first hardware target) and others get tested.
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -213,7 +214,32 @@ class GLKVMDriver(PiKVMDriver):
                       "note": "flash the staged image; the device auto-reboots"})
         return steps
 
-    def apply_firmware_update(self, *, image: str | None = None, dry_run: bool = True) -> dict:
+    def _upgrade_state_reached(self, baseline: object) -> bool:
+        """One probe: has the device visibly entered an upgrade state?
+
+        The ``/api/upgrade/*`` bodies are provisional (#95), so "entered" means
+        any of: the status body carries a truthy upgrade-ish field, the body
+        changed from the pre-start ``baseline``, or the endpoint dropped (the
+        documented mid-flash reboot behavior).
+        """
+        try:
+            st = self._http.get("/api/upgrade/status")
+        except KVMPilotError:
+            return True  # channel dropped -> the device is rebooting into the flash
+        if isinstance(st, dict) and any(
+            st.get(k) for k in ("status", "state", "percent", "progress", "upgrading")
+        ):
+            return True
+        return baseline is not None and st != baseline
+
+    def apply_firmware_update(
+        self,
+        *,
+        image: str | None = None,
+        dry_run: bool = True,
+        verify_timeout: float = 15.0,
+        poll_interval: float = 2.0,
+    ) -> dict:
         """Flash the GLKVM's **own** firmware — the most destructive op we expose.
 
         The device reboots into the new image (dropping this REST channel) and a
@@ -223,8 +249,15 @@ class GLKVMDriver(PiKVMDriver):
         it, the already-staged image (GET ``/api/upgrade/download``) is flashed. Then
         POST ``/api/upgrade/start``; the device auto-reboots.
 
+        A non-error ``start`` response is NOT trusted (#94: on a real RM1PE it can
+        200 and no-op): the device must visibly enter an upgrade state within
+        ``verify_timeout`` seconds — status transition or channel drop — or the
+        call reports failure (``sent: False`` + ``error``, raw response in
+        ``result``).
+
         Gated: routed through ``safety.guard("firmware.flash", …)``. ``dry_run=True``
-        (default) plans only and sends nothing. Returns ``{sent, dry_run, plan[, result]}``.
+        (default) plans only and sends nothing. Returns
+        ``{sent, dry_run, plan[, result, error, verified]}``.
         The ``/api/upgrade/*`` request bodies are provisional (not vendor-documented).
         """
         plan = self._firmware_plan(image)
@@ -252,12 +285,34 @@ class GLKVMDriver(PiKVMDriver):
                     extra_headers={"Content-Length": str(size)},
                     long_timeout=1800, retry=False,
                 )
+        try:
+            baseline = self._http.get("/api/upgrade/status")
+        except KVMPilotError:
+            baseline = None
         logger.warning(
             "Starting firmware flash on %s — do NOT interrupt power; the device will "
             "reboot and this REST channel will drop.", self.host,
         )
         result = self._http.post("/api/upgrade/start", long_timeout=1800, retry=False)
-        return {"sent": True, "dry_run": False, "plan": plan, "result": result}
+        deadline = time.monotonic() + verify_timeout
+        while not self._upgrade_state_reached(baseline):
+            if time.monotonic() >= deadline:
+                logger.error(
+                    "Device did not enter an upgrade state within %.0fs of "
+                    "/api/upgrade/start — treating the flash as a no-op (#94).",
+                    verify_timeout,
+                )
+                return {
+                    "sent": False, "dry_run": False, "plan": plan, "result": result,
+                    "error": (
+                        f"device did not enter upgrade state within {verify_timeout:.0f}s "
+                        "after start; the start POST likely no-opped (#94/#95) — raw "
+                        "response in 'result'"
+                    ),
+                }
+            time.sleep(poll_interval)
+        return {"sent": True, "dry_run": False, "plan": plan, "result": result,
+                "verified": "upgrade-state"}
 
 
 class BliKVMDriver(PiKVMDriver):

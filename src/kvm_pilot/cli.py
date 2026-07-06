@@ -605,7 +605,11 @@ def cmd_firmware_update(args) -> int:
     _eject_before_flash(kvm)
     result = fwu.apply_firmware_update(image=args.image, dry_run=False)
     if not result.get("sent"):
-        print("Flash not sent (declined at the safety prompt or dry-run policy).", file=sys.stderr)
+        if result.get("error"):
+            print(f"Flash FAILED: {result['error']}", file=sys.stderr)
+        else:
+            print("Flash not sent (declined at the safety prompt or dry-run policy).",
+                  file=sys.stderr)
         return 1
     print("Firmware flash started. The device will reboot and may be unreachable for several "
           "minutes — do NOT interrupt power.")
