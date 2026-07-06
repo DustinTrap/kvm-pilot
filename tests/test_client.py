@@ -24,6 +24,54 @@ def test_snapshot_rejects_non_jpeg_bytes(client, fake_http):
     assert "non-JPEG" in str(ei.value)
 
 
+def test_video_signal_info_normalizes_streamer_state(client, fake_http):
+    fake_http.results["/api/streamer"] = {"source": {
+        "online": True, "captured_fps": 30, "format": "JPEG",
+        "resolution": {"width": 2560, "height": 1440}}}
+    assert client.video_signal_info() == {
+        "online": True, "width": 2560, "height": 1440, "fps": 30, "format": "JPEG"}
+
+
+class _Snapshot503HTTP:
+    """Snapshot 503s; the streamer state endpoint still answers (the #142 field
+    pattern: only the JPEG path is failing)."""
+
+    def __init__(self, source):
+        self.source = source
+
+    def get(self, path, **kw):
+        from kvm_pilot.errors import KVMPilotError, UnavailableError
+
+        if path == "/api/streamer/snapshot":
+            raise UnavailableError("Subsystem unavailable (HTTP 503)", 503)
+        if path == "/api/streamer":
+            return {"source": self.source}
+        raise KVMPilotError("not found", 404)
+
+
+def test_snapshot_503_enriched_when_signal_is_live():
+    # #142/#143: a snapshot 503 with a live capture source must say so — the
+    # JPEG path is failing, not the video signal.
+    from kvm_pilot.errors import UnavailableError
+
+    c = KVMClient("h")
+    c._http = _Snapshot503HTTP({"online": True, "resolution": {"width": 1600, "height": 900}})
+    with pytest.raises(UnavailableError) as ei:
+        c.snapshot()
+    msg = str(ei.value)
+    assert "capture source looks live" in msg and "width=1600" in msg
+
+
+def test_snapshot_503_reports_no_signal_when_source_offline():
+    from kvm_pilot.errors import UnavailableError
+
+    c = KVMClient("h")
+    c._http = _Snapshot503HTTP({"online": False})
+    with pytest.raises(UnavailableError) as ei:
+        c.snapshot()
+    assert "no video signal" in str(ei.value)
+
+
 def test_power_off_hard_gated_by_confirm(fake_http):
     c = KVMClient("fake", confirm=deny_all)
     c._http = fake_http
