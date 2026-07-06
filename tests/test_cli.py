@@ -21,6 +21,23 @@ def test_power_subcommand_parsed():
     assert args.dry_run is True
 
 
+def test_ssh_check_forwards_ssh_target_overrides(monkeypatch):
+    # A runtime --ssh-host (e.g. an install-time DHCP IP the profile can't know)
+    # flows through _resolve_cfg into the HostConfig, beating profile/env (#81).
+    # (ssh-check still resolves a full HostConfig, so give it a KVM host.)
+    from kvm_pilot.cli import _resolve_cfg
+
+    monkeypatch.setenv("KVM_PILOT_HOST", "kvm.local")
+    parser = build_parser()
+    args = parser.parse_args(
+        ["ssh-check", "--ssh-host", "10.9.9.9", "--ssh-port", "2222", "--ssh-user", "root"]
+    )
+    cfg = _resolve_cfg(args)
+    assert cfg.ssh_host == "10.9.9.9"
+    assert cfg.ssh_port == 2222
+    assert cfg.ssh_user == "root"
+
+
 def test_watch_requires_phase():
     parser = build_parser()
     args = parser.parse_args(

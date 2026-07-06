@@ -24,7 +24,7 @@ client/driver code stays stdlib-only; `mcp` is imported only in this subpackage.
 | `logs` | `readOnlyHint` | Device/host event log as text (`seek` = seconds of lookback). The text diagnostic when video/streamer/power looks wrong — it names a fault (e.g. a stuck encoder behind a `snapshot` 503) a screenshot can't |
 | `snapshot` | `readOnlyHint` | Current screen, returned as a real JPEG **image** content block the model can see |
 | `classify_screen` | `readOnlyHint` | Boot/run phase. Uses the server-side vision backend (Anthropic or a local VLM, see below) when configured; **if the server has no vision key it falls back to caller-side** — returning the screenshot + prompt/schema for a vision-capable agent to classify. Cheap on-device gates (power-off/no-signal/boot-progress/OCR) resolve with no key at all. Result is a `mode="server"` dict, or a `[json, image]` list to classify yourself |
-| `ssh_reachable` | `readOnlyHint` | Is the **managed host's OS** reachable over SSH (in-band)? Targets the host *behind* the KVM (its own `ssh_host`), not the appliance — use it to prefer remote recovery before physical intervention |
+| `ssh_reachable` | `readOnlyHint` | Is the **managed host's OS** reachable over SSH (in-band)? Targets the host *behind* the KVM (its own `ssh_host`), not the appliance — use it to prefer remote recovery before physical intervention. Pass `host=` to override the target at runtime (e.g. an install-time DHCP address the profile can't know); also surfaced as an `ssh-reachable` healthcheck when `ssh_host` is configured |
 | `power` | `destructiveHint` | `on` / `off` / `off-hard` / `reset` — **disabled unless the operator opts in** (`KVM_PILOT_MCP_ALLOW_POWER`) |
 | `type_text` | `destructiveHint` | Type text on the host console (HID keyboard) — needs `KVM_PILOT_MCP_ALLOW_HID` + per-invocation approval |
 | `press_key` | `destructiveHint` | Press one key (e.g. `Enter`, `F2`) — needs `KVM_PILOT_MCP_ALLOW_HID` + approval |
@@ -33,7 +33,7 @@ client/driver code stays stdlib-only; `mcp` is imported only in this subpackage.
 | `mouse` | `destructiveHint` | Move (and optionally click) the mouse. Coords in `percent` (0.0-1.0, default), `pixel`, or `raw` kvmd. A **click** must carry `observed_frame_ref` from a prior `snapshot`; it's refused if the host rebooted/swapped media since (generation changed) so it can't land on a stale screen. Needs `KVM_PILOT_MCP_ALLOW_HID` |
 | `mount_iso` | `destructiveHint` | Mount an ISO (local path or URL; `usb=true` for a flash drive) as virtual media — needs `KVM_PILOT_MCP_ALLOW_MEDIA` + approval |
 | `eject` | `destructiveHint` | Detach virtual media (inverse of `mount_iso`) — needs `KVM_PILOT_MCP_ALLOW_MEDIA` + approval |
-| `ssh_exec` | `destructiveHint` | Run a command on the managed host's OS over SSH — **disabled unless the operator opts in** (`KVM_PILOT_MCP_ALLOW_SSH`) |
+| `ssh_exec` | `destructiveHint` | Run a command on the managed host's OS over SSH — **disabled unless the operator opts in** (`KVM_PILOT_MCP_ALLOW_SSH`). `host=` overrides the target at runtime |
 | `ssh_discover` | `readOnlyHint` | Scan a CIDR for open SSH — **RISKY/opt-in** (active network scan; `confirm=true` required). Only to help find a target the user can't address, on networks they own |
 
 Every tool result names the **host and driver it acted on**, and read-only

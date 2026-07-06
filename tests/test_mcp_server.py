@@ -473,6 +473,32 @@ def test_ssh_reachable_errors_when_not_configured(config_file):
     assert "not configured" in result.content[0].text
 
 
+def test_ssh_reachable_host_override_unblocks_unconfigured_profile(config_file):
+    """host= lets a caller target a runtime-discovered address even when the
+    profile has no ssh_host — the install-time DHCP case (#81)."""
+
+    async def interact(session):
+        return await session.call_tool("ssh_reachable", {"host": "127.0.0.1"})
+
+    result = run_session(server_env(config_file), interact)
+    assert result.isError is False  # no longer "not configured"
+    parsed = result_json(result)
+    assert parsed["target"] == "127.0.0.1"
+    assert "reachable" in parsed
+
+
+def test_ssh_reachable_rejects_hyphen_host(config_file):
+    """A host starting with '-' is refused (ssh option-injection) — which also
+    proves the host= override flows into channel construction."""
+
+    async def interact(session):
+        return await session.call_tool("ssh_reachable", {"host": "-oProxyCommand=touch /tmp/x"})
+
+    result = run_session(server_env(config_file), interact)
+    assert result.isError is True
+    assert "misparsed" in result.content[0].text
+
+
 def test_ssh_discover_requires_confirm(config_file):
     """A network scan is risky — it must not run without an explicit acknowledgement."""
 
