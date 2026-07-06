@@ -571,6 +571,21 @@ async def mouse(
         }
 
 
+@mcp.tool(annotations=_READ_ONLY)
+def list_virtual_media(profile: str | None = None) -> dict:
+    """Inventory the KVM's virtual-media (MSD) storage (read-only).
+
+    Check this BEFORE asking the operator to download or upload an ISO — the
+    image you need may already be on the device from an earlier job (#127).
+    Returns the device's MSD state: stored images (name/size/completeness),
+    the selected drive image, and whether media is attached (``online``).
+    """
+    with _driver(profile, confirm=deny_all, capability=Capability.VIRTUAL_MEDIA) as (cfg, kvm):
+        if not hasattr(kvm, "get_msd_state"):
+            return {**_provenance(cfg), "note": "driver does not expose MSD storage inventory"}
+        return {**_provenance(cfg), "msd": kvm.get_msd_state()}
+
+
 @mcp.tool(annotations=_DESTRUCTIVE)
 async def mount_iso(
     ctx: Context,

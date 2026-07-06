@@ -179,6 +179,16 @@ class FakeDriver(PowerMixin, CapabilityMixin):
             self._record("mount_iso", name)
         return name
 
+    def get_msd_state(self) -> dict:
+        """kvmd-shaped MSD state built from this fake's mount history."""
+        images = {n: {"size": 1024, "complete": True} for n in self.mounted}
+        current = self.mounted[-1] if self.mounted else None
+        return {
+            "online": bool(current),
+            "drive": {"image": current, "connected": bool(current)},
+            "storage": {"images": images},
+        }
+
     def msd_connect(self) -> None:
         if self.safety.guard("msd.connect", f"Attach virtual media to {self.host}"):
             self._record("msd_connect")

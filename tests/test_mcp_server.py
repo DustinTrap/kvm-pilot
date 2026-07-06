@@ -43,6 +43,7 @@ EXPECTED_TOOLS = {
     "mouse",
     "mount_iso",
     "eject",
+    "list_virtual_media",
 }
 # Tools that change state (readOnlyHint=False, destructiveHint=True).
 DESTRUCTIVE_TOOLS = {
@@ -577,6 +578,20 @@ def test_logs_tool_returns_text_with_provenance(config_file):
     assert parsed["host"] == "fakebox.local"
     assert parsed["driver"] == "fake"
     assert isinstance(parsed["log"], str)
+
+
+def test_list_virtual_media_inventories_msd_storage(config_file):
+    """Read-only MSD inventory (#127): lets an agent find an ISO already on the
+    device instead of asking the user to download/upload it again."""
+
+    async def interact(session):
+        return await session.call_tool("list_virtual_media", {})
+
+    result = run_session(server_env(config_file), interact)
+    assert result.isError is False
+    parsed = result_json(result)
+    assert parsed["host"] == "fakebox.local"
+    assert "online" in parsed["msd"] and "storage" in parsed["msd"]
 
 
 def test_snapshot_returns_a_real_image(config_file):
