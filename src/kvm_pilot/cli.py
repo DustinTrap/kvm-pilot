@@ -360,7 +360,12 @@ def cmd_type(args) -> int:
 
 def cmd_key(args) -> int:
     kvm = _rich_client(args, Capability.HID)
-    kvm.press_key(args.key)
+    # A chord (Ctrl+Alt+F2) routes to send_shortcut; a bare key is pressed (#112).
+    keys = args.key.replace("+", ",")
+    if "," in keys:
+        kvm.send_shortcut(keys)
+    else:
+        kvm.press_key(args.key)
     return 0
 
 
@@ -854,8 +859,10 @@ def build_parser() -> argparse.ArgumentParser:
     _add_common(p)
     p.set_defaults(func=cmd_type, _preflight=True)
 
-    p = sub.add_parser("key", help="Press a single key")
-    p.add_argument("key")
+    p = sub.add_parser("key", help="Press a key, or send a chord of kvmd key codes")
+    p.add_argument("key",
+                   help="A kvmd key code (e.g. Enter, F2) or a +/,-separated chord "
+                        "(e.g. ControlLeft+AltLeft+F2)")
     _add_common(p)
     p.set_defaults(func=cmd_key, _preflight=True)
 
