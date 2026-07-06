@@ -146,6 +146,38 @@ def test_key_single_key_still_pressed(monkeypatch):
     assert pressed["key"] == "F2"
 
 
+def test_mouse_move_defaults_to_percent_space(monkeypatch):
+    # #124: CLI wrappers over the existing client mouse methods; percent is the
+    # default so a coordinate survives a resolution change (the #128 trap).
+    from kvm_pilot.drivers.fake import FakeDriver
+
+    moved = {}
+    monkeypatch.setattr(
+        FakeDriver, "mouse_move_percent",
+        lambda self, x, y: moved.setdefault("to", (x, y)),
+    )
+    rc = main(["mouse-move", "0.5", "0.9", "--driver", "fake", "--yes"])
+    assert rc == 0
+    assert moved["to"] == (0.5, 0.9)
+
+
+def test_click_moves_then_clicks(monkeypatch):
+    from kvm_pilot.drivers.fake import FakeDriver
+
+    calls = []
+    monkeypatch.setattr(
+        FakeDriver, "mouse_move_percent",
+        lambda self, x, y: calls.append(("move", x, y)),
+    )
+    monkeypatch.setattr(
+        FakeDriver, "mouse_click",
+        lambda self, button="left", **kw: calls.append(("click", button)),
+    )
+    rc = main(["click", "--at", "0.87", "0.88", "--driver", "fake", "--yes"])
+    assert rc == 0
+    assert calls == [("move", 0.87, 0.88), ("click", "left")]
+
+
 def test_ssh_bootstrap_plan_mode(capsys):
     # Plan mode (no --execute) prints the plan and sends nothing; also proves the
     # --command flag's dest doesn't collide with the subcommand name.

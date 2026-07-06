@@ -136,6 +136,9 @@ class FakeDriver(PowerMixin, CapabilityMixin):
         # center — mirrored from PiKVMDriver.mouse_move. Moves stay ungated.
         self._record("mouse_move", (x, y))
 
+    def mouse_move_percent(self, x_pct: float, y_pct: float) -> None:
+        self._record("mouse_move_percent", (x_pct, y_pct))
+
     def mouse_click(self, button: str = "left", **kw: Any) -> None:
         if self.safety.guard("hid.mouse_click", f"Mouse {button} click on {self.host}"):
             self._record("mouse_click", button)

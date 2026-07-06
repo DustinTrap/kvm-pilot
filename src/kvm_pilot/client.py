@@ -437,6 +437,20 @@ class PiKVMDriver(PowerMixin, CapabilityMixin):
                 )
         self.mouse_move(_pixel_to_kvmd(x, width), _pixel_to_kvmd(y, height))
 
+    def mouse_move_percent(self, x_pct: float, y_pct: float) -> None:
+        """Move to a 0.0-1.0 screen fraction, mapped onto kvmd's centered axis.
+
+        Resolution-free: the kvmd absolute space already *is* a fraction of the
+        screen, so a percentage coordinate survives a mode/resolution change
+        (BIOS->GRUB->OS) that would invalidate a pixel coordinate.
+        """
+
+        def to_kvmd(p: float) -> int:
+            p = max(0.0, min(1.0, p))
+            return round(-32768 + p * 65535)
+
+        self.mouse_move(to_kvmd(x_pct), to_kvmd(y_pct))
+
     def mouse_move_rel(self, dx: int, dy: int) -> None:
         self._http.post(
             "/api/hid/events/send_mouse_relative", params={"delta_x": dx, "delta_y": dy}
