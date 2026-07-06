@@ -44,7 +44,7 @@ remote before physical**, below).
 | Action | Best interface | Notes / fallback |
 |---|---|---|
 | See the screen as a model-visible image | **MCP** `snapshot` | Returns a real image content block — no screenshot-file round-trip. CLI `snapshot` writes a file. |
-| Classify boot/run phase | **MCP** `classify_screen` | Needs a vision backend (Anthropic key or local VLM). CLI: `classify` / `watch`. |
+| Classify boot/run phase | **MCP** `classify_screen` | Uses the server's vision backend if configured; **with no server key it falls back to caller-side** — hands you the screenshot + prompt to classify yourself (a `[json, image]` result). CLI: `classify` / `watch`. |
 | Preflight audit (run first) | **MCP** `healthcheck` or CLI `healthcheck` | The intake gate — see below. |
 | Device info / host power state | **MCP** `info` / `power_state`, or CLI | Either works. |
 | List what the driver supports | **MCP** `capabilities` or CLI `capabilities` | Structural/offline — no network, no preflight. Use it to pick the right interface up front. |
@@ -102,8 +102,11 @@ Prefer remote recovery, in this order, and present the options in this order:
 **The 8 tools it exposes**, all named `mcp__kvm-pilot__<tool>`:
 - Read-only: `info`, `power_state`, `capabilities`, `healthcheck`, `logs`
 - `snapshot` — returns a model-visible JPEG of the screen
-- `classify_screen` — boot/run phase (needs a vision backend: `ANTHROPIC_API_KEY`
-  or a local VLM configured in the **server's** env, else it errors)
+- `classify_screen` — boot/run phase. Uses a server-side vision backend
+  (`ANTHROPIC_API_KEY` or a local VLM in the **server's** env) when present; with
+  no server key it returns `mode="caller_classify"` — the screenshot + prompt for
+  you to classify. Cheap on-device gates (power-off/no-signal/boot-progress/OCR)
+  still resolve with no key at all.
 - `power` — **destructive**, on/off/cycle/reset of the managed host; disabled
   unless the operator set `KVM_PILOT_MCP_ALLOW_POWER=1`, and requires `confirm=true`
 

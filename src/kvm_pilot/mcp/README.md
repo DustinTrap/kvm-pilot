@@ -23,7 +23,7 @@ client/driver code stays stdlib-only; `mcp` is imported only in this subpackage.
 | `power_state` | `readOnlyHint` | `powered_on` plus ATX detail where the driver has it |
 | `logs` | `readOnlyHint` | Device/host event log as text (`seek` = seconds of lookback). The text diagnostic when video/streamer/power looks wrong — it names a fault (e.g. a stuck encoder behind a `snapshot` 503) a screenshot can't |
 | `snapshot` | `readOnlyHint` | Current screen, returned as a real JPEG **image** content block the model can see |
-| `classify_screen` | `readOnlyHint` | Boot/run phase via the vision backend (Anthropic or a local VLM, see below) |
+| `classify_screen` | `readOnlyHint` | Boot/run phase. Uses the server-side vision backend (Anthropic or a local VLM, see below) when configured; **if the server has no vision key it falls back to caller-side** — returning the screenshot + prompt/schema for a vision-capable agent to classify. Cheap on-device gates (power-off/no-signal/boot-progress/OCR) resolve with no key at all. Result is a `mode="server"` dict, or a `[json, image]` list to classify yourself |
 | `ssh_reachable` | `readOnlyHint` | Is the **managed host's OS** reachable over SSH (in-band)? Targets the host *behind* the KVM (its own `ssh_host`), not the appliance — use it to prefer remote recovery before physical intervention |
 | `power` | `destructiveHint` | `on` / `off` / `off-hard` / `reset` — **disabled unless the operator opts in** |
 | `ssh_exec` | `destructiveHint` | Run a command on the managed host's OS over SSH — **disabled unless the operator opts in** (`KVM_PILOT_MCP_ALLOW_SSH`) |
@@ -130,7 +130,7 @@ kvm-pilot-mcp                    # start the stdio server (or: python -m kvm_pil
 | `KVM_PILOT_VISION_BACKEND` | Vision backend for `classify_screen`: `anthropic` (default) or `local` (any OpenAI-compatible VLM: LM Studio, Ollama, vLLM) |
 | `KVM_PILOT_VISION_URL` | Base URL of the local VLM (required for `local`) |
 | `KVM_PILOT_VISION_MODEL` | Vision model id — required for `local`; optional pin for `anthropic` (otherwise the newest model is auto-resolved once per process) |
-| `ANTHROPIC_API_KEY` | Required for the `anthropic` vision backend |
+| `ANTHROPIC_API_KEY` | The `anthropic` vision backend uses it when set; **not required** — without any vision key, `classify_screen` falls back to caller-side classification (returns the screenshot + prompt for a vision-capable agent) |
 
 ## Claude Desktop
 
