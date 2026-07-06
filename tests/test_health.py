@@ -20,6 +20,7 @@ from kvm_pilot.health import (
     check_exposed_services,
     check_msd_online,
     check_recovery_path,
+    check_ssh_reachable,
     check_tls_posture,
     enforce_gate,
     preflight,
@@ -94,6 +95,45 @@ def test_recovery_path_ok_via_gpio_when_atx_off():
 def test_recovery_path_ok_for_power_capable_bmc_without_atx():
     # No ATX surface but advertises POWER -> genuine OOB reset (BMC/fake).
     assert check_recovery_path(FakeDriver()).severity is Severity.OK
+
+
+def _ssh_channel(*, up: bool | None = True):
+    def reach():
+        if up is None:
+            raise OSError("probe blew up")
+        return up
+    return types.SimpleNamespace(ssh_reachable=reach, target="root@10.0.0.2", port=22)
+
+
+def test_ssh_reachable_check_skips_when_unconfigured():
+    # No ssh_channel attached (profile has no ssh_host) -> the check self-skips.
+    assert check_ssh_reachable(FakeDriver()) is None
+
+
+def test_ssh_reachable_check_ok_when_up():
+    res = check_ssh_reachable(stub(ssh_channel=_ssh_channel(up=True)))
+    assert res is not None
+    assert res.id == "ssh-reachable"
+    assert res.severity is Severity.OK
+    assert res.cacheable is False  # volatile: never cached
+
+
+def test_ssh_reachable_check_info_when_down():
+    # Down is INFO, not WARNING — a pre-network/installer host normally won't
+    # answer and must not inflate the report or gate a destructive op.
+    res = check_ssh_reachable(stub(ssh_channel=_ssh_channel(up=False)))
+    assert res.severity is Severity.INFO
+
+
+def test_ssh_reachable_check_info_when_probe_raises():
+    res = check_ssh_reachable(stub(ssh_channel=_ssh_channel(up=None)))
+    assert res.severity is Severity.INFO
+
+
+def test_ssh_reachable_check_is_volatile():
+    from kvm_pilot.health import _is_volatile
+
+    assert _is_volatile(check_ssh_reachable) is True
 
 
 def test_tls_posture_warns_when_verification_disabled():
