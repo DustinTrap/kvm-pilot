@@ -221,6 +221,40 @@ def check_api_reachable(driver: Any) -> CheckResult | None:
     )
 
 
+def check_driver_identity(driver: Any) -> CheckResult | None:
+    """Wrong-driver fingerprint (#145): a plain-PiKVM profile pointed at a GL unit.
+
+    GL firmware self-reports as a stock Raspberry Pi PiKVM in ``/api/info``
+    (#126), so the only cheap tell is GL's proprietary ``/api/upgrade/version``.
+    Probe it only when the profile chose the plain ``pikvm`` driver — the forks
+    already know who they are, and a 404 is the expected stock answer.
+    """
+    from .client import PiKVMDriver
+
+    if type(driver) is not PiKVMDriver:
+        return None
+    try:
+        up = driver._http.get("/api/upgrade/version")
+    except KVMPilotError:
+        return None  # 404 = stock PiKVM, the expected answer
+    if not (isinstance(up, dict) and (up.get("version") or up.get("model"))):
+        return None
+    ident = ", ".join(str(v) for v in (up.get("model"), up.get("version")) if v)
+    return CheckResult(
+        id="driver-identity",
+        pillar=Pillar.READINESS,
+        severity=Severity.WARNING,
+        title="Wrong driver? Device looks like a GL.iNet GLKVM",
+        detail=(
+            f"This device answers GL's proprietary /api/upgrade/version ({ident}) "
+            "but the profile uses the plain 'pikvm' driver — GL quirks, the "
+            "API-disabled hint, dual-version firmware reporting, and the gated "
+            "flash capability are all inactive."
+        ),
+        remediation='Set driver = "glkvm" in the profile (or pass --driver glkvm).',
+    )
+
+
 def check_ssh_reachable(driver: Any) -> CheckResult | None:
     """The managed host's OS answers on its SSH port. Volatile; self-skips.
 
@@ -711,6 +745,7 @@ def check_capability_profile(driver: Any) -> CheckResult | None:
 # The registry — each check self-guards, so the same list serves every driver.
 CHECKS: list[Check] = [
     check_api_reachable,
+    check_driver_identity,
     check_ssh_reachable,
     check_recovery_path,
     check_video_signal,
