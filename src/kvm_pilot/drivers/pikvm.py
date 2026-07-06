@@ -146,13 +146,23 @@ class GLKVMDriver(PiKVMDriver):
         }
 
     def known_quirks(self, firmware: str | None = None) -> list[Quirk]:
-        """Quirks that apply to ``firmware`` (auto-detected from the device if omitted)."""
-        if firmware is None:
+        """Quirks that apply to ``firmware`` (auto-detected from the device if omitted).
+
+        Auto-detection matches each quirk against **every** version the device
+        reports — the GL product firmware (``version``, what the UI shows) *and*
+        the kvmd component (``kvmd_version``) — because quirks may be keyed to
+        either (the ATX quirk was observed against kvmd 4.82, which
+        ``get_firmware_info`` no longer reports as ``version``; #139).
+        """
+        if firmware is not None:
+            versions: list[str | None] = [firmware]
+        else:
             try:
-                firmware = self.get_firmware_info().get("version")
+                fw = self.get_firmware_info()
             except KVMPilotError:
-                firmware = None
-        return [q for q in GLKVM_QUIRKS if q.applies_to(firmware)]
+                fw = {}
+            versions = [v for v in (fw.get("version"), fw.get("kvmd_version")) if v] or [None]
+        return [q for q in GLKVM_QUIRKS if any(q.applies_to(v) for v in versions)]
 
     # -- FirmwareUpdate capability (GL /api/upgrade/*) ---------------------
     #

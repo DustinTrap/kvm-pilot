@@ -137,6 +137,22 @@ def test_glkvm_reports_gl_product_firmware_when_available():
     assert fw["kvmd_version"] == "4.82" and fw["vendor"] == "gl.inet"
 
 
+def test_quirk_autodetect_matches_kvmd_version_behind_product_version():
+    # Regression (#139): on real GL hardware get_firmware_info() reports the GL
+    # *product* firmware ("V1.9.1 release1") as `version`, while the ATX quirk is
+    # keyed to the kvmd component version ("4.82"). Auto-detection must match
+    # against both, or the quirk — and the healthcheck warning built on it —
+    # silently disappears exactly on the hardware it was observed on.
+    d = GLKVMDriver("h")
+    d._http = _FakeHTTP({
+        "/api/info": {"system": {"kvmd": {"version": "4.82"},
+                                 "platform": {"base": "Rockchip RV1126B-P EVB", "model": "v3"}}},
+        "/api/upgrade/version": {"model": "RM1PE", "version": "V1.9.1 release1"},
+    })
+    ids = {q.id for q in d.known_quirks()}
+    assert "atx-power-state-always-off" in ids
+
+
 def test_glkvm_falls_back_to_kvmd_when_upgrade_endpoint_absent():
     d = GLKVMDriver("h")
     d._http = _FakeHTTP({
