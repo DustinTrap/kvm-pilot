@@ -6,6 +6,40 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.0a8] — 2026-07-06
+
+### Added — MCP act layer: drive the box, not just observe it (2026-07-06, #61, #112)
+- **New MCP tools** `type_text`, `press_key`, `send_shortcut`, `ctrl_alt_delete`,
+  `mouse`, `mount_iso`, `eject` — an agent can now *drive* HID/media over MCP, not
+  only observe. Authorized by **two guarantees**: an operator effect-gate env flag
+  (classified by *effect, not transport*, so Ctrl+Alt+Del and reboot chords need
+  `KVM_PILOT_MCP_ALLOW_POWER`, ordinary HID needs `KVM_PILOT_MCP_ALLOW_HID`, media
+  needs `KVM_PILOT_MCP_ALLOW_MEDIA`) **and** a per-invocation approval — MCP
+  elicitation when the client supports it, else `confirm=true` under a standing
+  policy (the unattended path). Fail-closed `KVM_PILOT_MCP_PROFILES` allowlist.
+  Denials return through the same call path; each result carries a stable
+  `invocation_id` + transport + effect. Effect taxonomy is additive over
+  `DESTRUCTIVE_OPS` (`EffectClass` in `safety.py`); see `mcp/act.py`.
+
+### Added — mouse with a generation-keyed staleness gate (2026-07-06, #124)
+- **`mouse`** — absolute move + optional click (`percent` coords by default,
+  resolution-independent). A click must carry the `observed_frame_ref` from a prior
+  `snapshot`; it is refused if the host rebooted or swapped media since (the frame
+  *generation* changed), so a click can't land on a stale screen. `snapshot` now
+  returns a `frame_ref`.
+
+### Added — keyless `classify_screen` (2026-07-06, #125)
+- `classify_screen` falls back to **caller-side** classification (returns the
+  screenshot + prompt/schema) when the server has no vision key.
+
+### Added — SSH install-time hand-off (2026-07-06, #81)
+- CLI `--ssh-host` / MCP `host=` runtime override (use a target's DHCP IP without
+  editing config); a volatile `ssh-reachable` healthcheck; and a guided
+  `kvm-pilot ssh-bootstrap` command that reads the target IP off an installer
+  console and starts `sshd` (plans by default; the IP probe doubles as a console
+  canary and aborts before any command if it doesn't echo; success requires an
+  `ssh_exec` auth-probe).
+
 ## [0.1.0a7] — 2026-07-04
 
 ### Added — first-run onboarding + agent recovery guidance (2026-07-04, #111)
