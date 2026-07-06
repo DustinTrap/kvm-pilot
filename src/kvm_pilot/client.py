@@ -32,6 +32,7 @@ from .errors import (
     AuthError,
     CapabilityError,
     KVMPilotError,
+    MediaOfflineError,
     SnapshotFormatError,
     TimeoutError,
 )
@@ -577,9 +578,13 @@ class PiKVMDriver(PowerMixin, CapabilityMixin):
             params["rw"] = "1" if rw else "0"
         self._http.post("/api/msd/set_params", params=params)
 
-    def msd_connect(self) -> None:
+    def msd_connect(self) -> bool:
+        """Attach the selected image. Returns whether the request was sent
+        (False on dry-run or a declined confirmation)."""
         if self.safety.guard("msd.connect", f"Attach virtual media to {self.host}"):
             self._http.post("/api/msd/set_connected", params={"connected": "1"})
+            return True
+        return False
 
     def msd_disconnect(self) -> None:
         if self.safety.guard("msd.disconnect", f"Detach virtual media from {self.host}"):
@@ -594,9 +599,20 @@ class PiKVMDriver(PowerMixin, CapabilityMixin):
             self._http.post("/api/msd/reset")
 
     def mount_iso(
-        self, source: str, image_name: str | None = None, cdrom: bool = True
+        self,
+        source: str,
+        image_name: str | None = None,
+        cdrom: bool = True,
+        verify: bool = True,
+        verify_timeout: float = 10.0,
     ) -> str:
-        """Upload-or-pull an image, select it, and attach it. Returns image name."""
+        """Upload-or-pull an image, select it, and attach it. Returns image name.
+
+        With ``verify`` (default), the attach is confirmed against the device:
+        ``/api/msd`` must report ``online`` within ``verify_timeout`` seconds or
+        a ``MediaOfflineError`` is raised — GLKVM accepts the mount calls while
+        the host sees no device when its MSD toggle is off (#77).
+        """
         if source.startswith(("http://", "https://")):
             name = image_name or source.split("/")[-1].split("?")[0]
             self.msd_upload_url(source, image_name=name)
@@ -604,9 +620,30 @@ class PiKVMDriver(PowerMixin, CapabilityMixin):
             name = image_name or Path(source).name
             self.msd_upload_file(source, image_name=name)
         self.msd_set_params(image=name, cdrom=cdrom)
-        self.msd_connect()
+        if self.msd_connect() and verify:
+            self._verify_msd_online(verify_timeout)
         logger.info("ISO mounted: %s (%s)", name, "CD-ROM" if cdrom else "USB flash")
         return name
+
+    def _verify_msd_online(self, timeout: float) -> None:
+        """Poll ``/api/msd`` until the attached media reports ``online``.
+
+        A mount is only real when the device exposes it to the host (#77: GLKVM
+        reports ``connected: true`` while ``online`` stays ``false`` and the
+        host sees nothing).
+        """
+        deadline = time.monotonic() + timeout
+        while True:
+            if self.get_msd_state().get("online"):
+                return
+            if time.monotonic() >= deadline:
+                raise MediaOfflineError(
+                    f"virtual media attached but /api/msd still reports "
+                    f"online=false after {timeout:.0f}s — the host will not see "
+                    "the device. On GL.iNet KVMs check the virtual-media (MSD) "
+                    "toggle in the device web UI, then retry."
+                )
+            time.sleep(0.5)
 
     # -- GPIO ------------------------------------------------------------
 

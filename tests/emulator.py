@@ -46,6 +46,9 @@ class FakeKVMState:
         self.atx_enabled = True
         self.gpio_outputs: dict[str, object] = {}
         self.msd: dict[str, object] = {"online": False, "drive": {"image": None}}
+        # A healthy device goes online once media is attached; msd_stays_offline
+        # reproduces the #77 GLKVM failure (connect accepted, host sees nothing).
+        self.msd_stays_offline = False
         # GL /api/upgrade/* remote-firmware surface. Absent by default (older
         # firmware / fallback path) so get_firmware_info keeps returning the base
         # kvmd version; a test flips upgrade_present to exercise the flash path.
@@ -190,6 +193,10 @@ class _Handler(BaseHTTPRequestHandler):
         elif path == "/api/upgrade/start":
             if not self._state.upgrade_start_noop:
                 self._state.upgrade_started = True
+            self._json({})
+        elif path == "/api/msd/set_connected":
+            connected = "connected=1" in (self.path.split("?", 1) + [""])[1]
+            self._state.msd["online"] = connected and not self._state.msd_stays_offline
             self._json({})
         elif path in _VALID_POST_PATHS:
             self._json({})  # generic OK for a real hid/msd/gpio route
