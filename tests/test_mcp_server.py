@@ -40,10 +40,11 @@ EXPECTED_TOOLS = {
     "press_key",
     "send_shortcut",
     "ctrl_alt_delete",
+    "mouse",
 }
 # Tools that change state (readOnlyHint=False, destructiveHint=True).
 DESTRUCTIVE_TOOLS = {
-    "power", "ssh_exec", "type_text", "press_key", "send_shortcut", "ctrl_alt_delete",
+    "power", "ssh_exec", "type_text", "press_key", "send_shortcut", "ctrl_alt_delete", "mouse",
 }
 
 
@@ -305,6 +306,86 @@ def test_allowlist_allows_listed_profile(config_file):
 
     env = server_env(config_file, KVM_PILOT_MCP_PROFILES="fakebox")
     assert run_session(env, interact).isError is False
+
+
+# -- mouse + generation-keyed staleness (#124) -------------------------------
+
+
+def test_snapshot_returns_frame_ref(config_file):
+    async def interact(session):
+        return await session.call_tool("snapshot", {})
+
+    result = run_session(server_env(config_file), interact)
+    assert result.isError is False
+    payload = json.loads(result.content[0].text)
+    assert payload["host"] == "fakebox.local"
+    assert payload["frame_ref"].startswith("fakebox.local:0:")
+    assert any(c.type == "image" for c in result.content)
+
+
+def test_mouse_move_only_needs_no_ref(config_file):
+    async def interact(session):
+        return await session.call_tool("mouse", {"x": 0.5, "y": 0.5, "confirm": True})
+
+    parsed = result_json(run_session(server_env(config_file, KVM_PILOT_MCP_ALLOW_HID="1"), interact))
+    assert parsed["approved"] is True
+    assert parsed["op"] == "hid.mouse_move"
+    assert parsed["coord_space"] == "percent"
+
+
+def test_mouse_click_requires_observed_frame_ref(config_file):
+    async def interact(session):
+        return await session.call_tool(
+            "mouse", {"x": 0.5, "y": 0.5, "button": "left", "confirm": True}
+        )
+
+    parsed = result_json(run_session(server_env(config_file, KVM_PILOT_MCP_ALLOW_HID="1"), interact))
+    assert parsed["approved"] is False
+    assert "observed_frame_ref" in parsed["denied_reason"]
+
+
+def test_mouse_click_with_fresh_ref_is_approved(config_file):
+    async def interact(session):
+        snap = await session.call_tool("snapshot", {})
+        ref = json.loads(snap.content[0].text)["frame_ref"]
+        return await session.call_tool(
+            "mouse",
+            {"x": 0.67, "y": 0.28, "button": "left", "observed_frame_ref": ref, "confirm": True},
+        )
+
+    parsed = result_json(run_session(server_env(config_file, KVM_PILOT_MCP_ALLOW_HID="1"), interact))
+    assert parsed["approved"] is True
+    assert parsed["op"] == "hid.mouse_click"
+
+
+def test_mouse_click_refused_after_generation_bump(config_file):
+    # A reboot (ctrl_alt_delete, power_soft) bumps the frame generation, so a click
+    # planned against the pre-reboot frame is refused rather than landing blind.
+    async def interact(session):
+        snap = await session.call_tool("snapshot", {})
+        ref = json.loads(snap.content[0].text)["frame_ref"]
+        await session.call_tool("ctrl_alt_delete", {"confirm": True})
+        return await session.call_tool(
+            "mouse",
+            {"x": 0.5, "y": 0.5, "button": "left", "observed_frame_ref": ref, "confirm": True},
+        )
+
+    env = server_env(config_file, KVM_PILOT_MCP_ALLOW_HID="1", KVM_PILOT_MCP_ALLOW_POWER="1")
+    parsed = result_json(run_session(env, interact))
+    assert parsed["approved"] is False
+    assert "stale screen" in parsed["denied_reason"]
+
+
+def test_mouse_click_malformed_ref_refused(config_file):
+    async def interact(session):
+        return await session.call_tool(
+            "mouse",
+            {"x": 0.5, "y": 0.5, "button": "left", "observed_frame_ref": "garbage", "confirm": True},
+        )
+
+    parsed = result_json(run_session(server_env(config_file, KVM_PILOT_MCP_ALLOW_HID="1"), interact))
+    assert parsed["approved"] is False
+    assert "valid frame reference" in parsed["denied_reason"]
 
 
 def test_ssh_exec_errors_without_operator_gate(config_file):

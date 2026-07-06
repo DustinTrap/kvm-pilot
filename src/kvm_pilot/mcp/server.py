@@ -33,6 +33,7 @@ hardware). Treat every result as unverified. See issue #7.
 
 from __future__ import annotations
 
+import json
 import logging
 import os
 import threading
@@ -267,12 +268,20 @@ def logs(seek: int = 0, profile: str | None = None) -> dict:
 
 @mcp.tool(annotations=_READ_ONLY)
 def snapshot(profile: str | None = None):
-    """Capture the current KVM screen and return it as a viewable JPEG image (read-only)."""
+    """Capture the current KVM screen (read-only).
+
+    Returns ``[json_text, image]``: the JSON carries a ``frame_ref``
+    (``host:generation:hash``) — pass it back to the ``mouse`` tool as
+    ``observed_frame_ref`` so an absolute click can be refused if the host rebooted
+    or swapped media since you looked.
+    """
     with _driver(profile, confirm=deny_all, capability=Capability.VIDEO) as (cfg, kvm):
+        img = cast("Video", kvm).snapshot()
         note = f"screen of host '{cfg.host}' via the '{cfg.driver}' driver"
         if _dry_run():
             note += " (dry-run session)"
-        return [note, Image(data=cast("Video", kvm).snapshot(), format="jpeg")]
+        payload = {**_provenance(cfg), "frame_ref": act.frame_ref(cfg.host, img), "note": note}
+        return [json.dumps(payload), Image(data=img, format="jpeg")]
 
 
 @mcp.tool(annotations=_READ_ONLY)
@@ -351,6 +360,10 @@ async def _act(
         if not approval.approved:
             return {**_provenance(cfg), **act.result(inv, approval)}
         run(kvm)
+        # A media/power effect changes the screen enough to invalidate prior
+        # observations — bump the frame generation so a stale mouse ref won't match.
+        if not inv.dry_run and act.bumps_generation(inv.effect):
+            act.bump_generation(cfg.host)
         return {**_provenance(cfg), **act.result(inv, approval, detail=detail)}
 
 
@@ -425,6 +438,86 @@ async def ctrl_alt_delete(
         run=lambda kvm: cast("HID", kvm).send_shortcut("ControlLeft,AltLeft,Delete"),
         detail="sent Ctrl+Alt+Del",
     )
+
+
+def _mouse_stale(host: str, observed_frame_ref: str | None) -> str | None:
+    """A denial reason if the observation is missing or from a stale generation, else None."""
+    if not observed_frame_ref:
+        return "a mouse click requires observed_frame_ref from a prior snapshot"
+    obs_gen = act.frame_ref_generation(observed_frame_ref)
+    if obs_gen is None:
+        return f"observed_frame_ref {observed_frame_ref!r} is not a valid frame reference"
+    if obs_gen != act.generation(host):
+        return (
+            "frame was observed before a power/media state change on this host; "
+            "re-snapshot and retry so the click can't land on a stale screen"
+        )
+    return None
+
+
+def _run_mouse(kvm: KVMDriver, x: float, y: float, coord_space: str, button: str | None) -> None:
+    hid = cast("HID", kvm)
+    if coord_space == "percent":
+        hid.mouse_move(act.pct_to_kvmd(x), act.pct_to_kvmd(y))
+    elif coord_space == "raw":
+        hid.mouse_move(int(x), int(y))
+    else:  # pixel — needs a driver that reports its capture resolution
+        move_px = getattr(kvm, "mouse_move_pixels", None)
+        if move_px is None:
+            raise ToolError(
+                "this driver has no pixel-coordinate mouse support; use coord_space='percent'"
+            )
+        move_px(int(x), int(y))
+    if button is not None:
+        hid.mouse_click(button)
+
+
+@mcp.tool(annotations=_DESTRUCTIVE)
+async def mouse(
+    ctx: Context,
+    x: float,
+    y: float,
+    observed_frame_ref: str | None = None,
+    coord_space: Literal["percent", "pixel", "raw"] = "percent",
+    button: Literal["left", "right", "middle"] | None = None,
+    confirm: bool = False,
+    profile: str | None = None,
+) -> dict:
+    """Move the mouse (and optionally click) on the host. DESTRUCTIVE (HID input).
+
+    Absolute positioning depends on current screen state, so a **click** must carry
+    the ``observed_frame_ref`` it was planned against (from a prior ``snapshot``). If
+    the host has since rebooted or swapped media (its frame *generation* changed) the
+    call is refused so the click can't land on a stale screen — re-``snapshot`` and
+    retry. A move-only call (``button`` omitted) needs no ref.
+
+    ``coord_space``: ``percent`` (0.0-1.0, default — robust to a resolution change),
+    ``pixel`` (screen pixels; needs a driver that reports resolution), or ``raw``
+    (kvmd centered -32768..32767). ``button``: omit to move only, else move + click.
+    Gated by ``KVM_PILOT_MCP_ALLOW_HID`` + per-invocation approval.
+    """
+    with _driver(profile, confirm=allow_all, capability=Capability.HID) as (cfg, kvm):
+        inv = act.new_invocation(
+            host=cfg.host, profile=profile, tool="mouse", effect=EffectClass.HID_INPUT,
+            op="hid.mouse_click" if button else "hid.mouse_move", transport="hid.mouse",
+            args={"x": x, "y": y, "coord_space": coord_space, "button": button},
+            dry_run=_dry_run(),
+        )
+        # Staleness gate (clicks only): the observation must be from this generation.
+        if button is not None:
+            stale = _mouse_stale(cfg.host, observed_frame_ref)
+            if stale is not None:
+                return {**_provenance(cfg), **act.result(inv, act.Approval(False, reason=stale))}
+        approval = await act.approve_or_deny(ctx, inv, confirm=confirm)
+        if not approval.approved:
+            return {**_provenance(cfg), **act.result(inv, approval)}
+        if not inv.dry_run:
+            _run_mouse(kvm, x, y, coord_space, button)
+        detail = f"moved to ({x}, {y}) [{coord_space}]" + (f" + {button} click" if button else "")
+        return {
+            **_provenance(cfg),
+            **act.result(inv, approval, detail=detail, extra={"coord_space": coord_space}),
+        }
 
 
 @mcp.tool(annotations=_READ_ONLY)

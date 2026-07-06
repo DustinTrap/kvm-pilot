@@ -154,3 +154,48 @@ def test_approval_invalidated_on_midflight_state_change(monkeypatch):
     res = asyncio.run(act.approve_or_deny(None, _inv(), confirm=True))
     assert res.approved is False
     assert "invalidated" in res.reason
+
+
+# -- generation-keyed frame identity (#124) ----------------------------------
+
+
+def test_frame_ref_format_and_generation_parse():
+    ref = act.frame_ref("10.0.0.5", b"abc")
+    host, gen, digest = ref.rsplit(":", 2)
+    assert host == "10.0.0.5"
+    assert gen == "0"
+    assert len(digest) == 16
+    assert act.frame_ref_generation(ref) == 0
+
+
+def test_frame_ref_generation_handles_colon_bearing_host():
+    # rsplit(':', 2) keeps an IPv6 / host:port intact.
+    assert act.frame_ref_generation("fe80::1:3:deadbeefdeadbeef") == 3
+
+
+def test_frame_ref_generation_none_on_malformed():
+    assert act.frame_ref_generation("garbage") is None
+    assert act.frame_ref_generation("h:notanint:hash") is None
+
+
+def test_bump_generation_increments_per_host():
+    h = "gen-increment-host"
+    start = act.generation(h)
+    assert act.bump_generation(h) == start + 1
+    assert act.generation(h) == start + 1
+
+
+def test_bumps_generation_only_for_media_and_power():
+    assert act.bumps_generation(EffectClass.MEDIA) is True
+    assert act.bumps_generation(EffectClass.POWER_SOFT) is True
+    assert act.bumps_generation(EffectClass.POWER_HARD) is True
+    assert act.bumps_generation(EffectClass.HID_INPUT) is False
+    assert act.bumps_generation(EffectClass.HID_CONTROL) is False
+
+
+@pytest.mark.parametrize(
+    "p,expected",
+    [(0.0, -32768), (0.5, 0), (1.0, 32767), (-1.0, -32768), (2.0, 32767)],
+)
+def test_pct_to_kvmd_maps_and_clamps(p, expected):
+    assert act.pct_to_kvmd(p) == expected

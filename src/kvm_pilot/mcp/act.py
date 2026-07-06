@@ -30,6 +30,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import threading
 import uuid
 from dataclasses import dataclass
 from typing import Any
@@ -301,6 +302,70 @@ def result(
     return out
 
 
+# --------------------------------------------------------------------------- #
+# Generation-keyed frame identity (mouse staleness, issue #124)               #
+# --------------------------------------------------------------------------- #
+#
+# A per-host counter, bumped after any media/power effect. It is folded into the
+# frame_ref an agent gets from `snapshot`, so a reference minted before a
+# reboot/ISO-swap/retarget can't match one minted after (even if the pixels
+# coincide) — an absolute mouse click can't land on a stale screen. Comparing the
+# generation is a free in-memory check (no re-snapshot), and doesn't false-block
+# on spinners/clocks/cursor blink the way a pixel hash would. In-memory only: a
+# server restart resets it to 0, which conservatively invalidates old refs.
+
+_GENERATIONS: dict[str, int] = {}
+_gen_lock = threading.Lock()
+
+# Effects that change the screen enough to invalidate a prior observation.
+_GENERATION_BUMPING = (EffectClass.MEDIA, EffectClass.POWER_SOFT, EffectClass.POWER_HARD)
+
+
+def generation(host: str) -> int:
+    with _gen_lock:
+        return _GENERATIONS.get(host, 0)
+
+
+def bump_generation(host: str) -> int:
+    with _gen_lock:  # read-modify-write is atomic under the lock
+        _GENERATIONS[host] = _GENERATIONS.get(host, 0) + 1
+        return _GENERATIONS[host]
+
+
+def bumps_generation(effect: EffectClass) -> bool:
+    return effect in _GENERATION_BUMPING
+
+
+def frame_ref(host: str, image: bytes) -> str:
+    """An observation token ``host:generation:shorthash`` for a captured frame."""
+    return f"{host}:{generation(host)}:{hashlib.sha256(image).hexdigest()[:16]}"
+
+
+def frame_ref_generation(ref: str) -> int | None:
+    """Parse the generation segment of a frame_ref, or None if malformed.
+
+    ``rsplit(':', 2)`` so a host containing ':' (IPv6, host:port) still parses.
+    """
+    parts = ref.rsplit(":", 2)
+    if len(parts) != 3:
+        return None
+    try:
+        return int(parts[1])
+    except ValueError:
+        return None
+
+
+def pct_to_kvmd(p: float) -> int:
+    """Map a 0.0-1.0 screen fraction to kvmd's centered absolute axis (-32768..32767).
+
+    Resolution-free: the kvmd absolute space already *is* a fraction of the screen,
+    so a percentage coordinate survives a mode/resolution change (BIOS->GRUB->OS)
+    that would invalidate a pixel coordinate.
+    """
+    p = max(0.0, min(1.0, p))
+    return round(-32768 + p * 65535)
+
+
 __all__ = [
     "EFFECT_ENABLE_FLAG",
     "env_flag",
@@ -311,4 +376,10 @@ __all__ = [
     "Approval",
     "approve_or_deny",
     "result",
+    "generation",
+    "bump_generation",
+    "bumps_generation",
+    "frame_ref",
+    "frame_ref_generation",
+    "pct_to_kvmd",
 ]

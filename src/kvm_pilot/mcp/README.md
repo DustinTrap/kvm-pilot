@@ -30,6 +30,7 @@ client/driver code stays stdlib-only; `mcp` is imported only in this subpackage.
 | `press_key` | `destructiveHint` | Press one key (e.g. `Enter`, `F2`) — needs `KVM_PILOT_MCP_ALLOW_HID` + approval |
 | `send_shortcut` | `destructiveHint` | Send a key chord (e.g. `ControlLeft,AltLeft,F2`). Gated **by effect**: a reboot/power chord (Ctrl+Alt+Del, Magic SysRq) needs `ALLOW_POWER`; an ordinary session chord needs `ALLOW_HID` |
 | `ctrl_alt_delete` | `destructiveHint` | Send Ctrl+Alt+Del (a reboot) — classified `power_soft`, so it needs `KVM_PILOT_MCP_ALLOW_POWER`, not the HID gate |
+| `mouse` | `destructiveHint` | Move (and optionally click) the mouse. Coords in `percent` (0.0-1.0, default), `pixel`, or `raw` kvmd. A **click** must carry `observed_frame_ref` from a prior `snapshot`; it's refused if the host rebooted/swapped media since (generation changed) so it can't land on a stale screen. Needs `KVM_PILOT_MCP_ALLOW_HID` |
 | `ssh_exec` | `destructiveHint` | Run a command on the managed host's OS over SSH — **disabled unless the operator opts in** (`KVM_PILOT_MCP_ALLOW_SSH`) |
 | `ssh_discover` | `readOnlyHint` | Scan a CIDR for open SSH — **RISKY/opt-in** (active network scan; `confirm=true` required). Only to help find a target the user can't address, on networks they own |
 
@@ -78,7 +79,7 @@ right interface (the skill's *Choosing an interface* matrix is the full guide):
 
 - **`firmware-check`/`firmware-update`, `events`, `watch`, `mount`/`eject`** →
   the **CLI** (`kvm-pilot <cmd>`); no MCP tool.
-- **Mouse move/click, MSD mode switching** → the **Python library**.
+- **MSD mode switching** → the **Python library**.
 - **Reboot the KVM appliance / restart `kvmd`** → **out-of-band SSH** to the
   appliance. No kvm-pilot interface reboots the box; `power` acts on the
   *managed host*, not the appliance.
