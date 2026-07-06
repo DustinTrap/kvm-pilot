@@ -612,14 +612,19 @@ async def eject(ctx: Context, confirm: bool = False, profile: str | None = None)
 
 
 @mcp.tool(annotations=_READ_ONLY)
-def ssh_reachable(profile: str | None = None) -> dict:
+def ssh_reachable(profile: str | None = None, host: str | None = None) -> dict:
     """Is the managed host's OS reachable over SSH? (read-only, in-band).
 
     Targets the host *behind* the KVM (its own ``ssh_host`` / `KVM_PILOT_SSH_HOST`),
     a different machine from the KVM appliance. Use this to prefer remote recovery
     before asking a user to physically intervene.
+
+    ``host`` overrides the profile/env ``ssh_host`` at runtime — e.g. an install-time
+    DHCP address the profile can't know until the target boots.
     """
     cfg = resolve_host(profile or os.environ.get("KVM_PILOT_PROFILE"))
+    if host:
+        cfg.ssh_host = host
     from kvm_pilot.ssh import SSHChannel
 
     try:
@@ -635,11 +640,15 @@ def ssh_reachable(profile: str | None = None) -> dict:
 
 
 @mcp.tool(annotations=_DESTRUCTIVE)
-def ssh_exec(command: str, confirm: bool = False, profile: str | None = None) -> dict:
+def ssh_exec(
+    command: str, confirm: bool = False, profile: str | None = None, host: str | None = None
+) -> dict:
     """Run a command on the managed host's OS over SSH. DESTRUCTIVE / in-band.
 
     Disabled unless the server operator set `KVM_PILOT_MCP_ALLOW_SSH` in the
     server's own environment. ``confirm=true`` is required as a second factor.
+    ``host`` overrides the profile/env ``ssh_host`` at runtime (e.g. a discovered
+    install-time DHCP address).
     """
     if not _env_flag("KVM_PILOT_MCP_ALLOW_SSH"):
         raise ToolError(
@@ -651,6 +660,8 @@ def ssh_exec(command: str, confirm: bool = False, profile: str | None = None) ->
     if not confirm:
         raise ToolError("ssh_exec was not confirmed")
     cfg = resolve_host(profile or os.environ.get("KVM_PILOT_PROFILE"))
+    if host:
+        cfg.ssh_host = host
     from kvm_pilot.ssh import SSHChannel
 
     try:
