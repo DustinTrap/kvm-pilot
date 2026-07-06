@@ -587,6 +587,71 @@ def test_classify_screen_supports_local_backend(config_file):
     parsed = result_json(result)
     assert parsed["phase"] == "power_off"
     assert parsed["host"] == "fakebox.local"
+    assert parsed["mode"] == "server"
+
+
+def test_classify_screen_cheap_gate_works_without_any_key(config_file):
+    """Keyless deployments (#125) still get structured results for cheap-gate
+    phases: the fake is powered off, so the power gate resolves with no vision
+    credentials and no VLM call — the default anthropic backend is never used."""
+
+    async def interact(session):
+        return await session.call_tool("classify_screen", {})
+
+    # server_env strips ANTHROPIC_API_KEY; the default backend is anthropic.
+    result = run_session(server_env(config_file), interact)
+    assert result.isError is False
+    parsed = result_json(result)
+    assert parsed["mode"] == "server"
+    assert parsed["phase"] == "power_off"
+
+
+def test_classify_fallback_returns_image_and_prompt():
+    """When server-side vision is unavailable, classify_screen hands the caller
+    the screenshot + the prompt/schema to classify it itself (#125). Unit-level
+    because the fake driver over MCP is always powered off (power gate resolves
+    before the backend), so the fallback can't be reached end-to-end there."""
+    from types import SimpleNamespace
+
+    from mcp.server.fastmcp import Image
+
+    from kvm_pilot.drivers import FakeDriver
+    from kvm_pilot.errors import VisionError
+    from kvm_pilot.mcp import server
+
+    cfg = SimpleNamespace(host="fakebox.local", driver="fake")
+    out = server._classify_fallback(
+        cfg, FakeDriver(host="fakebox.local"), "look for a login prompt",
+        VisionError("No Anthropic API key."),
+    )
+    assert isinstance(out, list) and len(out) == 2
+    text, image = out
+    payload = json.loads(text)
+    assert payload["mode"] == "caller_classify"
+    assert payload["host"] == "fakebox.local"
+    assert "No Anthropic API key." in payload["reason"]
+    assert payload["hint"] == "look for a login prompt"
+    assert isinstance(payload["phases"], list) and payload["phases"]
+    assert "phase" in payload["system_prompt"]  # the classification schema prompt
+    assert isinstance(image, Image)
+
+
+def test_classify_fallback_raises_when_snapshot_also_fails():
+    """No image means nothing to delegate -> a clean tool error, not a fallback."""
+    from types import SimpleNamespace
+
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    from kvm_pilot.errors import VisionError
+    from kvm_pilot.mcp import server
+
+    class NoSnapshot:
+        def snapshot(self):
+            raise RuntimeError("streamer offline")
+
+    cfg = SimpleNamespace(host="h", driver="fake")
+    with pytest.raises(ToolError):
+        server._classify_fallback(cfg, NoSnapshot(), "", VisionError("no key"))
 
 
 def test_video_tools_error_cleanly_on_capability_less_driver(config_file):

@@ -48,10 +48,16 @@ from mcp.types import ToolAnnotations
 from kvm_pilot import resolve_host
 from kvm_pilot.config import HostConfig
 from kvm_pilot.drivers import Capability, KVMDriver, make_driver_from_config
-from kvm_pilot.errors import CapabilityError
+from kvm_pilot.errors import CapabilityError, VisionError
 from kvm_pilot.mcp import act
 from kvm_pilot.safety import EffectClass, allow_all, deny_all, shortcut_effect
-from kvm_pilot.vision import ScreenAnalyzer, VisionBackend, make_backend
+from kvm_pilot.vision import (
+    ALL_PHASES,
+    SYSTEM_PROMPT,
+    ScreenAnalyzer,
+    VisionBackend,
+    make_backend,
+)
 
 if TYPE_CHECKING:
     # ``_driver(capability=…)`` guarantees the driver supports the capability at
@@ -285,11 +291,56 @@ def snapshot(profile: str | None = None):
 
 
 @mcp.tool(annotations=_READ_ONLY)
-def classify_screen(hint: str = "", profile: str | None = None) -> dict:
-    """Classify the current screen's boot/run phase via the vision backend (read-only)."""
+def classify_screen(hint: str = "", profile: str | None = None):
+    """Classify the current screen's boot/run phase (read-only).
+
+    Uses the server-side vision backend when one is configured. If the server has
+    no vision credentials (no ``ANTHROPIC_API_KEY`` / ``KVM_PILOT_VISION_*``), it
+    falls back to *caller-side* classification: it returns the screenshot plus the
+    classification prompt/schema so a vision-capable agent can classify the image
+    itself. Cheap on-device gates (power-off, no-signal, boot-progress, OCR rules)
+    still resolve with no credentials at all.
+
+    Return shapes:
+      * server-side / cheap-gate → a dict with ``mode="server"`` + phase fields.
+      * caller-side fallback → a ``[json_text, Image]`` list; classify the image
+        yourself against the ``system_prompt`` / ``phases`` in the JSON block.
+    """
     with _driver(profile, confirm=deny_all, capability=Capability.VIDEO) as (cfg, kvm):
-        state = ScreenAnalyzer(kvm, _vision_backend()).classify(hint=hint)
-        return {**_provenance(cfg), **state.to_dict()}
+        try:
+            state = ScreenAnalyzer(kvm, _vision_backend()).classify(hint=hint)
+        except VisionError as exc:
+            return _classify_fallback(cfg, kvm, hint, exc)
+        return {**_provenance(cfg), "mode": "server", **state.to_dict()}
+
+
+def _classify_fallback(cfg: HostConfig, kvm: KVMDriver, hint: str, exc: VisionError):
+    """Return the screenshot + classification prompt for caller-side vision (#125).
+
+    Server-side vision is unavailable (no key/model, or a backend failure); the
+    calling agent already has vision, so hand it the frame and the same
+    prompt/schema ``classify_screen`` would have used. If we can't even capture a
+    frame there is nothing to delegate — surface a tool error instead.
+    """
+    try:
+        img = cast("Video", kvm).snapshot()
+    except Exception as e:  # noqa: BLE001 - no image means nothing to delegate
+        raise ToolError(
+            f"server-side vision unavailable ({exc}); a fallback snapshot also failed: {e}"
+        ) from e
+    payload = {
+        **_provenance(cfg),
+        "mode": "caller_classify",
+        "reason": str(exc),
+        "hint": hint,
+        "instructions": (
+            "Server-side vision is unavailable. Classify the attached screenshot and "
+            "reply with a JSON object matching the schema in 'system_prompt'."
+        ),
+        "phases": ALL_PHASES,
+        "system_prompt": SYSTEM_PROMPT,
+    }
+    return [json.dumps(payload), Image(data=img, format="jpeg")]
 
 
 @mcp.tool(annotations=_DESTRUCTIVE)
