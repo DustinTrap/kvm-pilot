@@ -52,7 +52,12 @@ upgradeable one.)
           "supported": true, "method": "gl-api", "risk": "high",
           "recovery_required": true, "self_flash_blind": true, "notes": "…"
         }
-      }
+      },
+      "versions": [                      // DERIVED from data/test_runs.jsonl (#98) — never hand-edit
+        {"version": "V1.9.1 release1",
+         "maturity": {"level": "beta",
+                      "capabilities": {"info": "beta", "snapshot": "beta"}}}
+      ]
     }
   ]
 }
@@ -82,6 +87,32 @@ Everything else on the report is computed live and combined. `get_firmware_info(
 can auto-populate the observable half, so humans only supply these few facts —
 and can enrich them over time (an initial profile on first contact, a follow-up
 report adding `vmedia` once an ISO has actually been booted).
+
+## Maturity (derived from the run ledger, #98)
+
+Each entry's `versions[].maturity` records how proven a `(vendor, product,
+firmware_version)` combo is. The levels are **derived — never hand-set** — by
+`kvm_pilot.maturity` from **live** runs only (`source: "real"` in
+`data/test_runs.jsonl`); synthetic/mock runs never promote anything.
+
+| level | rule (per capability, from its live pass history) |
+|---|---|
+| `alpha` | 0 live passes (mocks only, or live failures only) |
+| `beta`  | ≥ 1 live pass |
+| `rc`    | ≥ 3 live passes across ≥ 2 distinct UTC dates (destructive caps use the same ladder; the harness's explicit include gate, #99, guarantees they were deliberate) |
+| `ga`    | ≥ 5 live passes spanning ≥ 14 days, all **after** the capability's most recent live failure (a new failure resets the window) |
+
+The overall `level` is the `min()` of the exercised capabilities' levels.
+Regenerate with:
+
+```bash
+python -m kvm_pilot.maturity --ledger data/test_runs.jsonl \
+  --registry src/kvm_pilot/data/firmware_registry.json --write
+```
+
+CI re-derives the levels from the ledger and **fails if the committed registry
+disagrees** (`tests/test_maturity.py::test_committed_registry_matches_ledger`),
+so a hand-edited level cannot survive a pull request.
 
 ## The checks (`health.py`, generic — no per-vendor branching)
 

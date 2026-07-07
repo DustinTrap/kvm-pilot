@@ -7,6 +7,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Support-matrix maturity, derived from the run ledger** (#98, part of #96):
+  `kvm_pilot.maturity` computes per-capability and overall levels
+  (alpha/beta/rc/ga) for every `(vendor, product, firmware_version)` combo
+  from live runs in `data/test_runs.jsonl` and folds them into the shipped
+  registry's new additive `versions[].maturity` rows (schema stays v2).
+  Levels are derived, never hand-set — a CI test re-derives them from the
+  ledger and fails on drift.
 - **MCP `wait_for_state` tool** (#147 — the last #61 acceptance criterion):
   block (bounded, 300 s server-side cap) until the screen reaches a named
   boot/run phase, the MCP twin of CLI `watch`. Validates the phase token up
