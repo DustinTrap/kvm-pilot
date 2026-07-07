@@ -24,6 +24,7 @@ client/driver code stays stdlib-only; `mcp` is imported only in this subpackage.
 | `logs` | `readOnlyHint` | Device/host event log as text (`seek` = seconds of lookback). The text diagnostic when video/streamer/power looks wrong — it names a fault (e.g. a stuck encoder behind a `snapshot` 503) a screenshot can't |
 | `snapshot` | `readOnlyHint` | Current screen, returned as a real JPEG **image** content block the model can see. The JSON payload carries the live `signal` state (online/resolution/fps/format) and `unchanged_since_last_snapshot` — byte-identical pixels across an expected screen change are stale/cached: verify via `signal` + `logs` before acting (#141/#143) |
 | `classify_screen` | `readOnlyHint` | Boot/run phase. Uses the server-side vision backend (Anthropic or a local VLM, see below) when configured; **if the server has no vision key it falls back to caller-side** — returning the screenshot + prompt/schema for a vision-capable agent to classify. Cheap on-device gates (power-off/no-signal/boot-progress/OCR) resolve with no key at all. Result is a `mode="server"` dict, or a `[json, image]` list to classify yourself |
+| `wait_for_state` | `readOnlyHint` | Block (bounded) until the screen reaches a named boot/run phase — the MCP twin of CLI `watch`. Validates the phase token up front, polls the cheap gates + server-side vision with backoff, emits MCP progress per poll, and returns the reached phase + confidence + a `frame_ref` to anchor a follow-up `mouse` click; a timeout comes back as a same-path `reached: false` result with the last observed state. `timeout` is capped server-side at 300 s — chain calls for longer waits. **Needs server-side vision for phases the cheap gates can't resolve**: with no vision key it fails fast pointing you at `classify_screen` polling (caller-side classification) instead of burning the timeout |
 | `ssh_reachable` | `readOnlyHint` | Is the **managed host's OS** reachable over SSH (in-band)? Targets the host *behind* the KVM (its own `ssh_host`), not the appliance — use it to prefer remote recovery before physical intervention. Pass `host=` to override the target at runtime (e.g. an install-time DHCP address the profile can't know); also surfaced as an `ssh-reachable` healthcheck when `ssh_host` is configured |
 | `list_virtual_media` | `readOnlyHint` | Inventory the KVM's virtual-media (MSD) storage: stored images (name/size/completeness), the selected drive image, and whether media is attached. **Check this before asking the operator to download or upload an ISO** — the image may already be on the device from an earlier job |
 | `power` | `destructiveHint` | `on` / `off` / `off-hard` / `reset` — **disabled unless the operator opts in** (`KVM_PILOT_MCP_ALLOW_POWER`) |
@@ -66,7 +67,7 @@ re-plan, never left hanging. Each result carries a stable `invocation_id` and bo
 
 ### Which tools work with which driver
 
-| Driver kind | `info` | `healthcheck` | `capabilities` | `power_state` | `logs` | `snapshot` | `classify_screen` | `power` |
+| Driver kind | `info` | `healthcheck` | `capabilities` | `power_state` | `logs` | `snapshot` | `classify_screen` / `wait_for_state` | `power` |
 |---|---|---|---|---|---|---|---|---|
 | `pikvm` / `glkvm` / `blikvm` | ✅ | ✅ | ✅ | ✅ (with ATX detail) | ✅ | ✅ | ✅ | ✅ |
 | `redfish` (iDRAC, iLO, XCC, OpenBMC, …) | ✅ | ✅ (checks it can't serve are omitted) | ✅ | ✅ | ✅ | ❌ no video capability | ❌ no video capability | ✅ |
@@ -80,7 +81,7 @@ the driver kind and the missing capability (it never `AttributeError`s).
 The MCP surface is deliberately small. For anything outside the table, pick the
 right interface (the skill's *Choosing an interface* matrix is the full guide):
 
-- **`firmware-check`/`firmware-update`, `events`, `watch`** → the **CLI**
+- **`firmware-check`/`firmware-update`, `events`** → the **CLI**
   (`kvm-pilot <cmd>`); no MCP tool.
 - **MSD mode switching** → the **Python library**.
 - **Reboot the KVM appliance / restart `kvmd`** → **out-of-band SSH** to the
@@ -160,10 +161,10 @@ kvm-pilot-mcp                    # start the stdio server (or: python -m kvm_pil
 | `KVM_PILOT_MCP_ELICIT` | Set to `off` to force the pre-authorized posture (env gate + `confirm=true`) even for elicitation-capable clients; otherwise a per-invocation human approval is requested when the client supports it |
 | `KVM_PILOT_SSH_HOST` / `KVM_PILOT_SSH_USER` / `KVM_PILOT_SSH_PORT` / `KVM_PILOT_SSH_KEY` | The **managed host's** SSH target (a different machine from the KVM) for `ssh_reachable` / `ssh_exec`; also settable per-profile as `ssh_host` etc. |
 | `KVM_PILOT_MCP_DRY_RUN` | Build every driver with `dry_run=True`; destructive calls are logged, never sent |
-| `KVM_PILOT_VISION_BACKEND` | Vision backend for `classify_screen`: `anthropic` (default) or `local` (any OpenAI-compatible VLM: LM Studio, Ollama, vLLM) |
+| `KVM_PILOT_VISION_BACKEND` | Vision backend for `classify_screen` / `wait_for_state`: `anthropic` (default) or `local` (any OpenAI-compatible VLM: LM Studio, Ollama, vLLM) |
 | `KVM_PILOT_VISION_URL` | Base URL of the local VLM (required for `local`) |
 | `KVM_PILOT_VISION_MODEL` | Vision model id — required for `local`; optional pin for `anthropic` (otherwise the newest model is auto-resolved once per process) |
-| `ANTHROPIC_API_KEY` | The `anthropic` vision backend uses it when set; **not required** — without any vision key, `classify_screen` falls back to caller-side classification (returns the screenshot + prompt for a vision-capable agent) |
+| `ANTHROPIC_API_KEY` | The `anthropic` vision backend uses it when set; **not required** — without any vision key, `classify_screen` falls back to caller-side classification (returns the screenshot + prompt for a vision-capable agent); `wait_for_state` needs server-side vision for non-cheap-gate phases and errors fast otherwise (pointing at `classify_screen` polling) |
 
 ## Claude Desktop
 

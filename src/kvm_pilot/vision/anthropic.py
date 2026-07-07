@@ -62,6 +62,15 @@ class AnthropicBackend(VisionBackend):
             self._model = self._resolve_latest_model()
         return self._model
 
+    @property
+    def credentialed(self) -> bool:
+        """Whether an API key is configured. False means every network call will
+        raise VisionError; server-side wait loops check this up front (#147) to
+        fail fast instead of retrying a credential error until their deadline.
+        Duck-typed from the MCP server via ``getattr(backend, "credentialed", True)``,
+        so a backend without the property is simply treated as credentialed."""
+        return bool(self._api_key)
+
     # -- model discovery -------------------------------------------------
 
     def _resolve_latest_model(self) -> str:

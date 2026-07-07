@@ -31,6 +31,7 @@ EXPECTED_TOOLS = {
     "logs",
     "snapshot",
     "classify_screen",
+    "wait_for_state",
     "power",
     "healthcheck",
     "ssh_reachable",
@@ -711,6 +712,122 @@ def test_classify_fallback_raises_when_snapshot_also_fails():
     cfg = SimpleNamespace(host="h", driver="fake")
     with pytest.raises(ToolError):
         server._classify_fallback(cfg, NoSnapshot(), "", VisionError("no key"))
+
+
+# -- wait_for_state (#147): the MCP twin of CLI watch -------------------------
+
+
+def test_wait_for_state_reaches_cheap_phase_without_vision_key(config_file):
+    """A keyless server can still wait for cheap-gate phases: the fake is powered
+    off, so the power gate resolves every poll with zero vision credentials and
+    no VLM call — and the keyless pre-check must not block that. The success
+    result mints a frame_ref (same convention as snapshot) so a follow-up mouse
+    click can anchor to the final frame."""
+
+    async def interact(session):
+        return await session.call_tool("wait_for_state", {"phase": "power_off", "timeout": 10})
+
+    # server_env strips ANTHROPIC_API_KEY; the default backend is anthropic.
+    result = run_session(server_env(config_file), interact)
+    assert result.isError is False
+    parsed = result_json(result)
+    assert parsed["reached"] is True
+    assert parsed["phase"] == "power_off"
+    assert parsed["confidence"] >= 0.7
+    assert parsed["waited_for"] == "power_off"
+    assert parsed["host"] == "fakebox.local"
+    assert parsed["frame_ref"].startswith("fakebox.local:0:")
+
+
+def test_wait_for_state_timeout_returns_same_path_result(config_file):
+    """A timeout is a result, not an error: reached=false plus the last observed
+    state, so the agent can decide (and chain another call) instead of crashing."""
+
+    async def interact(session):
+        return await session.call_tool("wait_for_state", {"phase": "desktop", "timeout": 1})
+
+    result = run_session(server_env(config_file), interact)
+    assert result.isError is False
+    parsed = result_json(result)
+    assert parsed["reached"] is False
+    assert parsed["waited_for"] == "desktop"
+    assert parsed["timeout_s"] == 1
+    assert parsed["last"]["phase"] == "power_off"
+
+
+def test_wait_for_state_rejects_unknown_phase_fast(config_file):
+    """A typo'd phase token fails immediately with the valid list — it must not
+    burn the requested timeout (the CLI watch guard, ported). The 300 s request
+    completing inside the harness's 60 s cap proves the fast path."""
+
+    async def interact(session):
+        return await session.call_tool("wait_for_state", {"phase": "dekstop", "timeout": 300})
+
+    result = run_session(server_env(config_file), interact)
+    assert result.isError is True
+    text = result.content[0].text
+    assert "Valid phases" in text
+    assert "desktop" in text
+
+
+def test_wait_for_state_emits_progress(config_file):
+    """Per-poll MCP progress notifications reach the client end-to-end over
+    stdio — the anyio from_thread bridge out of the worker thread works."""
+    updates: list[tuple] = []
+
+    async def interact(session):
+        async def cb(progress, total, message):
+            updates.append((progress, total, message))
+
+        return await session.call_tool(
+            "wait_for_state", {"phase": "desktop", "timeout": 1}, progress_callback=cb
+        )
+
+    result = run_session(server_env(config_file), interact)
+    assert result.isError is False
+    assert updates
+    progress, total, message = updates[0]
+    assert total == 1.0
+    assert "power_off" in message
+
+
+def test_wait_for_state_no_vision_errors_with_classify_screen_pointer(monkeypatch):
+    """The decided keyless behavior (#147): when the screen actually needs the
+    VLM tier and the server has no key, the pre-check fails fast with a typed
+    error pointing at caller-side classify_screen polling — never a burned
+    timeout. Unit-level because the MCP fake is always powered off, so the VLM
+    tier is unreachable end-to-end (same rationale as test_classify_fallback_*)."""
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    from kvm_pilot.drivers import FakeDriver
+    from kvm_pilot.mcp import server
+    from kvm_pilot.vision import ScreenAnalyzer
+    from kvm_pilot.vision.anthropic import AnthropicBackend
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    analyzer = ScreenAnalyzer(
+        FakeDriver(host="x", powered=True, phase="unknown"), AnthropicBackend(model="pinned")
+    )
+    with pytest.raises(ToolError) as excinfo:
+        server._assert_waitable(analyzer, "desktop", "")
+    assert "classify_screen" in str(excinfo.value)
+    assert "caller-side" in str(excinfo.value)
+
+
+def test_wait_timeout_clamped_to_cap_and_rejects_nonpositive():
+    """The server-side ceiling without a 300 s test run: in-range values pass
+    through, anything above is clamped to the cap, non-positive is refused."""
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    from kvm_pilot.mcp import server
+
+    assert server._clamp_timeout(10) == 10
+    assert server._clamp_timeout(1e6) == 300.0
+    assert server._clamp_timeout(1e6) == server._WAIT_TIMEOUT_CAP
+    with pytest.raises(ToolError):
+        server._clamp_timeout(0)
+    with pytest.raises(ToolError):
+        server._clamp_timeout(-5)
 
 
 def test_video_tools_error_cleanly_on_capability_less_driver(config_file):

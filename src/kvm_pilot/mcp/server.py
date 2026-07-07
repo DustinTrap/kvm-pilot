@@ -10,7 +10,8 @@ stdlib-only, importing ``mcp`` only here).
 SAFETY MODEL (see the co-located README.md for the operator-facing version):
   * The read-only tools (``info``, ``healthcheck``, ``capabilities``,
     ``power_state``, ``logs``, ``snapshot``, ``classify_screen``,
-    ``list_virtual_media``, ``ssh_reachable``, ``ssh_discover``) run with a
+    ``wait_for_state``, ``list_virtual_media``, ``ssh_reachable``,
+    ``ssh_discover``) run with a
     deny-all confirm callback and carry a ``readOnlyHint`` tool annotation
     (``ssh_discover`` additionally requires ``confirm=true`` — an active
     network scan is read-only but not harmless).
@@ -38,14 +39,18 @@ combos remain mock-only, so treat results on unlisted hardware as unverified.
 
 from __future__ import annotations
 
+import base64
 import json
 import logging
 import os
 import threading
+import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
+from functools import partial
 from typing import TYPE_CHECKING, Literal, cast
 
+import anyio
 from mcp.server.fastmcp import Context, FastMCP, Image
 from mcp.server.fastmcp.exceptions import ToolError
 from mcp.types import ToolAnnotations
@@ -54,6 +59,7 @@ from kvm_pilot import resolve_host
 from kvm_pilot.config import HostConfig
 from kvm_pilot.drivers import Capability, KVMDriver, make_driver_from_config
 from kvm_pilot.errors import CapabilityError, KVMPilotError, VisionError
+from kvm_pilot.errors import TimeoutError as KVMTimeoutError
 from kvm_pilot.mcp import act
 from kvm_pilot.safety import EffectClass, allow_all, deny_all, shortcut_effect
 from kvm_pilot.vision import (
@@ -368,6 +374,132 @@ def _classify_fallback(cfg: HostConfig, kvm: KVMDriver, hint: str, exc: VisionEr
         "system_prompt": SYSTEM_PROMPT,
     }
     return [json.dumps(payload), Image(data=img, format="jpeg")]
+
+
+# -- wait_for_state (#147): screen-phase wait parity with CLI watch -----------
+
+_WAIT_TIMEOUT_CAP = 300.0  # hard server-side ceiling; chain calls for longer waits
+
+
+def _clamp_timeout(timeout: float) -> float:
+    if timeout <= 0:
+        raise ToolError("timeout must be > 0 seconds")
+    return min(timeout, _WAIT_TIMEOUT_CAP)
+
+
+def _no_vision_error(phase: str, reason: str) -> ToolError:
+    return ToolError(
+        f"cannot wait for {phase!r}: resolving this screen needs the vision model, but "
+        f"server-side vision is unavailable ({reason}). Poll `classify_screen` instead — "
+        "with no server key it returns the screenshot plus the classification prompt so a "
+        "vision-capable agent can classify each frame itself (caller-side)."
+    )
+
+
+def _assert_waitable(analyzer: ScreenAnalyzer, phase: str, hint: str) -> None:
+    """Keyless server: prove the cheap gates can resolve the screen before waiting.
+
+    Without server-side vision every non-cheap poll raises VisionError, which the
+    analyzer's wait loop would swallow and retry until it burned the whole timeout
+    (#147). One classify up front turns that into an immediate typed error that
+    points the agent at caller-side `classify_screen` polling.
+    """
+    try:
+        analyzer.classify(hint=hint)
+    except VisionError as exc:
+        raise _no_vision_error(phase, str(exc)) from exc
+
+
+def _final_frame_ref(cfg: HostConfig, kvm: KVMDriver, state) -> str | None:
+    """Mint a frame_ref for the final frame so a follow-up mouse click can anchor.
+
+    Cheap-gate states carry no image (power_off/no_signal resolve without a
+    snapshot); take one best-effort frame then. None if even that fails (e.g. the
+    streamer 503s on a powered-off host) — the wait result must not fail because
+    the anchor could not be minted.
+    """
+    if state.image_b64:
+        return act.frame_ref(cfg.host, base64.b64decode(state.image_b64))
+    try:
+        return act.frame_ref(cfg.host, cast("Video", kvm).snapshot())
+    except Exception:  # noqa: BLE001
+        return None
+
+
+@mcp.tool(annotations=_READ_ONLY)
+async def wait_for_state(
+    ctx: Context,
+    phase: str,
+    timeout: float = 60.0,
+    hint: str = "",
+    profile: str | None = None,
+) -> dict:
+    """Wait (bounded) until the screen reaches a boot/run phase (read-only).
+
+    The server-side twin of the CLI `watch` command: polls the sensing hierarchy
+    (cheap power/signal/boot-progress gates first, then the server-side vision
+    backend) with backoff until `phase` is observed at sufficient confidence, so
+    an agent doesn't have to hand-roll `classify_screen` polling round-trips.
+
+    `phase` must be a known phase token (see `classify_screen`); an unknown token
+    fails immediately with the valid list. `timeout` is seconds (default 60,
+    hard server-side cap 300 — for longer waits call again: the timeout result
+    reports the last observed phase, so chaining is cheap). Emits an MCP progress
+    notification per poll when the client requests progress.
+
+    Returns `reached=true` with the final phase/confidence plus a `frame_ref` for
+    the final frame — pass it to `mouse` as `observed_frame_ref` to anchor a
+    follow-up click. A timeout returns `reached=false` with the last observed
+    state through the same path (never a hang, never a raised error). If the
+    server has no vision credentials and the cheap gates cannot resolve the
+    screen, it fails fast with an error directing you to `classify_screen`
+    polling (whose caller-side fallback hands you the screenshot + prompt).
+    Holds the device driver open for up to `timeout` seconds.
+    """
+    if phase not in ALL_PHASES:
+        raise ToolError(f"unknown phase {phase!r}. Valid phases: {', '.join(ALL_PHASES)}")
+    timeout = _clamp_timeout(timeout)
+    try:
+        backend = _vision_backend()
+    except VisionError as exc:  # e.g. 'local' kind with no URL/model configured
+        raise _no_vision_error(phase, str(exc)) from exc
+
+    with _driver(profile, confirm=deny_all, capability=Capability.VIDEO) as (cfg, kvm):
+        analyzer = ScreenAnalyzer(kvm, backend)
+        if getattr(backend, "credentialed", True) is False:
+            await anyio.to_thread.run_sync(partial(_assert_waitable, analyzer, phase, hint))
+
+        last: list = []  # last observed ScreenState, for the timeout result
+
+        def _note(state, elapsed) -> None:
+            last[:] = [state]
+            try:  # best-effort; no-op when the client sent no progress token
+                anyio.from_thread.run(
+                    ctx.report_progress, min(elapsed, timeout), timeout,
+                    f"{state.phase} (confidence={state.confidence:.2f})",
+                )
+            except Exception:  # noqa: BLE001 - progress must never break the wait
+                pass
+
+        start = time.monotonic()
+        try:
+            state = await anyio.to_thread.run_sync(
+                partial(analyzer.wait_for_state, phase, timeout=timeout, hint=hint, on_poll=_note)
+            )
+        except KVMTimeoutError as exc:
+            out = {
+                **_provenance(cfg), "reached": False, "waited_for": phase,
+                "timeout_s": timeout, "detail": str(exc),
+            }
+            if last:
+                out["last"] = last[0].to_dict()
+            return out
+        return {
+            **_provenance(cfg), "reached": True, "waited_for": phase,
+            "elapsed_s": round(time.monotonic() - start, 1),
+            **state.to_dict(),
+            "frame_ref": _final_frame_ref(cfg, kvm, state),
+        }
 
 
 @mcp.tool(annotations=_DESTRUCTIVE)
