@@ -297,7 +297,12 @@ class PiKVMDriver(PowerMixin, CapabilityMixin):
         return data
 
     def _snapshot_unavailable_detail(self, exc: UnavailableError) -> str:
-        """Explain a snapshot 503 using the streamer state (#142/#143)."""
+        """Explain a snapshot 503 using the streamer state (#142/#143/#154).
+
+        Three very different causes, keyed on the authoritative ``hdmi.signal``
+        (not ``source.online``, which stays True with no picture on GL firmware):
+        no HDMI signal, an idle on-demand streamer, or a wedged encoder.
+        """
         try:
             sig = self.video_signal_info()
         except Exception:  # noqa: BLE001 - the original 503 is the real story
@@ -307,17 +312,25 @@ class PiKVMDriver(PowerMixin, CapabilityMixin):
                 "the KVM appliance."
             )
         state = ", ".join(f"{k}={v}" for k, v in sig.items() if v is not None) or "no detail"
-        if sig.get("online") is False:
+        if sig.get("hdmi_signal") is False or sig.get("online") is False:
             return (
-                f"{exc} — the capture source reports offline ({state}): there is "
-                "no video signal. The host may be powered off or the HDMI input "
-                "disconnected; this is not a kvm-pilot fault."
+                f"{exc} — no video signal ({state}): hdmi.signal is false, so the "
+                "guest appears powered off, asleep, or the HDMI cable is "
+                "disconnected. This is not a kvm-pilot fault — bring the guest's "
+                "display up, then retry."
+            )
+        if sig.get("streamer_idle"):
+            return (
+                f"{exc} — HDMI signal is present but the streamer is idle ({state}): "
+                "the on-demand encoder has no subscriber (captured_fps=0, no JPEG "
+                "sink client), so no frame is being produced. Waking the stream or "
+                "retrying should yield a frame (#142)."
             )
         return (
-            f"{exc} — but the capture source looks live ({state}), so the JPEG "
-            "snapshot path itself is failing: typically the encoder is "
-            "re-initializing (retry in a few seconds) or wedged (#142). Check "
-            "`logs`; the video feed in the device web UI may still work."
+            f"{exc} — HDMI signal is present and capturing ({state}), so the JPEG "
+            "snapshot path itself is failing: the encoder is re-initializing "
+            "(retry in a few seconds) or wedged (#142). Check `logs`; the WebRTC "
+            "feed may still work."
         )
 
     def snapshot_save(self, path: str) -> Path:
@@ -349,39 +362,68 @@ class PiKVMDriver(PowerMixin, CapabilityMixin):
             source = state["streamer"].get("source") or {}
         return source if isinstance(source, dict) else {}
 
-    def video_signal_info(self) -> dict:
-        """Normalized live-capture state: ``{online, width, height, fps, format}``.
+    @staticmethod
+    def _streamer_block(state: dict) -> dict:
+        """The GL ``streamer`` sub-block of ``/api/streamer`` (hdmi/sinks), or {}."""
+        blk = state.get("streamer")
+        return blk if isinstance(blk, dict) else {}
 
-        The cheap readout that distinguishes the three very different snapshot
-        failure modes — no signal, a format the JPEG path can't serve (#107),
-        and a wedged/re-initializing subsystem (#142) — so agents and the
-        healthcheck reason from data instead of guessing (#143). Fields the
-        firmware doesn't report are ``None``.
+    @staticmethod
+    def _as_dict(val: object) -> dict:
+        """``val`` if it is a dict, else ``{}`` — for defensively walking nested JSON."""
+        return val if isinstance(val, dict) else {}
+
+    def video_signal_info(self) -> dict:
+        """Normalized live-capture state.
+
+        The cheap readout that distinguishes the snapshot failure modes so agents
+        and the healthcheck reason from data instead of guessing (#143/#154):
+
+        * ``hdmi_signal`` — the **authoritative** "is there a picture" flag
+          (``streamer.hdmi.signal``); ``None`` if the firmware doesn't report it.
+          On GL firmware ``source.online`` stays True with no picture, so this is
+          the field to trust.
+        * ``online`` — ``source.online`` (the pipeline-up flag; kept for context).
+        * ``streamer_idle`` — True when the on-demand encoder is producing no
+          frames (``captured_fps==0`` and no JPEG-sink subscriber): a still may
+          need the stream woken (#142).
+        * ``width``/``height``/``fps``/``format`` — capture geometry; ``None`` if
+          unreported (a JPEG path can't serve some formats/resolutions, #107).
         """
-        source = self._streamer_source(self.get_streamer_state())
-        res = source.get("resolution")
-        res = res if isinstance(res, dict) else {}
+        state = self.get_streamer_state()
+        source = self._streamer_source(state)
+        streamer = self._streamer_block(state)
+        hdmi = self._as_dict(streamer.get("hdmi"))
+        jpeg_sink = self._as_dict(self._as_dict(streamer.get("sinks")).get("jpeg"))
+        res = self._as_dict(source.get("resolution"))
+        fps = source.get("captured_fps", source.get("fps"))
         return {
             "online": source.get("online"),
+            "hdmi_signal": hdmi.get("signal"),
             "width": res.get("width"),
             "height": res.get("height"),
-            "fps": source.get("captured_fps", source.get("fps")),
+            "fps": fps,
             "format": source.get("format"),
+            "streamer_idle": fps in (0, None) and jpeg_sink.get("has_clients") is False,
         }
 
     def has_video_signal(self) -> bool:
-        """True if the capture pipeline reports a live video source.
+        """True if there is a live picture from the host.
 
-        Parses ``/api/streamer`` defensively: it returns ``False`` only when the
-        device *positively* reports the source offline, so a missing or unknown
-        field never suppresses a real frame. Lets the vision layer skip a model
-        call when there is simply nothing on screen (powered off, between mode
-        sets, sleeping).
+        Prefers the authoritative ``streamer.hdmi.signal`` when the firmware
+        reports it (GL keeps ``source.online`` True with no picture, #154); falls
+        back to ``source.online`` for stock PiKVM. A missing/unknown field never
+        suppresses a real frame. Lets the vision layer cheaply conclude
+        "no signal" (powered off, asleep, between mode sets) instead of attempting
+        a snapshot that 503s.
         """
         try:
             state = self.get_streamer_state()
         except Exception:  # noqa: BLE001 - a liveness probe must never raise
             return True
+        hdmi = self._streamer_block(state).get("hdmi")
+        if isinstance(hdmi, dict) and "signal" in hdmi:
+            return bool(hdmi["signal"])  # authoritative on GL firmware
         online = self._streamer_source(state).get("online")
         return True if online is None else bool(online)
 
