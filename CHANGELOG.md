@@ -7,6 +7,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Unattended Linux installs guide** (#129): `docs/unattended-install.md` —
+  prefer text mode + SSH over driving a graphical installer via KVM HID, with
+  the per-distro boot-arg matrix (Anaconda `inst.sshd`/`inst.text`, d-i
+  network-console, Subiquity autoinstall, linuxrc `ssh=1`, Arch/Alpine live
+  shell) and the SSH handoff — plus the bundled skill's compact install-time
+  rule. The detect-installer automation half is tracked in the Reflexes
+  `unattended-install` playbook (#122).
 - **MCP `support_matrix` tool + `support-evidence` healthcheck finding**
   (#102, part of #96): a read-only, offline lookup of what has actually been
   exercised on real hardware, per `(vendor, product, firmware_version)` ×

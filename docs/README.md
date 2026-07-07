@@ -22,6 +22,7 @@ on every push to `main` — edit the files here, never the wiki directly).
 - [Redfish reference](redfish.md) — the BMC driver: hypermedia navigation, auth, and firmware quirks.
 - [Firmware registry](firmware-registry.md) — the firmware-currency check, the community registry data model, and the GitHub-based single-source-of-truth + ingestion design (#80 follow-up).
 - [Remote firmware update](firmware-update.md) — the GL `/api/upgrade/*` surface, the reliability/risk model, and the gated `firmware-update` command (#92).
+- [Unattended Linux installs](unattended-install.md) — prefer text mode + SSH over driving a graphical installer via KVM HID: the per-distro boot-arg matrix (Anaconda `inst.sshd`/`inst.text`, d-i network-console, Subiquity autoinstall, linuxrc `ssh=1`) and the SSH handoff ([#129](https://github.com/DustinTrap/kvm-pilot/issues/129)).
 - [Claude skill](../src/kvm_pilot/skill/SKILL.md) — the bundled skill for driving `kvm-pilot` from Claude.
 - [MCP server](../src/kvm_pilot/mcp/README.md) — the bundled Model Context Protocol server (`kvm-pilot-mcp`).
 

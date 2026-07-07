@@ -44,6 +44,7 @@ PAGES: list[tuple[str, str, str | None]] = [
     ("docs/redfish.md", "redfish.md", "Redfish reference"),
     ("docs/firmware-registry.md", "firmware-registry.md", "Firmware registry"),
     ("docs/firmware-update.md", "firmware-update.md", "Remote firmware update"),
+    ("docs/unattended-install.md", "unattended-install.md", "Unattended Linux installs"),
     ("src/kvm_pilot/skill/SKILL.md", "skill.md", "Claude skill"),
     ("src/kvm_pilot/mcp/README.md", "mcp-server.md", "MCP server"),
     ("docs/CONTRIBUTING.md", "CONTRIBUTING.md", "Contributing"),
