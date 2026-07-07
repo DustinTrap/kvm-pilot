@@ -59,6 +59,7 @@ class FakeDriver(PowerMixin, CapabilityMixin):
         powered: bool = False,
         phase: str = "power_off",
         video_signal: bool = True,
+        hid_connected: bool = True,
         ocr_text: str = "",
         logs: str = "",
         events: list[dict] | None = None,
@@ -70,6 +71,7 @@ class FakeDriver(PowerMixin, CapabilityMixin):
         self.powered = powered
         self.phase = phase
         self.video_signal = video_signal
+        self.hid_connected = hid_connected
         self.ocr_text = ocr_text
         self.logs = logs
         self._events = list(events or [])
@@ -120,6 +122,15 @@ class FakeDriver(PowerMixin, CapabilityMixin):
             self._record("reset_hard")
 
     # -- HID -------------------------------------------------------------
+
+    def get_hid_state(self) -> dict:
+        """kvmd-shaped HID state; ``hid_connected`` toggles the target-reach signal."""
+        return {
+            "connected": self.hid_connected,
+            "online": self.hid_connected,
+            "keyboard": {"online": self.hid_connected},
+            "mouse": {"online": self.hid_connected, "absolute": True},
+        }
 
     def type_text(self, text: str, **kw: Any) -> None:
         if self.safety.guard("hid.type_text", f"Type {len(text)} characters into {self.host}"):

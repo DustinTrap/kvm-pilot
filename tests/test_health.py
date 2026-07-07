@@ -18,6 +18,7 @@ from kvm_pilot.health import (
     Severity,
     check_default_creds,
     check_exposed_services,
+    check_hid_reachable,
     check_msd_online,
     check_recovery_path,
     check_ssh_reachable,
@@ -411,6 +412,30 @@ def test_driver_identity_skips_fork_drivers(emu):
 
     emu.state.upgrade_present = True
     assert check_driver_identity(gl(emu)) is None  # glkvm already knows who it is
+
+
+# ---- HID reachability (#155) --------------------------------------------- #
+
+
+def test_hid_reachable_ok_when_gadget_attached(emu):
+    # Default emulator: HID gadget attached to the target -> OK.
+    res = check_hid_reachable(gl(emu))
+    assert res is not None and res.severity is Severity.OK
+    assert res.id == "hid-reachable" and res.cacheable is False
+
+
+def test_hid_reachable_warns_when_gadget_not_reaching_target(emu):
+    # The bench field case (#155): connected=false -> WARNING naming the OTG cable.
+    emu.state.hid_connected = False
+    res = check_hid_reachable(gl(emu))
+    assert res is not None and res.severity is Severity.WARNING
+    assert "not reaching the target" in res.detail
+    assert "OTG/HID cable" in res.remediation and "data-capable" in res.remediation
+
+
+def test_hid_reachable_skips_driver_without_hid():
+    # A driver that doesn't expose /api/hid (e.g. a BMC) is skipped, not failed.
+    assert check_hid_reachable(stub()) is None
 
 
 # ---- first-connection audit (issue #80) ---------------------------------- #

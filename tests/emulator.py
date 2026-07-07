@@ -45,6 +45,9 @@ class FakeKVMState:
         # Healthcheck knobs: ATX wiring, GPIO outputs, MSD state.
         self.atx_enabled = True
         self.gpio_outputs: dict[str, object] = {}
+        # HID gadget reach: True = emulated keyboard/mouse attached to the target;
+        # a test flips it False to exercise the #155 cable/port-fault check.
+        self.hid_connected = True
         self.msd: dict[str, object] = {"online": False, "drive": {"image": None}}
         # A healthy device goes online once media is attached; msd_stays_offline
         # reproduces the #77 GLKVM failure (connect accepted, host sees nothing).
@@ -156,6 +159,10 @@ class _Handler(BaseHTTPRequestHandler):
             })
         elif path == "/api/gpio":
             self._json({"state": {"outputs": self._state.gpio_outputs}})
+        elif path == "/api/hid":
+            c = self._state.hid_connected
+            self._json({"connected": c, "online": c, "busy": False,
+                        "keyboard": {"online": c}, "mouse": {"online": c, "absolute": True}})
         elif path == "/api/msd":
             self._json(self._state.msd)
         elif path == "/api/streamer":
