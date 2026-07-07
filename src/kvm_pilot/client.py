@@ -445,6 +445,22 @@ class PiKVMDriver(PowerMixin, CapabilityMixin):
     def reset_hid(self) -> None:
         self._http.post("/api/hid/reset")
 
+    def set_jiggler(self, active: bool) -> dict:
+        """Toggle kvmd's mouse jiggler (a keep-awake, #159).
+
+        The device itself nudges the mouse on an interval so the target's
+        display never DPMS-sleeps out from under a vision/snapshot session — the
+        actual root cause of the "snapshot 503s even though video works" reports
+        (#126/#142): an asleep display reports ``hdmi.signal=false`` and the
+        snapshot path fails. This is a benign HID movement (no click/key), so it
+        stays ungated like ``mouse_move``. Returns the resulting ``jiggler`` state
+        (``{active, enabled, interval, ...}``); ``{}`` if the firmware omits it.
+        """
+        self._http.post(f"/api/hid/set_params?jiggler={1 if active else 0}")
+        state = self.get_hid_state()
+        jiggler = state.get("jiggler")
+        return jiggler if isinstance(jiggler, dict) else {}
+
     def type_text(
         self, text: str, keymap: str = "en-us", slow: bool = False, delay: float = 0.0
     ) -> None:

@@ -59,6 +59,17 @@ def test_auth_header_carries_credentials(emu):
     assert emu.state.last_headers.get("x-kvmd-passwd") == "s3cr3t"
 
 
+def test_set_jiggler_toggles_and_reads_back(emu):
+    # #159 keep-awake: set_params?jiggler=1/0 flips device state; the returned
+    # jiggler dict reflects it, so the CLI can report ON/off truthfully.
+    c = _client(emu)
+    assert c.set_jiggler(True) == {"active": True, "enabled": True, "interval": 20}
+    assert emu.state.jiggler_active is True
+    assert ("POST", "/api/hid/set_params") in emu.state.calls
+    assert c.set_jiggler(False)["active"] is False
+    assert emu.state.jiggler_active is False
+
+
 def test_retry_on_503_then_succeeds(emu):
     emu.state.fail_status = 503
     emu.state.fail_times = 1

@@ -48,6 +48,8 @@ class FakeKVMState:
         # HID gadget reach: True = emulated keyboard/mouse attached to the target;
         # a test flips it False to exercise the #155 cable/port-fault check.
         self.hid_connected = True
+        # kvmd jiggler (keep-awake, #159): set_params?jiggler=1/0 toggles it.
+        self.jiggler_active = False
         self.msd: dict[str, object] = {"online": False, "drive": {"image": None}}
         # A healthy device goes online once media is attached; msd_stays_offline
         # reproduces the #77 GLKVM failure (connect accepted, host sees nothing).
@@ -162,7 +164,9 @@ class _Handler(BaseHTTPRequestHandler):
         elif path == "/api/hid":
             c = self._state.hid_connected
             self._json({"connected": c, "online": c, "busy": False,
-                        "keyboard": {"online": c}, "mouse": {"online": c, "absolute": True}})
+                        "keyboard": {"online": c}, "mouse": {"online": c, "absolute": True},
+                        "jiggler": {"active": self._state.jiggler_active,
+                                    "enabled": True, "interval": 20}})
         elif path == "/api/msd":
             self._json(self._state.msd)
         elif path == "/api/streamer":
@@ -204,6 +208,13 @@ class _Handler(BaseHTTPRequestHandler):
         elif path == "/api/msd/set_connected":
             connected = "connected=1" in (self.path.split("?", 1) + [""])[1]
             self._state.msd["online"] = connected and not self._state.msd_stays_offline
+            self._json({})
+        elif path == "/api/hid/set_params":
+            query = (self.path.split("?", 1) + [""])[1]
+            if "jiggler=1" in query:
+                self._state.jiggler_active = True
+            elif "jiggler=0" in query:
+                self._state.jiggler_active = False
             self._json({})
         elif path in _VALID_POST_PATHS:
             self._json({})  # generic OK for a real hid/msd/gpio route

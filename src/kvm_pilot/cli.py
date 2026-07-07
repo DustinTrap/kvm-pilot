@@ -421,6 +421,20 @@ def cmd_eject(args) -> int:
     return 0
 
 
+def cmd_keep_awake(args) -> int:
+    # Toggle kvmd's jiggler so the target display doesn't DPMS-sleep out from
+    # under a vision/snapshot session — the root of the "snapshot 503s though
+    # video works" reports (#126/#142/#159).
+    kvm = _rich_client(args, Capability.HID)
+    jiggler = kvm.set_jiggler(args.state == "on")
+    if jiggler.get("active"):
+        interval = jiggler.get("interval")
+        print("keep-awake: ON" + (f" (jiggle every {interval}s)" if interval else ""))
+    else:
+        print("keep-awake: off")
+    return 0
+
+
 def cmd_classify(args) -> int:
     kvm = _rich_client(args, Capability.VIDEO)
     analyzer = _make_analyzer(kvm, args)
@@ -928,6 +942,13 @@ def build_parser() -> argparse.ArgumentParser:
     p = sub.add_parser("eject", help="Detach virtual media (the inverse of mount)")
     _add_common(p)
     p.set_defaults(func=cmd_eject, _preflight=True)
+
+    p = sub.add_parser(
+        "keep-awake",
+        help="Toggle the mouse jiggler so the target display doesn't sleep (#159)")
+    p.add_argument("state", choices=["on", "off"], help="Turn keep-awake on or off")
+    _add_common(p)
+    p.set_defaults(func=cmd_keep_awake)
 
     p = sub.add_parser("classify", help="Classify the current screen once")
     _add_common(p)
