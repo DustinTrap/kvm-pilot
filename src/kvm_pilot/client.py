@@ -461,6 +461,27 @@ class PiKVMDriver(PowerMixin, CapabilityMixin):
         jiggler = state.get("jiggler")
         return jiggler if isinstance(jiggler, dict) else {}
 
+    def recover_hid(self, timeout: float = 5.0) -> bool:
+        """Re-enumerate the emulated HID gadget and wait for it to reattach (#160).
+
+        Resets the USB HID gadget (``reset_hid``) and polls until the keyboard/
+        mouse report online again, or ``timeout`` elapses. A reversible
+        re-enumeration that never touches guest power, so it can back a
+        healthcheck ``AutoFix`` for the #155 write-select/unattached-gadget fault.
+        Do NOT call mid-type/click — the reset drops any in-flight report.
+        Returns True if the gadget is reachable (``connected``) after the reset.
+        """
+        self.reset_hid()
+        deadline = time.monotonic() + timeout
+        while True:
+            try:
+                connected = bool(self.get_hid_state().get("connected"))
+            except KVMPilotError:
+                connected = False
+            if connected or time.monotonic() >= deadline:
+                return connected
+            time.sleep(0.3)
+
     def type_text(
         self, text: str, keymap: str = "en-us", slow: bool = False, delay: float = 0.0
     ) -> None:

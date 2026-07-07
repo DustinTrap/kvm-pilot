@@ -23,6 +23,7 @@ from kvm_pilot.health import (
     check_recovery_path,
     check_ssh_reachable,
     check_tls_posture,
+    check_video_signal,
     enforce_gate,
     preflight,
     run_healthcheck,
@@ -436,6 +437,39 @@ def test_hid_reachable_warns_when_gadget_not_reaching_target(emu):
 def test_hid_reachable_skips_driver_without_hid():
     # A driver that doesn't expose /api/hid (e.g. a BMC) is skipped, not failed.
     assert check_hid_reachable(stub()) is None
+
+
+def test_hid_reachable_offline_offers_recover_hid_autofix():
+    # #160: the offline branch attaches a reversible recover_hid AutoFix that,
+    # when applied, re-enumerates the gadget and restores reachability.
+    d = FakeDriver(hid_connected=False)
+    res = check_hid_reachable(d)
+    assert res.severity is Severity.WARNING
+    assert res.auto_fix is not None and res.auto_fix.safe_reversible
+    res.auto_fix.apply(d)
+    assert d.hid_connected is True
+    assert check_hid_reachable(d).severity is Severity.OK
+
+
+def test_display_asleep_detected_when_no_signal_but_hid_attached():
+    # #161: no signal + HID attached (target enumerates USB) => "Display asleep",
+    # with a keep-awake AutoFix — not a bare "target may be off".
+    d = FakeDriver(video_signal=False, hid_connected=True)
+    res = check_video_signal(d)
+    assert res.severity is Severity.WARNING
+    assert res.title == "Display asleep (target on)"
+    assert "keep-awake" in res.remediation
+    assert res.auto_fix is not None and res.auto_fix.safe_reversible
+    res.auto_fix.apply(d)
+    assert d.jiggler_active is True
+
+
+def test_no_signal_with_hid_offline_stays_plain_no_signal():
+    # No signal AND the HID gadget is not attached => can't claim "asleep";
+    # fall back to the plain no-signal warning with no keep-awake AutoFix.
+    d = FakeDriver(video_signal=False, hid_connected=False)
+    res = check_video_signal(d)
+    assert res.title == "Video signal" and res.auto_fix is None
 
 
 # ---- first-connection audit (issue #80) ---------------------------------- #

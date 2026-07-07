@@ -70,6 +70,18 @@ def test_set_jiggler_toggles_and_reads_back(emu):
     assert emu.state.jiggler_active is False
 
 
+def test_recover_hid_resets_and_confirms_reattach(emu):
+    # #160: recover_hid resets the gadget, then confirms it reaches the target.
+    c = _client(emu)
+    assert c.recover_hid() is True  # default emulator reports connected
+    assert ("POST", "/api/hid/reset") in emu.state.calls
+
+
+def test_recover_hid_returns_false_when_gadget_stays_unreachable(emu):
+    emu.state.hid_connected = False
+    assert _client(emu).recover_hid(timeout=0.4) is False
+
+
 def test_retry_on_503_then_succeeds(emu):
     emu.state.fail_status = 503
     emu.state.fail_times = 1

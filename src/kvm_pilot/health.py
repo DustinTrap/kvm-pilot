@@ -389,6 +389,36 @@ def check_video_signal(driver: Any) -> CheckResult | None:
             detail="Capture stream is live" + (f" ({sig})." if sig else "."),
             cacheable=False,
         )
+    # No signal: distinguish "display asleep (target on)" from "target off/cable".
+    # If the HID gadget is attached the target is enumerating USB, so it is
+    # powered — the display just DPMS-slept, which is the real root of the
+    # #126/#142 "snapshot fails though video works" reports. keep-awake (the
+    # jiggler) wakes and holds it (#161).
+    target_on = False
+    hid_fn = getattr(driver, "get_hid_state", None)
+    if hid_fn is not None:
+        try:
+            target_on = bool(_result(hid_fn()).get("connected"))
+        except KVMPilotError:
+            target_on = False
+    if target_on and hasattr(driver, "set_jiggler"):
+        return CheckResult(
+            id="video-signal",
+            pillar=Pillar.READINESS,
+            severity=Severity.WARNING,
+            title="Display asleep (target on)",
+            detail="No video signal, but the emulated HID is attached — the target "
+            "is powered and its display has DPMS-slept" + (f" ({sig})." if sig else "."),
+            remediation="Wake and hold the display with `kvm-pilot keep-awake on` "
+            "(kvmd's jiggler), or disable display sleep on the target OS.",
+            cacheable=False,
+            auto_fix=AutoFix(
+                description="Enable the keep-awake jiggler (a benign mouse nudge) "
+                "to wake and hold the display.",
+                safe_reversible=True,
+                apply=lambda d: d.set_jiggler(True),
+            ),
+        )
     return CheckResult(
         id="video-signal",
         pillar=Pillar.READINESS,
@@ -433,6 +463,16 @@ def check_hid_reachable(driver: Any) -> CheckResult | None:
             detail=f"Emulated keyboard/mouse online (keyboard={kbd}, mouse={mouse}).",
             cacheable=False,
         )
+    # A gadget reset re-enumerates the USB HID and can clear a soft write-select
+    # wedge (#160) — reversible, never touches guest power. A physical cable/port
+    # fault won't recover, so this is a best-effort AutoFix, not a guarantee.
+    fix = None
+    if hasattr(driver, "recover_hid"):
+        fix = AutoFix(
+            description="Reset and re-enumerate the USB HID gadget.",
+            safe_reversible=True,
+            apply=lambda d: d.recover_hid(),
+        )
     return CheckResult(
         id="hid-reachable",
         pillar=Pillar.READINESS,
@@ -450,6 +490,7 @@ def check_hid_reachable(driver: Any) -> CheckResult | None:
             "attach; transient flapping during a target reboot is benign."
         ),
         cacheable=False,
+        auto_fix=fix,
     )
 
 
