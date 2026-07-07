@@ -24,20 +24,46 @@ def test_snapshot_rejects_non_jpeg_bytes(client, fake_http):
     assert "non-JPEG" in str(ei.value)
 
 
-def test_video_signal_info_normalizes_streamer_state(client, fake_http):
-    fake_http.results["/api/streamer"] = {"source": {
-        "online": True, "captured_fps": 30, "format": "JPEG",
-        "resolution": {"width": 2560, "height": 1440}}}
-    assert client.video_signal_info() == {
-        "online": True, "width": 2560, "height": 1440, "fps": 30, "format": "JPEG"}
+def _gl_streamer(*, hdmi_signal, captured_fps=0, jpeg_clients=False, width=1920, height=1080):
+    """A GL-shaped /api/streamer body (nested under 'streamer', with the hdmi
+    block that source.online alone can't substitute for — the #154 case)."""
+    return {"streamer": {
+        "hdmi": {"signal": hdmi_signal},
+        "sinks": {"jpeg": {"has_clients": jpeg_clients}},
+        "source": {"online": True, "captured_fps": captured_fps,
+                   "resolution": {"width": width, "height": height}},
+    }}
+
+
+def test_video_signal_info_reads_hdmi_signal(client, fake_http):
+    # #154: source.online is True but there is no picture; the authoritative
+    # field is streamer.hdmi.signal, and it must surface in the readout.
+    fake_http.results["/api/streamer"] = _gl_streamer(hdmi_signal=False)
+    info = client.video_signal_info()
+    assert info["online"] is True and info["hdmi_signal"] is False
+    assert info["width"] == 1920 and info["height"] == 1080
+    assert info["streamer_idle"] is True
+
+
+def test_has_video_signal_prefers_hdmi_over_source_online(fake_http):
+    # The core #154 fix: hdmi.signal False must win over source.online True.
+    c = KVMClient("h")
+    c._http = fake_http
+    fake_http.results["/api/streamer"] = _gl_streamer(hdmi_signal=False)
+    assert c.has_video_signal() is False
+    fake_http.results["/api/streamer"] = _gl_streamer(hdmi_signal=True, captured_fps=30)
+    assert c.has_video_signal() is True
+    # Stock PiKVM (no hdmi block): fall back to source.online.
+    fake_http.results["/api/streamer"] = {"source": {"online": True}}
+    assert c.has_video_signal() is True
 
 
 class _Snapshot503HTTP:
     """Snapshot 503s; the streamer state endpoint still answers (the #142 field
-    pattern: only the JPEG path is failing)."""
+    pattern: only the JPEG still path is failing)."""
 
-    def __init__(self, source):
-        self.source = source
+    def __init__(self, streamer_state):
+        self.streamer_state = streamer_state
 
     def get(self, path, **kw):
         from kvm_pilot.errors import KVMPilotError, UnavailableError
@@ -45,31 +71,38 @@ class _Snapshot503HTTP:
         if path == "/api/streamer/snapshot":
             raise UnavailableError("Subsystem unavailable (HTTP 503)", 503)
         if path == "/api/streamer":
-            return {"source": self.source}
+            return self.streamer_state
         raise KVMPilotError("not found", 404)
 
 
-def test_snapshot_503_enriched_when_signal_is_live():
-    # #142/#143: a snapshot 503 with a live capture source must say so — the
-    # JPEG path is failing, not the video signal.
+def _snapshot_503_detail(streamer_state) -> str:
     from kvm_pilot.errors import UnavailableError
 
     c = KVMClient("h")
-    c._http = _Snapshot503HTTP({"online": True, "resolution": {"width": 1600, "height": 900}})
+    c._http = _Snapshot503HTTP(streamer_state)
     with pytest.raises(UnavailableError) as ei:
         c.snapshot()
-    msg = str(ei.value)
-    assert "capture source looks live" in msg and "width=1600" in msg
+    return str(ei.value)
 
 
-def test_snapshot_503_reports_no_signal_when_source_offline():
-    from kvm_pilot.errors import UnavailableError
+def test_snapshot_503_no_hdmi_signal_is_not_our_fault():
+    # #154: hdmi.signal False -> "no video signal, not a kvm-pilot fault",
+    # even though source.online is True.
+    msg = _snapshot_503_detail(_gl_streamer(hdmi_signal=False))
+    assert "no video signal" in msg and "not a kvm-pilot fault" in msg
+    assert "hdmi_signal=False" in msg
 
-    c = KVMClient("h")
-    c._http = _Snapshot503HTTP({"online": False})
-    with pytest.raises(UnavailableError) as ei:
-        c.snapshot()
-    assert "no video signal" in str(ei.value)
+
+def test_snapshot_503_idle_streamer_when_signal_present_no_subscriber():
+    # #142: HDMI present, but the on-demand encoder is idle (fps 0, no client).
+    msg = _snapshot_503_detail(_gl_streamer(hdmi_signal=True, captured_fps=0, jpeg_clients=False))
+    assert "streamer is idle" in msg and "no subscriber" in msg
+
+
+def test_snapshot_503_wedged_encoder_when_signal_present_and_capturing():
+    # HDMI present AND capturing -> the JPEG path itself is wedged/re-initializing.
+    msg = _snapshot_503_detail(_gl_streamer(hdmi_signal=True, captured_fps=30, jpeg_clients=True))
+    assert "present and capturing" in msg and "wedged" in msg
 
 
 def test_power_off_hard_gated_by_confirm(fake_http):
