@@ -23,6 +23,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   frame persisting) and still be carried into a click. The `mouse` tool now also
   refuses an observation older than `KVM_PILOT_MCP_FRAME_MAX_AGE` (60s default)
   or any `frame_ref` this server did not issue.
+- **Healthcheck `hid-reachable` check** (#155): reads `/api/hid` and warns when
+  the KVM's emulated keyboard/mouse is not reaching the target (`connected:
+  false`) — a USB OTG/HID cable or port-role fault where keystrokes and clicks
+  are generated but silently dropped, which reads as "the target ignores input"
+  or is misread as "target powered off." Names the cable/port remediation.
+  Pairs with `video-signal` to disambiguate target-off vs display-asleep vs
+  HID-unreachable. Diagnosed and verified live on a bench GL-RM1PE.
 
 ## [0.1.0a10] — 2026-07-07
 

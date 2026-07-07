@@ -400,6 +400,59 @@ def check_video_signal(driver: Any) -> CheckResult | None:
     )
 
 
+def check_hid_reachable(driver: Any) -> CheckResult | None:
+    """Does the KVM's emulated keyboard/mouse actually reach the target? Volatile.
+
+    kvmd presents the keyboard/mouse as a USB gadget over its OTG/device port; the
+    gadget must attach to a USB *host* port on the target. A charge-only/damaged
+    cable or a wrong-port-role connection leaves the gadget unattached — kvmd then
+    generates HID reports that fail ``write select`` (no connected host) and every
+    keystroke/click is silently dropped, which reads as "the target ignores input"
+    or is misread as "target powered off" (#155). Pairs with ``video-signal`` to
+    disambiguate: HID-reachable + no-signal = target on, display asleep;
+    HID-not-reachable = a USB OTG cable/port fault.
+    """
+    fn = getattr(driver, "get_hid_state", None)
+    if fn is None:
+        return None
+    try:
+        hid = _result(fn())
+    except KVMPilotError:
+        return None
+    connected = hid.get("connected")
+    if connected is None:
+        return None  # firmware doesn't report it -> nothing to assert
+    kbd = _result(hid.get("keyboard")).get("online")
+    mouse = _result(hid.get("mouse")).get("online")
+    if connected:
+        return CheckResult(
+            id="hid-reachable",
+            pillar=Pillar.READINESS,
+            severity=Severity.OK,
+            title="HID reaches the target",
+            detail=f"Emulated keyboard/mouse online (keyboard={kbd}, mouse={mouse}).",
+            cacheable=False,
+        )
+    return CheckResult(
+        id="hid-reachable",
+        pillar=Pillar.READINESS,
+        severity=Severity.WARNING,
+        title="HID reaches the target",
+        detail=(
+            f"The KVM's emulated keyboard/mouse is not reaching the target "
+            f"(connected=false, keyboard.online={kbd}, mouse.online={mouse}) — "
+            "keystrokes and clicks are generated but not delivered."
+        ),
+        remediation=(
+            "Check the USB OTG/HID cable: it must be data-capable (not charge-only) "
+            "and in a USB host port on the target. A persistent "
+            "'HID … write select' failure in `logs` confirms the gadget can't "
+            "attach; transient flapping during a target reboot is benign."
+        ),
+        cacheable=False,
+    )
+
+
 def _reconnect_media(driver: Any) -> None:  # pragma: no cover - exercised via AutoFix test
     driver.msd_disconnect()
     time.sleep(0.5)
@@ -858,6 +911,7 @@ CHECKS: list[Check] = [
     check_ssh_reachable,
     check_recovery_path,
     check_video_signal,
+    check_hid_reachable,
     check_msd_online,
     check_tls_posture,
     check_default_creds,
