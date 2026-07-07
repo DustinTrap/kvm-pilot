@@ -196,6 +196,121 @@ class SSHChannel:
         return argv
 
 
+class ApplianceChannel(SSHChannel):
+    """SSH to the KVM appliance's OWN OS (root@<kvm-ip>), distinct from the target
+    ``SSHChannel``. Adds read-only wedge diagnostics and a gated appliance reboot —
+    the only path to observe/recover the RV1126 encoder wedge that the kvmd REST
+    API cannot see (#162).
+
+    Opt-in and key-based (no password / no sshpass — keeps kvmd-REST and
+    appliance-root as separate trust domains). The host is the appliance itself
+    (``cfg.host`` — the REST box), so no second address is configured. Recovery is
+    operator-gated and must NEVER run in an autonomous loop: the wedge recurs
+    within minutes and there is no out-of-band power to the appliance, so a reboot
+    that fails to rejoin the network strands the operator with zero access.
+    """
+
+    # RV1126 hardware video-pipeline kernel threads. When the encoder wedges these
+    # sit in D-state — but on GL firmware they park in D even when perfectly idle
+    # (measured 2026-07-07: load self-inflates to ~= their count with zero
+    # interaction), so their presence is CONTEXT, not a wedge tell on its own.
+    _VIDEO_THREADS = frozenset(
+        {"venc", "vpss", "vrga_0", "vvi_thread", "valloc", "ivs", "vsys", "vrgn", "vlog"}
+    )
+
+    @classmethod
+    def from_config(
+        cls,
+        cfg: HostConfig,
+        *,
+        safety: SafetyPolicy | None = None,
+        confirm=None,
+        dry_run: bool = False,
+    ) -> ApplianceChannel:
+        """Build from a resolved ``HostConfig``; raises ``CapabilityError`` unless
+        ``appliance_ssh`` is enabled. The host is inferred from ``cfg.host``."""
+        if not cfg.appliance_ssh:
+            raise CapabilityError(
+                "Appliance-SSH is not enabled for this profile. Set appliance_ssh=true "
+                "(or KVM_PILOT_APPLIANCE_SSH=1) and provide appliance_ssh_key — it SSHes "
+                "to the KVM appliance's OWN OS (root@<kvm-ip>), key-based only."
+            )
+        if safety is None:
+            safety = SafetyPolicy(dry_run=dry_run, confirm=confirm)
+        return cls(
+            cfg.host,  # the appliance IS the REST box — no separate address
+            user=cfg.appliance_ssh_user,
+            port=cfg.appliance_ssh_port,
+            key=cfg.appliance_ssh_key,
+            timeout=cfg.timeout,
+            safety=safety,
+        )
+
+    # -- read-only diagnostics (ungated; FIXED constant commands only) ------
+
+    def _readonly(self, command: str) -> str:
+        """Run a FIXED read-only command, ungated (like ``ssh_reachable``). Returns
+        stdout, or '' on any failure. NEVER pass user input here — the safety of
+        skipping the guard rests on the command being a module constant."""
+        if shutil.which("ssh") is None:
+            return ""
+        try:
+            proc = subprocess.run(  # nosec B603 - fixed constant command, no shell
+                self._ssh_argv() + [command],
+                capture_output=True,
+                text=True,
+                timeout=min(self.timeout, _REACHABLE_TIMEOUT),
+            )
+        except (subprocess.SubprocessError, OSError):
+            return ""
+        return proc.stdout if proc.returncode == 0 else ""
+
+    def loadavg(self) -> float | None:
+        """1-minute load average, or None if unreadable. **Context only** — on
+        these units it sits at ~(D-state thread count) even when perfectly idle,
+        so it is NOT a standalone health signal (measured 2026-07-07)."""
+        out = self._readonly("cat /proc/loadavg").split()
+        try:
+            return float(out[0]) if out else None
+        except ValueError:
+            return None
+
+    def d_state_video_threads(self) -> list[str]:
+        """RV1126 video-pipeline kernel threads currently in D-state. Context: on
+        GL firmware these park in D even when healthy, so presence alone is not a
+        wedge — pair with a functional signal (does the snapshot decode?)."""
+        found = []
+        for line in self._readonly("ps -eo stat,comm").splitlines():
+            parts = line.split(None, 1)
+            if len(parts) == 2 and parts[0].startswith("D") and parts[1].strip() in self._VIDEO_THREADS:
+                found.append(parts[1].strip())
+        return found
+
+    # -- gated recovery -----------------------------------------------------
+
+    def reboot(self) -> dict:
+        """Reboot the KVM APPLIANCE (not the target) — the only recovery for the
+        RV1126 encoder wedge (the wedged threads are unkillable kernel threads).
+        Gated as ``appliance.reboot``. Target power is untouched (the HID/MSD
+        gadget is bus-powered). Operator-gated; never autonomous."""
+        if not self.safety.guard("appliance.reboot", f"Reboot the KVM appliance {self.host}"):
+            return _result("reboot", returncode=None, stdout="", stderr="", dry_run=True)
+        if shutil.which("ssh") is None:
+            raise CapabilityError("The system 'ssh' binary was not found on PATH.")
+        # Fire-and-forget: the reboot tears down our SSH session, so a normal exit
+        # never returns — detach it and treat the dropped connection as success.
+        try:
+            subprocess.run(  # nosec B603 - fixed constant command, no shell
+                self._ssh_argv() + ["nohup /sbin/reboot >/dev/null 2>&1 &"],
+                capture_output=True,
+                text=True,
+                timeout=min(self.timeout, _REACHABLE_TIMEOUT),
+            )
+        except subprocess.TimeoutExpired:
+            pass  # session torn down by the reboot — expected
+        return _result("reboot", returncode=0, stdout="rebooting", stderr="", dry_run=False)
+
+
 def _result(command, *, returncode, stdout, stderr, dry_run) -> dict:
     return {
         "command": command,
@@ -207,4 +322,10 @@ def _result(command, *, returncode, stdout, stderr, dry_run) -> dict:
     }
 
 
-__all__ = ["SSHChannel", "DEFAULT_SSH_PORT", "MAX_SWEEP_HOSTS", "discover_ssh_hosts"]
+__all__ = [
+    "SSHChannel",
+    "ApplianceChannel",
+    "DEFAULT_SSH_PORT",
+    "MAX_SWEEP_HOSTS",
+    "discover_ssh_hosts",
+]

@@ -14,7 +14,7 @@ from kvm_pilot.config import HostConfig, resolve_host
 from kvm_pilot.drivers.base import CAPABILITY_PROTOCOLS, Capability, RemoteShell
 from kvm_pilot.errors import CapabilityError, SafetyError, TimeoutError
 from kvm_pilot.safety import DESTRUCTIVE_OPS, SafetyPolicy, deny_all
-from kvm_pilot.ssh import MAX_SWEEP_HOSTS, SSHChannel, discover_ssh_hosts
+from kvm_pilot.ssh import MAX_SWEEP_HOSTS, ApplianceChannel, SSHChannel, discover_ssh_hosts
 
 
 def _cfg(**kw) -> HostConfig:
@@ -50,6 +50,53 @@ def test_from_config_carries_target_fields():
     assert ch.user == "root"
     assert ch.port == 2222
     assert ch.target == "root@10.0.0.2"
+
+
+# -- appliance channel (#162) ------------------------------------------------
+
+def test_appliance_from_config_requires_opt_in():
+    with pytest.raises(CapabilityError, match="not enabled"):
+        ApplianceChannel.from_config(HostConfig(host="10.0.0.1"))  # appliance_ssh=False
+
+
+def test_appliance_from_config_infers_host_from_appliance():
+    # The appliance IS the REST box: host = cfg.host, NOT the separate ssh_host.
+    ch = ApplianceChannel.from_config(
+        _cfg(appliance_ssh=True, appliance_ssh_port=2200, appliance_ssh_key="/k"))
+    assert ch.host == "10.0.0.1"  # cfg.host, not ssh_host (10.0.0.2)
+    assert ch.user == "root" and ch.port == 2200 and ch.key == "/k"
+
+
+def test_appliance_reboot_is_gated_and_denied_raises():
+    assert "appliance.reboot" in DESTRUCTIVE_OPS
+    ch = ApplianceChannel.from_config(
+        _cfg(appliance_ssh=True), safety=SafetyPolicy(confirm=deny_all))
+    with pytest.raises(SafetyError):
+        ch.reboot()
+
+
+def test_appliance_reboot_dry_run_does_not_send():
+    ch = ApplianceChannel.from_config(_cfg(appliance_ssh=True), safety=SafetyPolicy(dry_run=True))
+    with mock.patch("kvm_pilot.ssh.subprocess.run") as run:
+        res = ch.reboot()
+    assert res["dry_run"] is True and res["ok"] is False
+    run.assert_not_called()
+
+
+def test_appliance_loadavg_parses_first_field(monkeypatch):
+    ch = ApplianceChannel.from_config(_cfg(appliance_ssh=True))
+    monkeypatch.setattr(ch, "_readonly", lambda cmd: "10.05 9.99 8.40 2/202 3405\n")
+    assert ch.loadavg() == 10.05
+    monkeypatch.setattr(ch, "_readonly", lambda cmd: "")  # unreadable
+    assert ch.loadavg() is None
+
+
+def test_appliance_d_state_video_threads_filters(monkeypatch):
+    ch = ApplianceChannel.from_config(_cfg(appliance_ssh=True))
+    monkeypatch.setattr(
+        ch, "_readonly",
+        lambda cmd: "D    venc\nS    kvmd\nD    vpss\nD    bash\nR    ps\n")
+    assert set(ch.d_state_video_threads()) == {"venc", "vpss"}
 
 
 def test_reject_hyphen_prefixed_host():
@@ -136,6 +183,22 @@ def test_resolve_host_ssh_port_defaults_to_22(tmp_path):
     cfg = resolve_host(host="10.0.0.1", config_path=tmp_path / "none.toml")
     assert cfg.ssh_host is None
     assert cfg.ssh_port == 22
+
+
+def test_resolve_host_reads_appliance_ssh_env(monkeypatch, tmp_path):
+    monkeypatch.setenv("KVM_PILOT_APPLIANCE_SSH", "1")
+    monkeypatch.setenv("KVM_PILOT_APPLIANCE_SSH_KEY", "/keys/appliance")
+    monkeypatch.setenv("KVM_PILOT_APPLIANCE_SSH_PORT", "2200")
+    cfg = resolve_host(host="10.0.0.1", config_path=tmp_path / "none.toml")
+    assert cfg.appliance_ssh is True
+    assert cfg.appliance_ssh_user == "root"  # default
+    assert cfg.appliance_ssh_key == "/keys/appliance"
+    assert cfg.appliance_ssh_port == 2200
+
+
+def test_resolve_host_appliance_ssh_defaults_off(tmp_path):
+    cfg = resolve_host(host="10.0.0.1", config_path=tmp_path / "none.toml")
+    assert cfg.appliance_ssh is False and cfg.appliance_ssh_port == 22
 
 
 # -- network sweep (opt-in, risky) -------------------------------------------

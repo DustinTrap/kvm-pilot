@@ -67,6 +67,10 @@ Every key `resolve_host()` reads, with its default:
 | `ssh_user` | `KVM_PILOT_SSH_USER` | unset | SSH login on the target host. |
 | `ssh_port` | `KVM_PILOT_SSH_PORT` | `22` | SSH port on the target host. |
 | `ssh_key` | `KVM_PILOT_SSH_KEY` | unset | Private-key path for the target SSH login; omit to use the agent's SSH config / default keys. Auth is key-based (no password). |
+| `appliance_ssh` | `KVM_PILOT_APPLIANCE_SSH` | `false` | Opt-in: enable the SSH channel to the **KVM appliance's own OS** (`root@<kvm-ip>`) — a *different* channel from `ssh_host` (the managed target). Powers `kvm-pilot appliance loadavg/reboot` and the `encoder-wedge` healthcheck. Key-based only. |
+| `appliance_ssh_user` | `KVM_PILOT_APPLIANCE_SSH_USER` | `root` | Login on the KVM appliance. |
+| `appliance_ssh_port` | `KVM_PILOT_APPLIANCE_SSH_PORT` | `22` | SSH port on the KVM appliance. |
+| `appliance_ssh_key` | `KVM_PILOT_APPLIANCE_SSH_KEY` | unset | Private-key path for the appliance login. Key-based only — no password/sshpass, and never reuse the kvmd admin password over SSH. Onboard once with `ssh-copy-id root@<kvm-ip>`. The appliance host is **inferred from `host`** (the appliance is the REST box), so there is no separate address field. |
 
 Naming a `--profile` that doesn't exist in the file is an error (`KeyError`),
 not a silent fallback.

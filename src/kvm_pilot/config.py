@@ -70,14 +70,25 @@ class HostConfig:
     # auth disabled). Ignored by the PiKVM family.
     redfish_auth: str = "session"
     # In-band SSH to the managed HOST's OS (the machine behind the KVM), NOT the
-    # KVM appliance — a separate address and login. Used by the SSH channel
-    # (src/kvm_pilot/ssh.py) for reachability probes and recovery commands. Auth is
+    # In-band channel to the managed host behind the KVM (a *separate* machine
+    # from the appliance). Used by the SSH channel (src/kvm_pilot/ssh.py) for
+    # reachability probes and recovery commands on the target OS. Auth is
     # key-based: ssh_key is a private-key path, or omit it to use the agent's SSH
     # config / default keys. No password auth (avoids an sshpass dependency).
     ssh_host: str | None = None
     ssh_user: str | None = None
     ssh_port: int = 22
     ssh_key: str | None = None
+
+    # Appliance-SSH channel — SSH to the KVM appliance's OWN OS (root@<kvm-ip>),
+    # distinct from ssh_host above. The host is INFERRED from `host` (the
+    # appliance IS the REST box). Opt-in; key-based only (no password/sshpass).
+    # Powers wedge diagnostics + gated appliance-reboot recovery — the only path
+    # to observe/recover the RV1126 encoder wedge that REST can't see (#162).
+    appliance_ssh: bool = False
+    appliance_ssh_user: str = "root"
+    appliance_ssh_port: int = 22
+    appliance_ssh_key: str | None = None
 
 
 def _load_file(path: Path) -> dict[str, Any]:
@@ -134,6 +145,10 @@ def resolve_host(
     ssh_user: str | None = None,
     ssh_port: int | None = None,
     ssh_key: str | None = None,
+    appliance_ssh: bool | None = None,
+    appliance_ssh_user: str | None = None,
+    appliance_ssh_port: int | None = None,
+    appliance_ssh_key: str | None = None,
     config_path: Path | None = None,
 ) -> HostConfig:
     """Resolve a HostConfig from args > env > file (in that priority)."""
@@ -189,6 +204,9 @@ def resolve_host(
     verify_val = pick("verify_ssl", verify_ssl, "KVM_PILOT_VERIFY_SSL", False)
     if isinstance(verify_val, str):
         verify_val = verify_val.lower() in ("1", "true", "yes")
+    appliance_val = pick("appliance_ssh", appliance_ssh, "KVM_PILOT_APPLIANCE_SSH", False)
+    if isinstance(appliance_val, str):
+        appliance_val = appliance_val.lower() in ("1", "true", "yes")
 
     return HostConfig(
         host=resolved_host,
@@ -206,6 +224,13 @@ def resolve_host(
         ssh_user=pick("ssh_user", ssh_user, "KVM_PILOT_SSH_USER"),
         ssh_port=int(pick("ssh_port", ssh_port, "KVM_PILOT_SSH_PORT", 22)),
         ssh_key=pick("ssh_key", ssh_key, "KVM_PILOT_SSH_KEY"),
+        appliance_ssh=bool(appliance_val),
+        appliance_ssh_user=pick(
+            "appliance_ssh_user", appliance_ssh_user, "KVM_PILOT_APPLIANCE_SSH_USER", "root"),
+        appliance_ssh_port=int(
+            pick("appliance_ssh_port", appliance_ssh_port, "KVM_PILOT_APPLIANCE_SSH_PORT", 22)),
+        appliance_ssh_key=pick(
+            "appliance_ssh_key", appliance_ssh_key, "KVM_PILOT_APPLIANCE_SSH_KEY"),
     )
 
 
