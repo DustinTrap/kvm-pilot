@@ -6,6 +6,60 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.0a9] — 2026-07-06
+
+Post-a8 sweep release: field-report fixes from the first Comet sessions, a
+driver split that gives the GL fork its own home, and observability so
+vision-driven agents reason from data instead of guessing.
+
+### Fixed — trust what the device tells you
+- **GLKVM quirk auto-detection matched the GL product firmware but never the
+  kvmd component version** (#139) — on real hardware the observed
+  `atx-power-state-always-off` quirk silently stopped applying, and the
+  healthcheck lost its ATX-untrustworthy warning. Quirks now match against
+  every version the device reports.
+- **`firmware-update` no longer reports success on a no-op flash** (#94): after
+  `POST /api/upgrade/start` the device must visibly enter an upgrade state
+  (status transition or channel drop) within a bounded window, or the call
+  returns `sent: false` with the raw start response.
+- **`snapshot()` validates the JPEG magic bytes** (#107) instead of trusting
+  the Content-Type — RM1PE firmware has returned raw H.264 labeled as JPEG;
+  that now raises a typed `SnapshotFormatError`.
+- **`mount_iso()` verifies the media actually goes online** (#77): GLKVM
+  accepts the mount calls while the host sees no device; a mount that never
+  reports `online` now raises `MediaOfflineError` naming the GL-side toggle.
+
+### Added — observability + act-surface completion
+- **MCP `snapshot` payload carries the live `signal` state**
+  (online/resolution/fps/format) **and `unchanged_since_last_snapshot`**
+  (#141/#143): a byte-identical frame across an expected screen change is the
+  staleness tell the generation mechanism can't catch. Snapshot 503s are
+  re-raised with the streamer state attached, separating "no video signal"
+  from "signal fine, JPEG path failing" (#142).
+- **Healthcheck `driver-identity` check** (#145): GL firmware self-reports as
+  a stock Raspberry Pi PiKVM, so a GL unit on a `driver = "pikvm"` profile
+  silently loses every GL protection — the healthcheck now fingerprints GL's
+  proprietary `/api/upgrade/version` and warns with a set-`glkvm` remediation.
+- **MCP `list_virtual_media` tool + CLI `media-list`** (#127): inventory the
+  KVM's MSD storage before asking anyone to download or upload an ISO that may
+  already be on the device.
+- **CLI `mouse-move` / `click`** (#124, percent coordinates by default — the
+  #128 field report's fix) and **CLI `key` chord support**
+  (`ControlLeft+AltLeft+F2`, #112), completing the CLI half of the a8 act layer.
+
+### Changed — GL fork separation + CI gates
+- **`GLKVMDriver` moved to its own `drivers/glkvm.py`** (#140) with a module
+  docstring enumerating how the GL fork diverges from stock PiKVM;
+  `drivers/pikvm.py` keeps the no-delta forks (BliKVM) and re-exports the
+  moved symbols for this release. Public import paths are unchanged.
+- **CI now gates on 75% coverage**, caches pip, and smoke-builds the wiki on
+  PRs (#56).
+- Docs: new canonical [CLI reference](docs/cli.md); the configuration
+  reference and `.env.example` now document every a7/a8 env var (MCP effect
+  gates, profile allowlist, vision backend, SSH channel); stale
+  "act tools not exposed yet" / "never run on real hardware" claims corrected
+  across SECURITY.md, the skill, and module docstrings (#146).
+
 ## [0.1.0a8] — 2026-07-06
 
 ### Added — MCP act layer: drive the box, not just observe it (2026-07-06, #61, #112)
@@ -517,7 +571,8 @@ user feedback. **Not validated on real hardware** — see Notes.
   feedback are the explicit goals of this alpha. Reports welcome in the issue
   tracker.
 
-[Unreleased]: https://github.com/DustinTrap/kvm-pilot/compare/v0.1.0a8...HEAD
+[Unreleased]: https://github.com/DustinTrap/kvm-pilot/compare/v0.1.0a9...HEAD
+[0.1.0a9]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a9
 [0.1.0a8]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a8
 [0.1.0a7]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a7
 [0.1.0a6]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a6
