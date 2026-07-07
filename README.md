@@ -14,7 +14,7 @@ Vision runs on Claude **or** any local OpenAI-compatible VLM (LM Studio, Ollama,
 vLLM, llama.cpp). Point it at a model on your own GPU and the screenshots never
 leave your network and cost nothing per frame.
 
-> **Status:** v0.1.0a10 — **early alpha.** First real-hardware runs have happened —
+> **Status:** v0.1.0a11 — **early alpha.** First real-hardware runs have happened —
 > a GL-RM1PE, with the read/`snapshot`/`healthcheck`/`logs` paths exercised live on
 > firmware V1.5.1 release2 and V1.9.1 release1 — but **most device+capability combos
 > remain unverified** (mocked HTTP/vision or emulators only), and the remote
