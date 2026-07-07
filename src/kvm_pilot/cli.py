@@ -435,6 +435,19 @@ def cmd_keep_awake(args) -> int:
     return 0
 
 
+def cmd_recover_hid(args) -> int:
+    # Re-enumerate the USB HID gadget when it's not reaching the target (#160) —
+    # the recoverable half of the #155 write-select fault (a physical cable/port
+    # fault won't clear this way).
+    kvm = _rich_client(args, Capability.HID)
+    if kvm.recover_hid():
+        print("recover-hid: HID gadget reattached — keyboard/mouse reach the target")
+        return 0
+    print("recover-hid: still not reachable — check the USB OTG cable is data-capable "
+          "and in a host port on the target")
+    return 1
+
+
 def cmd_classify(args) -> int:
     kvm = _rich_client(args, Capability.VIDEO)
     analyzer = _make_analyzer(kvm, args)
@@ -949,6 +962,12 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("state", choices=["on", "off"], help="Turn keep-awake on or off")
     _add_common(p)
     p.set_defaults(func=cmd_keep_awake)
+
+    p = sub.add_parser(
+        "recover-hid",
+        help="Reset/re-enumerate the USB HID gadget when it isn't reaching the target (#160)")
+    _add_common(p)
+    p.set_defaults(func=cmd_recover_hid)
 
     p = sub.add_parser("classify", help="Classify the current screen once")
     _add_common(p)

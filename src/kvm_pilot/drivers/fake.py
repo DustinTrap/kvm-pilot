@@ -140,6 +140,12 @@ class FakeDriver(PowerMixin, CapabilityMixin):
         self._record("set_jiggler", active)
         return {"active": active, "enabled": True, "interval": 20}
 
+    def recover_hid(self, timeout: float = 5.0) -> bool:
+        """Re-enumerate the HID gadget (#160); reversible, restores reachability."""
+        self.hid_connected = True
+        self._record("recover_hid")
+        return True
+
     def type_text(self, text: str, **kw: Any) -> None:
         if self.safety.guard("hid.type_text", f"Type {len(text)} characters into {self.host}"):
             self.typed.append(text)

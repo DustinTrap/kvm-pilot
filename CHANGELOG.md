@@ -7,6 +7,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Self-healing healthcheck AutoFixes for the access failure modes** (#160, #161):
+  `check_hid-reachable`'s offline branch now offers a reversible
+  `recover_hid()` AutoFix (reset + re-enumerate the USB HID gadget, via
+  `kvm-pilot recover-hid`) — the recoverable half of the #155 write-select
+  fault. `check_video_signal` now distinguishes **"Display asleep (target on)"**
+  (no signal but the HID gadget is attached, so the target is powered and its
+  display DPMS-slept — the real root of #126/#142) from a plain no-signal, and
+  offers a `keep-awake` AutoFix to wake it. Both apply under `healthcheck --fix`.
 - **`keep-awake` — toggle the target-display jiggler** (#159): `kvm-pilot
   keep-awake on|off` (and `client.set_jiggler(active)`) drives kvmd's mouse
   jiggler so the target's display doesn't DPMS-sleep out from under a
