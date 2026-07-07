@@ -126,6 +126,19 @@ Prefer remote recovery, in this order, and present the options in this order:
   - `mount_iso` / `eject` — virtual media (`KVM_PILOT_MCP_ALLOW_MEDIA`)
   - `ssh_exec` — run a command over SSH (`KVM_PILOT_MCP_ALLOW_SSH`)
 
+**Approval posture in chat clients:** an elicitation-capable chat client raises
+a human approval prompt per act call, and sending a new chat message **cancels
+the pending prompt**. The signature is act results with `approved: false` +
+`approver: null` and `denied_reason: "approval cancel"` (or `"denied by
+approver"` after a mis-click) while read-only tools keep working. That is an
+approval-delivery problem, not a device fault — the action never reached the
+target. Do **not** silently retry into repeated cancellations: relay the
+result's `remediation` field to the user. Their options: answer the approval
+prompt before typing the next message, or (operator decision) set
+`KVM_PILOT_MCP_ELICIT=off` in the server env and reconnect, making the
+`ALLOW_*` effect gate + per-call `confirm=true` the standing authorization —
+at the cost of per-call human approval.
+
 Every tool takes an optional `profile` argument to pick a device from
 `~/.config/kvm-pilot/config.toml`; omit it to use the server's default profile.
 

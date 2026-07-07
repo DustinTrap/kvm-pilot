@@ -162,6 +162,7 @@ class Approval:
     approved: bool
     approver: str | None = None
     reason: str | None = None
+    remediation: str | None = None  # operator-facing fix for a client-side denial (#149)
 
 
 class _ApprovalForm(BaseModel):
@@ -243,6 +244,35 @@ async def approve_or_deny(ctx: Context | None, inv: InvocationContext, *, confir
     return Approval(True, approver=approver)
 
 
+# Issue #149: a chat client can kill an elicitation entirely client-side — a new
+# chat message cancels the pending prompt ("approval cancel"), a mis-click denies
+# it ("denied by approver") — while read-only tools keep working, so the denial
+# reads as "the host is ignoring input". Name what happened and the operator's
+# escape hatch in the result itself. Surfacing KVM_PILOT_MCP_ELICIT=off here does
+# NOT leak a gate incantation (unlike the ALLOW_* refusals, which stay mum): the
+# effect gate is checked before elicitation ever runs, and ELICIT only chooses the
+# approval posture — it must still be set by the operator in the server's own env.
+_ELICIT_TRADEOFF = (
+    "If per-invocation approvals keep failing in this client, the operator can set "
+    "KVM_PILOT_MCP_ELICIT=off in the MCP server's own environment and reconnect: the "
+    "ALLOW_* effect gate plus per-call confirm=true then become the standing "
+    "authorization. Trade-off: that disables per-call human approval, so it is the "
+    "operator's decision, not a default recommendation."
+)
+_REMEDY_CANCELLED = (
+    "The approval prompt was cancelled client-side before it was answered (in chat "
+    "clients, sending a new message cancels a pending approval). The action never "
+    "reached the device; read-only tools are unaffected. This is benign and "
+    "retryable once the operator is ready to answer the prompt. " + _ELICIT_TRADEOFF
+)
+_REMEDY_DENIED = (
+    "The approver declined this invocation client-side (a mis-click on the approval "
+    "prompt does this too). The action never reached the device; read-only tools "
+    "are unaffected. Retry only if the operator says it was accidental. "
+    + _ELICIT_TRADEOFF
+)
+
+
 async def _elicit(ctx: Context, inv: InvocationContext) -> Approval:
     """Prompt a human to approve this exact invocation. Same-path on any outcome."""
     message = (
@@ -259,8 +289,10 @@ async def _elicit(ctx: Context, inv: InvocationContext) -> Approval:
         data = result.data
         if data is not None and data.approve:
             return Approval(True, approver=data.approver or "operator")
-        return Approval(False, reason="denied by approver")
-    return Approval(False, reason=f"approval {result.action}")  # decline / cancel
+        return Approval(False, reason="denied by approver", remediation=_REMEDY_DENIED)
+    # decline / cancel
+    remedy = _REMEDY_CANCELLED if result.action == "cancel" else _REMEDY_DENIED
+    return Approval(False, reason=f"approval {result.action}", remediation=remedy)
 
 
 # --------------------------------------------------------------------------- #
@@ -296,6 +328,8 @@ def result(
         },
         "detail": detail,
         "denied_reason": approval.reason,
+        # #149: on a client-side elicitation denial, what happened + the operator fix.
+        "remediation": approval.remediation,
     }
     if extra:
         out.update(extra)

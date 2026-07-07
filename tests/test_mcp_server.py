@@ -196,6 +196,9 @@ def test_type_text_denied_without_hid_gate(config_file):
     parsed = result_json(run_session(server_env(config_file), interact))
     assert parsed["approved"] is False
     assert "disabled" in parsed["denied_reason"]
+    # The #149 remediation is for client-side elicitation outcomes only; a
+    # closed-gate refusal must not suggest flipping the approval posture.
+    assert parsed["remediation"] is None
 
 
 def test_type_text_preauthorized_with_confirm(config_file):
@@ -273,6 +276,18 @@ def test_act_interactive_elicit_accept(config_file):
     )
     assert parsed["approved"] is True
     assert parsed["approval"]["approver"] == "alice"
+    assert parsed["remediation"] is None
+
+
+def _assert_elicit_remediation(parsed):
+    """#149: a client-side elicitation denial must explain itself — the action never
+    reached the device — and name the operator's ELICIT=off escape hatch with its
+    security trade-off, so the failure isn't mistaken for the host ignoring input."""
+    assert parsed["approved"] is False
+    assert "never reached the device" in parsed["remediation"]
+    assert "KVM_PILOT_MCP_ELICIT=off" in parsed["remediation"]
+    assert "confirm=true" in parsed["remediation"]
+    assert "disables per-call human approval" in parsed["remediation"]
 
 
 def test_act_interactive_elicit_decline_returns_same_path(config_file):
@@ -283,6 +298,20 @@ def test_act_interactive_elicit_decline_returns_same_path(config_file):
     parsed = result_json(run_session_elicit(env, interact, action="decline"))
     assert parsed["approved"] is False
     assert "decline" in parsed["denied_reason"]
+    _assert_elicit_remediation(parsed)
+
+
+def test_act_interactive_elicit_cancel_carries_remediation(config_file):
+    # A chat client cancels a pending elicitation when a new message arrives (#149);
+    # the denial must say the approval was cancelled client-side and is retryable.
+    async def interact(session):
+        return await session.call_tool("type_text", {"text": "hi"})
+
+    env = server_env(config_file, KVM_PILOT_MCP_ALLOW_HID="1")
+    parsed = result_json(run_session_elicit(env, interact, action="cancel"))
+    assert parsed["denied_reason"] == "approval cancel"
+    assert "retryable" in parsed["remediation"]
+    _assert_elicit_remediation(parsed)
 
 
 def test_act_interactive_elicit_accept_but_not_approved(config_file):
@@ -294,6 +323,8 @@ def test_act_interactive_elicit_accept_but_not_approved(config_file):
         run_session_elicit(env, interact, action="accept", content={"approve": False})
     )
     assert parsed["approved"] is False
+    assert parsed["denied_reason"] == "denied by approver"
+    _assert_elicit_remediation(parsed)
 
 
 def test_allowlist_refuses_profile_not_listed(config_file):
