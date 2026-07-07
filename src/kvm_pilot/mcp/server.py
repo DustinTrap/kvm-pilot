@@ -42,12 +42,12 @@ from __future__ import annotations
 import base64
 import json
 import logging
+import math
 import os
 import threading
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from functools import partial
 from typing import TYPE_CHECKING, Literal, cast
 
 import anyio
@@ -69,6 +69,7 @@ from kvm_pilot.vision import (
     VisionBackend,
     make_backend,
 )
+from kvm_pilot.vision.base import PHASE_NO_SIGNAL, PHASE_POWER_OFF
 
 if TYPE_CHECKING:
     # ``_driver(capability=…)`` guarantees the driver supports the capability at
@@ -382,32 +383,42 @@ _WAIT_TIMEOUT_CAP = 300.0  # hard server-side ceiling; chain calls for longer wa
 
 
 def _clamp_timeout(timeout: float) -> float:
-    if timeout <= 0:
-        raise ToolError("timeout must be > 0 seconds")
+    # NaN slips through a bare `<= 0` (all NaN comparisons are False) and would
+    # propagate into min() and the deadline math — reject anything non-finite.
+    if not math.isfinite(timeout) or timeout <= 0:
+        raise ToolError("timeout must be a finite number > 0 seconds")
     return min(timeout, _WAIT_TIMEOUT_CAP)
 
 
 def _no_vision_error(phase: str, reason: str) -> ToolError:
     return ToolError(
-        f"cannot wait for {phase!r}: resolving this screen needs the vision model, but "
+        f"cannot wait for {phase!r}: resolving this phase needs the vision model, but "
         f"server-side vision is unavailable ({reason}). Poll `classify_screen` instead — "
         "with no server key it returns the screenshot plus the classification prompt so a "
         "vision-capable agent can classify each frame itself (caller-side)."
     )
 
 
-def _assert_waitable(analyzer: ScreenAnalyzer, phase: str, hint: str) -> None:
-    """Keyless server: prove the cheap gates can resolve the screen before waiting.
+def _keyless_waitable_phases(kvm: KVMDriver) -> set[str]:
+    """The phases the cheap gates can EVER emit for this driver.
 
-    Without server-side vision every non-cheap poll raises VisionError, which the
-    analyzer's wait loop would swallow and retry until it burned the whole timeout
-    (#147). One classify up front turns that into an immediate typed error that
-    points the agent at caller-side `classify_screen` polling.
+    A keyless server can legitimately wait for exactly these (#147): the
+    power/signal probes emit ``power_off`` / ``no_signal``, and a
+    BootProgress-capable driver (BMCs, the fake) can structurally report any
+    phase token. Everything else needs the vision model. The gate is on the
+    TARGET phase, never the current frame: waiting keylessly for ``power_off``
+    must work even while the screen currently shows a desktop the cheap gates
+    can't classify — those interim polls just retry until the target's own
+    gate fires.
     """
-    try:
-        analyzer.classify(hint=hint)
-    except VisionError as exc:
-        raise _no_vision_error(phase, str(exc)) from exc
+    phases: set[str] = set()
+    if hasattr(kvm, "is_powered_on"):
+        phases.add(PHASE_POWER_OFF)
+    if hasattr(kvm, "has_video_signal"):
+        phases.add(PHASE_NO_SIGNAL)
+    if getattr(kvm, "get_boot_progress", None) is not None:
+        phases.update(ALL_PHASES)
+    return phases
 
 
 def _final_frame_ref(cfg: HostConfig, kvm: KVMDriver, state) -> str | None:
@@ -451,10 +462,12 @@ async def wait_for_state(
     the final frame — pass it to `mouse` as `observed_frame_ref` to anchor a
     follow-up click. A timeout returns `reached=false` with the last observed
     state through the same path (never a hang, never a raised error). If the
-    server has no vision credentials and the cheap gates cannot resolve the
-    screen, it fails fast with an error directing you to `classify_screen`
-    polling (whose caller-side fallback hands you the screenshot + prompt).
-    Holds the device driver open for up to `timeout` seconds.
+    server has no vision credentials, only phases this driver's cheap gates can
+    ever emit (`power_off`, `no_signal`, and any phase on a BootProgress-capable
+    driver) are waitable — anything else fails fast, directing you to
+    `classify_screen` polling (whose caller-side fallback hands you the
+    screenshot + prompt). Holds the device driver open for up to `timeout`
+    seconds.
     """
     if phase not in ALL_PHASES:
         raise ToolError(f"unknown phase {phase!r}. Valid phases: {', '.join(ALL_PHASES)}")
@@ -464,42 +477,51 @@ async def wait_for_state(
     except VisionError as exc:  # e.g. 'local' kind with no URL/model configured
         raise _no_vision_error(phase, str(exc)) from exc
 
-    with _driver(profile, confirm=deny_all, capability=Capability.VIDEO) as (cfg, kvm):
-        analyzer = ScreenAnalyzer(kvm, backend)
-        if getattr(backend, "credentialed", True) is False:
-            await anyio.to_thread.run_sync(partial(_assert_waitable, analyzer, phase, hint))
+    def _wait_sync() -> dict:
+        # The whole device interaction — driver build, preflight, the poll loop,
+        # the final frame ref, close — is blocking I/O, so all of it lives in
+        # this worker thread; the event loop stays free for pings/progress.
+        with _driver(profile, confirm=deny_all, capability=Capability.VIDEO) as (cfg, kvm):
+            if getattr(backend, "credentialed", True) is False:
+                waitable = _keyless_waitable_phases(kvm)
+                if phase not in waitable:
+                    raise _no_vision_error(
+                        phase,
+                        "no vision credentials configured; this driver's cheap gates "
+                        f"can only observe: {', '.join(sorted(waitable)) or 'nothing'}",
+                    )
+            analyzer = ScreenAnalyzer(kvm, backend)
+            last: list = []  # last observed ScreenState, for the timeout result
 
-        last: list = []  # last observed ScreenState, for the timeout result
+            def _note(state, elapsed) -> None:
+                last[:] = [state]
+                try:  # best-effort; no-op when the client sent no progress token
+                    anyio.from_thread.run(
+                        ctx.report_progress, min(elapsed, timeout), timeout,
+                        f"{state.phase} (confidence={state.confidence:.2f})",
+                    )
+                except Exception:  # noqa: BLE001 - progress must never break the wait
+                    pass
 
-        def _note(state, elapsed) -> None:
-            last[:] = [state]
-            try:  # best-effort; no-op when the client sent no progress token
-                anyio.from_thread.run(
-                    ctx.report_progress, min(elapsed, timeout), timeout,
-                    f"{state.phase} (confidence={state.confidence:.2f})",
-                )
-            except Exception:  # noqa: BLE001 - progress must never break the wait
-                pass
-
-        start = time.monotonic()
-        try:
-            state = await anyio.to_thread.run_sync(
-                partial(analyzer.wait_for_state, phase, timeout=timeout, hint=hint, on_poll=_note)
-            )
-        except KVMTimeoutError as exc:
-            out = {
-                **_provenance(cfg), "reached": False, "waited_for": phase,
-                "timeout_s": timeout, "detail": str(exc),
+            start = time.monotonic()
+            try:
+                state = analyzer.wait_for_state(phase, timeout=timeout, hint=hint, on_poll=_note)
+            except KVMTimeoutError as exc:
+                out = {
+                    **_provenance(cfg), "reached": False, "waited_for": phase,
+                    "timeout_s": timeout, "detail": str(exc),
+                }
+                if last:
+                    out["last"] = last[0].to_dict()
+                return out
+            return {
+                **_provenance(cfg), "reached": True, "waited_for": phase,
+                "elapsed_s": round(time.monotonic() - start, 1),
+                **state.to_dict(),
+                "frame_ref": _final_frame_ref(cfg, kvm, state),
             }
-            if last:
-                out["last"] = last[0].to_dict()
-            return out
-        return {
-            **_provenance(cfg), "reached": True, "waited_for": phase,
-            "elapsed_s": round(time.monotonic() - start, 1),
-            **state.to_dict(),
-            "frame_ref": _final_frame_ref(cfg, kvm, state),
-        }
+
+    return await anyio.to_thread.run_sync(_wait_sync)
 
 
 @mcp.tool(annotations=_DESTRUCTIVE)

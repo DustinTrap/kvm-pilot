@@ -791,32 +791,49 @@ def test_wait_for_state_emits_progress(config_file):
     assert "power_off" in message
 
 
-def test_wait_for_state_no_vision_errors_with_classify_screen_pointer(monkeypatch):
-    """The decided keyless behavior (#147): when the screen actually needs the
-    VLM tier and the server has no key, the pre-check fails fast with a typed
-    error pointing at caller-side classify_screen polling — never a burned
-    timeout. Unit-level because the MCP fake is always powered off, so the VLM
-    tier is unreachable end-to-end (same rationale as test_classify_fallback_*)."""
-    from mcp.server.fastmcp.exceptions import ToolError
-
+def test_keyless_waitable_phases_gate_on_target_not_current_frame():
+    """The decided keyless behavior (#147, revised after adversarial review):
+    the gate is the set of phases this driver's cheap gates can EVER emit —
+    computed from driver capabilities, never from classifying the current
+    frame. Waiting keylessly for power_off must be allowed even while the
+    screen shows VLM-only content; waiting keylessly for a VLM-only phase must
+    be refused up front instead of burning the timeout."""
+    from kvm_pilot.client import PiKVMDriver
     from kvm_pilot.drivers import FakeDriver
     from kvm_pilot.mcp import server
-    from kvm_pilot.vision import ScreenAnalyzer
-    from kvm_pilot.vision.anthropic import AnthropicBackend
+    from kvm_pilot.vision import ALL_PHASES
 
-    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
-    analyzer = ScreenAnalyzer(
-        FakeDriver(host="x", powered=True, phase="unknown"), AnthropicBackend(model="pinned")
+    # A driver with no cheap probes at all can wait for nothing keylessly.
+    assert server._keyless_waitable_phases(object()) == set()
+    # PiKVM family: power + signal probes, no structured BootProgress.
+    pikvm = server._keyless_waitable_phases(PiKVMDriver("h"))
+    assert pikvm == {"power_off", "no_signal"}
+    assert "desktop" not in pikvm
+    # BootProgress-capable drivers (BMCs, the fake) can report any phase token.
+    assert server._keyless_waitable_phases(FakeDriver(host="x")) >= set(ALL_PHASES)
+
+
+def test_wait_for_state_keyless_refusal_names_the_waitable_set(monkeypatch):
+    """A keyless wait for a VLM-only phase fails fast with the typed pointer at
+    caller-side classify_screen polling — the wrapped refusal text, unit-level
+    (the MCP fake is BootProgress-capable, so end-to-end it can wait for
+    anything keylessly)."""
+    from kvm_pilot.mcp import server
+
+    err = server._no_vision_error(
+        "desktop",
+        "no vision credentials configured; this driver's cheap gates can only "
+        "observe: no_signal, power_off",
     )
-    with pytest.raises(ToolError) as excinfo:
-        server._assert_waitable(analyzer, "desktop", "")
-    assert "classify_screen" in str(excinfo.value)
-    assert "caller-side" in str(excinfo.value)
+    msg = str(err)
+    assert "classify_screen" in msg and "caller-side" in msg
+    assert "power_off" in msg  # the agent is told what IS waitable keylessly
 
 
 def test_wait_timeout_clamped_to_cap_and_rejects_nonpositive():
     """The server-side ceiling without a 300 s test run: in-range values pass
-    through, anything above is clamped to the cap, non-positive is refused."""
+    through, anything above is clamped to the cap; non-positive and non-finite
+    (NaN compares False against <= 0) are refused."""
     from mcp.server.fastmcp.exceptions import ToolError
 
     from kvm_pilot.mcp import server
@@ -824,10 +841,9 @@ def test_wait_timeout_clamped_to_cap_and_rejects_nonpositive():
     assert server._clamp_timeout(10) == 10
     assert server._clamp_timeout(1e6) == 300.0
     assert server._clamp_timeout(1e6) == server._WAIT_TIMEOUT_CAP
-    with pytest.raises(ToolError):
-        server._clamp_timeout(0)
-    with pytest.raises(ToolError):
-        server._clamp_timeout(-5)
+    for bad in (0, -5, float("nan"), float("inf"), float("-inf")):
+        with pytest.raises(ToolError):
+            server._clamp_timeout(bad)
 
 
 def test_video_tools_error_cleanly_on_capability_less_driver(config_file):
