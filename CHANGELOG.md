@@ -6,6 +6,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.0a11] — 2026-07-07
+
+The honest-sensor release: kvm-pilot now correctly diagnoses real GLKVM
+hardware states — video signal, capture geometry, frame staleness, and HID
+reachability — instead of confusing itself. Every fix was found and verified
+live on real GL-RM1PE units (V1.5.1 and V1.9.1).
+
 ### Fixed
 - **Video liveness reads `streamer.hdmi.signal`, not `source.online`** (#154):
   on GL firmware `source.online` stays True with no picture, so kvm-pilot
@@ -670,7 +677,8 @@ user feedback. **Not validated on real hardware** — see Notes.
   feedback are the explicit goals of this alpha. Reports welcome in the issue
   tracker.
 
-[Unreleased]: https://github.com/DustinTrap/kvm-pilot/compare/v0.1.0a10...HEAD
+[Unreleased]: https://github.com/DustinTrap/kvm-pilot/compare/v0.1.0a11...HEAD
+[0.1.0a11]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a11
 [0.1.0a10]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a10
 [0.1.0a9]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a9
 [0.1.0a8]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a8
