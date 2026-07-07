@@ -82,6 +82,16 @@ def test_recover_hid_returns_false_when_gadget_stays_unreachable(emu):
     assert _client(emu).recover_hid(timeout=0.4) is False
 
 
+def test_display_awake_restores_prior_jiggler_over_transport(emu):
+    # #161 A1: the context manager enables the jiggler for the block and restores
+    # the prior device state on exit — verified over the real HTTP transport.
+    c = _client(emu)
+    assert emu.state.jiggler_active is False
+    with c.display_awake():
+        assert emu.state.jiggler_active is True
+    assert emu.state.jiggler_active is False
+
+
 def test_retry_on_503_then_succeeds(emu):
     emu.state.fail_status = 503
     emu.state.fail_times = 1

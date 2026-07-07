@@ -46,11 +46,13 @@ EXPECTED_TOOLS = {
     "mount_iso",
     "eject",
     "list_virtual_media",
+    "appliance_status",
+    "appliance_reboot",
 }
 # Tools that change state (readOnlyHint=False, destructiveHint=True).
 DESTRUCTIVE_TOOLS = {
     "power", "ssh_exec", "type_text", "press_key", "send_shortcut", "ctrl_alt_delete",
-    "mouse", "mount_iso", "eject",
+    "mouse", "mount_iso", "eject", "appliance_reboot",
 }
 
 
@@ -537,6 +539,30 @@ def test_ssh_reachable_errors_when_not_configured(config_file):
     result = run_session(server_env(config_file), interact)
     assert result.isError is True
     assert "not configured" in result.content[0].text
+
+
+def test_appliance_reboot_errors_without_operator_gate(config_file):
+    """The env gate is the floor (mirrors power/ssh_exec): no copy-pasteable var."""
+
+    async def interact(session):
+        return await session.call_tool("appliance_reboot", {"confirm": True})
+
+    result = run_session(server_env(config_file), interact)
+    assert result.isError is True
+    text = result.content[0].text
+    assert "operator" in text
+    assert "KVM_PILOT_MCP_ALLOW_APPLIANCE" not in text  # no incantation to relay
+
+
+def test_appliance_status_errors_when_not_enabled(config_file):
+    """The fake profile has appliance_ssh off — the channel must not be inferred."""
+
+    async def interact(session):
+        return await session.call_tool("appliance_status", {})
+
+    result = run_session(server_env(config_file), interact)
+    assert result.isError is True
+    assert "not enabled" in result.content[0].text
 
 
 def test_ssh_reachable_host_override_unblocks_unconfigured_profile(config_file):
