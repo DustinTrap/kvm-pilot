@@ -454,6 +454,41 @@ conservative rather than blind full-auto, because the failure modes are severe:
   `snapshot`/`classify`/`type_text` + `ssh_reachable(host=…)` so a human stays in the
   loop; a single ungated auto-bootstrap MCP tool is deferred.
 
+## Appliance-SSH channel & the RV1126 encoder wedge (#162)
+
+The GL RV1126 hardware video encoder wedges (kvmd hard-loops on `init rv1126
+encoder failed`; the JPEG snapshot path 503s), and it is the dominant, recurring,
+fleet-wide fault. Several non-obvious choices came out of measuring it live:
+
+- **loadavg is NOT the wedge signal.** Measured 2026-07-07: a freshly-rebooted,
+  zero-interaction unit self-inflates to load ~10 within 90s and holds there while
+  CPU falls to ~4%. The RV1126 video-pipeline **kernel** threads (`venc`, `vpss`,
+  `vrga`, `vvi_thread`, …) park in uninterruptible **D-state** as their normal idle
+  behavior, and Linux counts D-state toward loadavg — so load ≈ (D-thread count) ≈
+  10 whether healthy or wedged. The `encoder-wedge` check therefore keys on
+  **function** (the encoder-init failure pattern in the kvmd log, which is
+  REST-visible and survives the wedge), and treats loadavg/D-state only as context.
+- **Detection is REST-based; the appliance channel is for recovery.** The kvmd log
+  is available over the REST `/api/log`, so the wedge is *detectable* without
+  appliance SSH. The appliance-SSH channel exists for the *independent transport*
+  and the *reboot recovery* — a reboot is the only fix, because the wedged threads
+  are kernel threads (unkillable; a userspace service restart cannot clear them).
+- **The finding is WARNING, never CRITICAL.** A CRITICAL gates every destructive op
+  (the health gate), and gating everything on a recurring transient would make the
+  tool unusable. WARNING surfaces it without blocking.
+- **Recovery is operator-gated and never autonomous.** The wedge recurs within
+  minutes of a reboot, and there is **no out-of-band power to the appliance itself**,
+  so an auto-reboot reflex would thrash the management plane and a reboot that fails
+  to rejoin the network strands the operator with zero access. `appliance.reboot`
+  stays a gated, human-initiated op; it must not be wired into the Reflexes loop.
+- **Key-based auth only; separate trust domain.** The channel reuses `SSHChannel`'s
+  deliberate BatchMode/no-sshpass stance. The credential that works today is
+  `root@<kvm>` with the shared fleet password (== the kvmd admin password); it is
+  **not** reused — onboard a key once (`ssh-copy-id root@<kvm>`) so kvmd-REST and
+  appliance-root stay distinct trust domains and no password is persisted. The
+  shared fleet root password across units is itself a blast-radius hazard;
+  per-device keys are the recommendation.
+
 ## Process
 
 Most structural choices came from adversarial review passes (find → verify →

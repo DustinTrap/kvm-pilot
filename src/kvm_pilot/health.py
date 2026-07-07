@@ -494,6 +494,73 @@ def check_hid_reachable(driver: Any) -> CheckResult | None:
     )
 
 
+# The GL RV1126 hard-loop signature: kvmd repeatedly failing to (re)initialize
+# the hardware video encoder. Functional and REST-visible (the log survives the
+# wedge), unlike loadavg — which sits at ~10 on these units even when perfectly
+# idle/healthy (measured 2026-07-07), so loadavg must NOT be used as the tell.
+_ENCODER_WEDGE_PATTERNS = (
+    "init rv1126 encoder failed",
+    "resolution failed",
+    "init rv1126 vpss failed",
+)
+# A genuine wedge hard-loops (many failures/sec); a couple of lines is a transient
+# reinit blip a unit recovered from (seen live: a working unit with 2 "resolution
+# failed" lines). Require a real loop before warning.
+_ENCODER_WEDGE_MIN_HITS = 3
+
+
+def check_encoder_wedge(driver: Any) -> CheckResult | None:
+    """GL RV1126 video-encoder wedge: kvmd hard-loops on encoder (re)init and the
+    JPEG snapshot path 503s or returns non-image bytes. Detected functionally from
+    the kvmd log (which survives the wedge); recovered only by an appliance reboot
+    (the wedged threads are unkillable kernel threads — a service restart can't
+    clear them). Self-skips on drivers without logs / when no failures are seen.
+    Volatile.
+    """
+    get_logs = getattr(driver, "get_logs", None)
+    if get_logs is None:
+        return None
+    try:
+        log = get_logs().lower()
+    except KVMPilotError:
+        return None
+    hits = sum(log.count(p) for p in _ENCODER_WEDGE_PATTERNS)
+    if hits < _ENCODER_WEDGE_MIN_HITS:
+        return None  # healthy, or a recovered transient blip -> nothing to assert
+    # Appliance-channel context if configured (loadavg is context, NOT the tell).
+    context = ""
+    chan = getattr(driver, "appliance_channel", None)
+    if chan is not None:
+        try:
+            la = chan.loadavg()
+            if la is not None:
+                context = f"; appliance load {la}"
+        except Exception:  # noqa: BLE001 - diagnostics must never fail the check
+            context = ""
+    can_reboot = chan is not None and hasattr(chan, "reboot")
+    remediation = (
+        "Reboot the KVM appliance to reinitialize the encoder — "
+        + (
+            "`kvm-pilot appliance reboot`. "
+            if can_reboot
+            else "no appliance-reboot path is configured (set appliance_ssh); reboot "
+            "it manually. "
+        )
+        + "A service restart cannot clear it (the wedged threads are kernel threads). "
+        "The durable fix is upstream firmware / capping capture ≤1080p (#107/#151)."
+    )
+    return CheckResult(
+        id="encoder-wedge",
+        pillar=Pillar.READINESS,
+        severity=Severity.WARNING,
+        title="Video encoder wedged",
+        detail=f"The kvmd log shows {hits} RV1126 encoder (re)init failure(s){context} — "
+        "the JPEG snapshot path will 503 or hand back non-image bytes.",
+        remediation=remediation,
+        cacheable=False,
+    )
+
+
 def _reconnect_media(driver: Any) -> None:  # pragma: no cover - exercised via AutoFix test
     driver.msd_disconnect()
     time.sleep(0.5)
@@ -953,6 +1020,7 @@ CHECKS: list[Check] = [
     check_recovery_path,
     check_video_signal,
     check_hid_reachable,
+    check_encoder_wedge,
     check_msd_online,
     check_tls_posture,
     check_default_creds,
@@ -1228,5 +1296,6 @@ def _is_volatile(check: Check) -> bool:
         "check_api_reachable",
         "check_ssh_reachable",
         "check_video_signal",
+        "check_encoder_wedge",
         "check_msd_online",
     }

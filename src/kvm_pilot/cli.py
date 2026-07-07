@@ -448,6 +448,35 @@ def cmd_recover_hid(args) -> int:
     return 1
 
 
+def cmd_appliance(args) -> int:
+    # Read-only diagnostics + gated reboot on the KVM APPLIANCE's own OS (#162) —
+    # the only path to observe/recover the RV1126 encoder wedge REST can't see.
+    kvm = _build_client(args)
+    chan = getattr(kvm, "appliance_channel", None)
+    if chan is None:
+        print("appliance-SSH is not configured for this profile. Set appliance_ssh=true "
+              "(or KVM_PILOT_APPLIANCE_SSH=1) and appliance_ssh_key.", file=sys.stderr)
+        return 2
+    if args.action == "loadavg":
+        la = chan.loadavg()
+        threads = chan.d_state_video_threads()
+        print(f"appliance load (1m): {la if la is not None else 'unreadable'}")
+        print(f"D-state video threads: {', '.join(threads) if threads else 'none'}")
+        print("(note: these park in D even when healthy — loadavg ≈ their count and is "
+              "NOT a health signal on these units)")
+        return 0
+    res = chan.reboot()  # action == "reboot"; gated as appliance.reboot
+    if res.get("dry_run"):
+        print("appliance reboot: dry-run — not sent")
+    elif res.get("ok"):
+        print(f"appliance reboot: issued to {chan.host} — KVM control drops for ~60s; "
+              "target power is untouched")
+    else:
+        print("appliance reboot: failed", file=sys.stderr)
+        return 1
+    return 0
+
+
 def cmd_classify(args) -> int:
     kvm = _rich_client(args, Capability.VIDEO)
     analyzer = _make_analyzer(kvm, args)
@@ -968,6 +997,14 @@ def build_parser() -> argparse.ArgumentParser:
         help="Reset/re-enumerate the USB HID gadget when it isn't reaching the target (#160)")
     _add_common(p)
     p.set_defaults(func=cmd_recover_hid)
+
+    p = sub.add_parser(
+        "appliance",
+        help="Diagnose/recover the KVM appliance's OWN OS over SSH — encoder wedge (#162)")
+    p.add_argument("action", choices=["loadavg", "reboot"],
+                   help="loadavg (read-only diagnostics) or reboot (gated recovery)")
+    _add_common(p)
+    p.set_defaults(func=cmd_appliance)
 
     p = sub.add_parser("classify", help="Classify the current screen once")
     _add_common(p)

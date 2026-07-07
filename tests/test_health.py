@@ -17,6 +17,7 @@ from kvm_pilot.health import (
     Pillar,
     Severity,
     check_default_creds,
+    check_encoder_wedge,
     check_exposed_services,
     check_hid_reachable,
     check_msd_online,
@@ -470,6 +471,30 @@ def test_no_signal_with_hid_offline_stays_plain_no_signal():
     d = FakeDriver(video_signal=False, hid_connected=False)
     res = check_video_signal(d)
     assert res.title == "Video signal" and res.auto_fix is None
+
+
+def test_encoder_wedge_detected_from_kvmd_log():
+    # #162: the RV1126 hard-loop signature in the kvmd log -> WARNING that names
+    # an appliance reboot (keyed on function/log, NOT loadavg which is useless).
+    d = FakeDriver(logs="ustreamer: init rv1126 encoder failed\n" * 3)
+    res = check_encoder_wedge(d)
+    assert res is not None and res.severity is Severity.WARNING
+    assert res.id == "encoder-wedge" and "reboot" in res.remediation.lower()
+    assert res.auto_fix is None  # a reboot is NEVER auto-applied
+
+
+def test_encoder_wedge_skips_healthy_log():
+    assert check_encoder_wedge(FakeDriver(logs="kvmd started\natx power on\n")) is None
+
+
+def test_encoder_wedge_below_threshold_is_a_transient_blip():
+    # A couple of recovered "resolution failed" lines (seen live on a still-working
+    # unit) must NOT warn — only a sustained hard-loop does.
+    assert check_encoder_wedge(FakeDriver(logs="rv1126: resolution failed\n" * 2)) is None
+
+
+def test_encoder_wedge_skips_driver_without_logs():
+    assert check_encoder_wedge(stub()) is None
 
 
 # ---- first-connection audit (issue #80) ---------------------------------- #

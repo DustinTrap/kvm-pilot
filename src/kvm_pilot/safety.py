@@ -73,6 +73,12 @@ DESTRUCTIVE_OPS: set[str] = {
     # reboot, service stop). An arbitrary command can't be statically classified,
     # so every exec is gated. Reachability probes stay ungated (read-only).
     "ssh.exec",
+    # Rebooting the KVM appliance itself (over appliance-SSH) to clear a wedged
+    # encoder: drops all KVM control for ~60s. Target power is untouched, but a
+    # reboot that fails to rejoin the network strands the operator (no OOB power
+    # to the appliance), so it is always gated. Appliance-SSH read-only
+    # diagnostics (loadavg, D-state) stay ungated. See ssh.ApplianceChannel.
+    "appliance.reboot",
 }
 
 class EffectClass(StrEnum):
@@ -93,6 +99,10 @@ class EffectClass(StrEnum):
     POWER_SOFT = "power_soft"
     POWER_HARD = "power_hard"
     CONFIG_MUTATION = "config_mutation"
+    # Resets the KVM APPLIANCE, not the target — distinct from POWER_* (which
+    # touch guest power) so an actuator can't misreport an appliance reboot as a
+    # guest power action, nor launder it as a config mutation.
+    APPLIANCE_RESET = "appliance_reset"
 
 
 # Effect class for each guarded op id. Every id in DESTRUCTIVE_OPS must appear
@@ -138,6 +148,7 @@ OP_EFFECT: dict[str, EffectClass] = {
     "firmware.flash": EffectClass.POWER_HARD,
     # Arbitrary in-band command: can do anything, keeps its own ALLOW_SSH gate.
     "ssh.exec": EffectClass.HID_CONTROL,
+    "appliance.reboot": EffectClass.APPLIANCE_RESET,
 }
 
 

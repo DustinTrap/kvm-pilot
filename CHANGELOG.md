@@ -7,6 +7,20 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Appliance-SSH channel — an independent transport that can see/recover the
+  encoder wedge REST can't** (#162): an opt-in, **key-based** SSH channel to the
+  KVM appliance's OWN OS (root@`<kvm-ip>`, `appliance_ssh`/`appliance_ssh_key`),
+  distinct from `ssh_host` (the target). A new REST-based `encoder-wedge`
+  healthcheck flags the GL RV1126 hard-loop (kvmd repeatedly failing to init the
+  encoder → snapshot 503s) from the kvmd log — keyed on **function, not
+  loadavg**, which sits at ~10 on these units even when perfectly idle (measured
+  live: load self-inflates to the D-state-thread count with zero interaction).
+  `kvm-pilot appliance loadavg|reboot` exposes read-only diagnostics and a
+  gated `appliance.reboot` recovery (new `EffectClass.APPLIANCE_RESET`) — the
+  only way to clear the wedge (the stuck threads are unkillable kernel threads).
+  Recovery is operator-gated and never autonomous (the wedge recurs and there is
+  no out-of-band power to the appliance). Key-based only — no sshpass, no
+  reusing the kvmd password over SSH.
 - **Self-healing healthcheck AutoFixes for the access failure modes** (#160, #161):
   `check_hid-reachable`'s offline branch now offers a reversible
   `recover_hid()` AutoFix (reset + re-enumerate the USB HID gadget, via

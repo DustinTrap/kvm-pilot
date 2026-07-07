@@ -163,6 +163,18 @@ def make_driver_from_config(
             drv.ssh_channel = SSHChannel.from_config(cfg)  # type: ignore[union-attr]
         except CapabilityError:
             pass  # a malformed ssh_host must never break KVM operation
+    # Attach the appliance-SSH channel (to the KVM's OWN OS) when opted in, so the
+    # healthcheck can observe/recover the RV1126 encoder wedge REST can't see
+    # (#162). Same swallow: a channel that can't build must never break KVM ops.
+    if cfg.appliance_ssh:
+        from ..ssh import ApplianceChannel
+
+        try:
+            drv.appliance_channel = ApplianceChannel.from_config(  # type: ignore[union-attr]
+                cfg, confirm=confirm, dry_run=dry_run
+            )
+        except CapabilityError:
+            pass
     return drv
 
 
