@@ -152,6 +152,11 @@ A short list that saves most new users their first few mistakes:
   credential in a `chmod 600` file, out of shell history and agent config.
 - **Name the machine you mean** — "the connected server behind the KVM at `<ip>`"
   vs. "the KVM appliance itself" (see §4). Ambiguity here causes wrong-target ops.
+- **Installing an OS? Decide whose locale wins.** The installer's language /
+  keyboard-layout / timezone prompts describe the *target server*, not your
+  laptop. Your agent should ask whether your local settings apply — answer
+  deliberately for a machine in another region instead of accepting your own
+  locale by default.
 - **Parallelize read-only work** — ask for `healthcheck` + `info` + `logs` at once;
   never parallelize destructive steps.
 - **Once the server's OS is on the network, prefer SSH to it** for in-band work —
