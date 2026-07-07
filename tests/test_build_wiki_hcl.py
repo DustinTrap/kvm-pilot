@@ -94,3 +94,17 @@ def test_full_build_emits_hcl_page_and_sidebar(build_wiki, tmp_path):
     build_wiki.build(out)
     assert (out / "Hardware-Compatibility.md").exists()
     assert "Hardware compatibility" in (out / "_Sidebar.md").read_text()
+
+
+def test_unattended_install_page_ships_on_both_surfaces(build_wiki, tmp_path):
+    # #129's deliverable: the text-mode+SSH distro matrix must exist on the
+    # durable docs surface (wiki page, navigable) AND on the in-wheel agent
+    # surface (the bundled skill). build() itself SystemExits on any
+    # unresolved relative link, so a passing build proves the links resolved.
+    out = tmp_path / "wiki"
+    build_wiki.build(out)
+    page = (out / "unattended-install.md").read_text()
+    assert "inst.sshd inst.text" in page      # the matrix made it to the wiki
+    assert "network-console" in page
+    assert "inst.sshd" in (out / "skill.md").read_text()   # compact rule shipped
+    assert "Unattended Linux installs" in (out / "_Sidebar.md").read_text()
