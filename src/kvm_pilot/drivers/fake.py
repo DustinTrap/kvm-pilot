@@ -48,6 +48,10 @@ class FakeDriver(PowerMixin, CapabilityMixin):
             ops gate exactly as on a real driver.
     """
 
+    # Host-visible virtual-media name seam (#78), canned so surfaces that
+    # forward it (MCP list_virtual_media) are exercisable without hardware.
+    virtual_media_host_pattern = "Fake Optical Drive"
+
     def __init__(
         self,
         host: str = "fake",

@@ -810,11 +810,22 @@ def list_virtual_media(profile: str | None = None) -> dict:
     image you need may already be on the device from an earlier job (#127).
     Returns the device's MSD state: stored images (name/size/completeness),
     the selected drive image, and whether media is attached (``online``).
+
+    ``host_visible_as`` (when the driver knows its brand's gadget name, #78)
+    is the device name the TARGET host shows once media is truly presented —
+    e.g. a boot-menu entry "UEFI: Glinet Optical Drive 1.00" on GLKVM. Use it
+    to pick the right boot entry and as a positive readiness cross-check: a
+    generic empty "CD/DVD Drive" entry without this name means the medium is
+    not actually inserted.
     """
     with _driver(profile, confirm=deny_all, capability=Capability.VIRTUAL_MEDIA) as (cfg, kvm):
         if not hasattr(kvm, "get_msd_state"):
             return {**_provenance(cfg), "note": "driver does not expose MSD storage inventory"}
-        return {**_provenance(cfg), "msd": kvm.get_msd_state()}
+        out = {**_provenance(cfg), "msd": kvm.get_msd_state()}
+        pattern = getattr(kvm, "virtual_media_host_pattern", None)
+        if pattern:
+            out["host_visible_as"] = pattern
+        return out
 
 
 @mcp.tool(annotations=_DESTRUCTIVE)

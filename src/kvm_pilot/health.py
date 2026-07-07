@@ -418,6 +418,9 @@ def check_msd_online(driver: Any) -> CheckResult | None:
     drive = msd.get("drive") or {}
     image = drive.get("image")
     online = msd.get("online")
+    # Substring of the device name the host shows for this brand's MSD gadget
+    # (#78); None on drivers where it has not been observed on real hardware.
+    pattern = getattr(driver, "virtual_media_host_pattern", None)
     if not image:
         return CheckResult(
             id="msd-online",
@@ -428,12 +431,19 @@ def check_msd_online(driver: Any) -> CheckResult | None:
             cacheable=False,
         )
     if online:
+        detail = "Image attached and online (presented to host)."
+        if pattern:
+            detail += (
+                f" The host should now list a '{pattern}' device (e.g. in its "
+                "boot menu); a bare generic CD/DVD entry instead means the "
+                "medium is not really presented (#78)."
+            )
         return CheckResult(
             id="msd-online",
             pillar=Pillar.READINESS,
             severity=Severity.OK,
             title="Virtual media",
-            detail="Image attached and online (presented to host).",
+            detail=detail,
             cacheable=False,
         )
     fix = None
@@ -449,7 +459,8 @@ def check_msd_online(driver: Any) -> CheckResult | None:
         severity=Severity.WARNING,
         title="Virtual media",
         detail="An image is attached but online=false — it is not presented to the "
-        "host, so a boot-from-media will fail.",
+        "host, so a boot-from-media will fail."
+        + (f" The host's boot menu will show no '{pattern}' device." if pattern else ""),
         remediation="Enable virtual media on the device (GL firmware disables the "
         "USB gadget separately), then reconnect.",
         cacheable=False,

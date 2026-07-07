@@ -169,6 +169,31 @@ def test_msd_online_ok_when_no_image():
     assert check_msd_online(d).severity is Severity.OK
 
 
+def test_msd_online_ok_names_expected_host_device():
+    # #78: when the driver knows its brand's host-visible gadget name, the OK
+    # detail tells the operator/agent what the host's boot menu should show —
+    # the positive readiness cross-check.
+    d = stub(
+        get_msd_state=lambda: {"online": True, "drive": {"image": {"name": "x.iso"}}},
+        virtual_media_host_pattern="Glinet Optical Drive",
+    )
+    res = check_msd_online(d)
+    assert res.severity is Severity.OK
+    assert "Glinet Optical Drive" in res.detail
+
+
+def test_msd_online_warning_notes_absent_host_device():
+    # #78: the discriminator that separates "attached but invisible" from
+    # "presented" — the warning names the device the boot menu will NOT show.
+    d = stub(
+        get_msd_state=lambda: {"online": False, "drive": {"image": {"name": "x.iso"}}},
+        virtual_media_host_pattern="Glinet Optical Drive",
+    )
+    res = check_msd_online(d)
+    assert res.severity is Severity.WARNING
+    assert "Glinet Optical Drive" in res.detail
+
+
 def test_msd_online_offers_autofix_when_reconnect_available():
     d = stub(
         get_msd_state=lambda: {"online": False, "drive": {"image": {"name": "x.iso"}}},

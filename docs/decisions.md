@@ -5,6 +5,20 @@ are intentional**, so they don't get re-litigated. Newest first.
 
 ## Drivers
 
+### Host-visible virtual-media device names are per-driver data, seeded GL-only ([#78](https://github.com/DustinTrap/kvm-pilot/issues/78))
+The device name a target host shows for a brand's MSD gadget (GLKVM: the observed
+`UEFI: Glinet Optical Drive 1.00` boot-menu entry) is declared as a driver class
+attribute, `virtual_media_host_pattern`. Not a `Quirk` — a quirk is a defect plus
+workaround, and this is a positive expected signal. Not a firmware-registry `profile`
+field — the gadget name is brand/driver identity (same across GL products and firmware),
+not per-(vendor, product, version) data, and it must be available offline like
+`capabilities()`, whereas registry matching needs a live `get_firmware_info()` probe.
+The value is a **substring**, not a regex (matching `Quirk.firmware` semantics) — the
+trailing "1.00" is a USB revision that may vary. PiKVM/BliKVM/Redfish deliberately stay
+`None` until observed on real hardware (don't invent device data). Consumers today:
+the `msd-online` healthcheck detail and the MCP `list_virtual_media` `host_visible_as`
+field. Automated boot-entry matching is future work that will read this same attribute.
+
 ### SSH-to-target is a per-profile channel, not a KVM-driver capability ([#81](https://github.com/DustinTrap/kvm-pilot/issues/81))
 The in-band SSH channel targets the **managed host's OS** — a different machine from
 the KVM appliance, with its own address (`ssh_host`) and login. It could have been a

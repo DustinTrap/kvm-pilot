@@ -119,6 +119,12 @@ class GLKVMDriver(PiKVMDriver):
     _NOT_FOUND_HINT = _GL_API_DISABLED_HINT
     _vendor = "gl.inet"
 
+    # Observed on a real GL-RM1PE (#78): with media truly presented, the Dell
+    # T7610 F12 boot menu listed "UEFI: Glinet Optical Drive 1.00"; the entry was
+    # absent while /api/msd reported online=false. Substring match — the "1.00"
+    # USB revision may vary.
+    virtual_media_host_pattern = "Glinet Optical Drive"
+
     def get_firmware_info(self) -> dict:
         """GL reports its **product** firmware (what the UI shows) at
         ``/api/upgrade/version`` — e.g. ``{"model": "RM1PE", "version": "V1.9.1
