@@ -8,9 +8,10 @@ description: >-
   (POST, GRUB, installer, login, crash). Backed by the `kvm-pilot` Python
   package; vision runs on Claude or a local OpenAI-compatible VLM. **No single
   interface is best for everything — pick per action: the bundled MCP server
-  (`kvm-pilot-mcp`) for the visual loop (snapshot/classify) and gated power, the
-  CLI for logs/capabilities/firmware/events/HID/media, the Python library for
-  mouse and MSD switching, and SSH for appliance maintenance the tool can't do.
+  (`kvm-pilot-mcp`) for the visual loop (snapshot/classify), gated act tools
+  (keyboard/mouse/media), and gated power; the CLI for
+  logs/capabilities/firmware/events and scripting; the Python library for MSD
+  mode switching; and SSH for appliance maintenance the tool can't do.
   See the interface matrix in the skill body.** Early alpha — most device/capability
   combos are still unverified (only a few exercised live, on a GL-RM1PE); treat
   every operation as unverified and confirm destructive steps with the user.
@@ -109,7 +110,9 @@ Prefer remote recovery, in this order, and present the options in this order:
   `snapshot` (model-visible JPEG), `classify_screen` (boot/run phase — uses a
   server-side vision backend if configured, else falls back to caller-side
   classification), `ssh_reachable`, `list_virtual_media` (MSD storage
-  inventory — check it before requesting an ISO download/upload)
+  inventory — check it before requesting an ISO download/upload), and
+  `ssh_discover` (CIDR scan — RISKY/opt-in, needs `confirm=true`, user-owned
+  networks only)
 - **Destructive act tools** — each needs the operator to opt the tool's *effect*
   in via an env flag **and** a per-invocation approval (a human elicitation, or
   `confirm=true` under a standing policy):
@@ -142,10 +145,11 @@ the tools silently don't load. Use `-s user` (or a committed repo `.mcp.json`)
 so it's available wherever you start. Point it at a config-file **profile**
 (`KVM_PILOT_PROFILE`) so the device password lives in
 `~/.config/kvm-pilot/config.toml`, not the MCP host config; every tool also
-takes a `profile` argument to retarget. Keep `KVM_PILOT_MCP_DRY_RUN=1` for this
-untested alpha — destructive calls are logged, not sent. The `power` tool is
-**disabled** unless the operator sets `KVM_PILOT_MCP_ALLOW_POWER=1` in the
-server's own `env`, and even then MCP hosts should require per-call human
+takes a `profile` argument to retarget. Keep `KVM_PILOT_MCP_DRY_RUN=1` until the
+user trusts a flow on their hardware — destructive calls are logged, not sent.
+Every destructive tool is **disabled** until the operator opts its effect class
+in via the server's own `env` (`KVM_PILOT_MCP_ALLOW_POWER` / `_ALLOW_HID` /
+`_ALLOW_MEDIA` / `_ALLOW_SSH`), and even then each call needs per-invocation
 approval (never "always allow"). Full operator guide:
 [MCP server README](https://github.com/DustinTrap/kvm-pilot/blob/main/src/kvm_pilot/mcp/README.md).
 
@@ -182,7 +186,7 @@ pip install --pre kvm-pilot               # CLI + this skill + the MCP server
 pip install --pre "kvm-pilot[totp]"       # add if the device has 2FA enabled
 ```
 
-It's a pre-release, so `--pre` (or pinning `==0.1.0a7`) is required — a bare
+It's a pre-release, so `--pre` (or pinning the exact current version) is required — a bare
 `pip install kvm-pilot` deliberately picks up no alpha. A single install brings
 the `kvm-pilot` CLI, the `kvm-pilot-mcp` server, and this skill file. For the
 latest unreleased tree, install from git:
@@ -279,22 +283,25 @@ clicks), GPIO, Redfish resets — are gated by `SafetyPolicy`
 - The `confirm` callback runs only for calls that would really be sent;
   returning `False` blocks the call with `SafetyError`.
 
-When acting on a user's real hardware — which, again, this package has never
-been validated against — confirm each destructive step with the user first
-unless they have explicitly said otherwise.
+When acting on a user's real hardware, remember most device+capability combos
+are still unverified (check the Hardware-Compatibility matrix) — confirm each
+destructive step with the user first unless they have explicitly said otherwise.
 
 ## CLI
 
-The CLI is the **primary (often only) interface** for a large part of the
-surface — `firmware-check`/`firmware-update`, `events`, `watch`, `type`/`key`,
-`mount`/`eject` have no MCP tool (see the interface matrix above). Use the MCP
-server for the visual loop (`snapshot`/`classify`), gated `power`, and the
-read-only checks it does expose (`info`/`healthcheck`/`capabilities`/`logs`/
-`power_state`); use the CLI for everything else and for one-off checks when no
-MCP host is in the loop.
+The CLI covers the **full surface** and is the only interface for
+`firmware-check`/`firmware-update`, `events`, `watch`, and `ssh-bootstrap`
+(see the interface matrix above — keyboard/mouse/media DO have MCP act tools
+since 0.1.0a8). Use the MCP server for the visual loop (`snapshot`/`classify`)
+and the gated act/power tools inside an agent session; use the CLI for
+everything else and for one-off checks when no MCP host is in the loop.
 
-`kvm-pilot info | capabilities | healthcheck | firmware-check | snapshot | power |
-power-cycle | type | key | mount | eject | classify | watch | events`. Run
+The full command set (see [docs/cli.md](https://github.com/DustinTrap/kvm-pilot/blob/main/docs/cli.md)
+for the reference table): `kvm-pilot info | capabilities | healthcheck |
+firmware-check | firmware-update | snapshot | sensors | logs | ssh-check |
+ssh-exec | ssh-discover | ssh-bootstrap | boot-progress | power | power-cycle |
+type | key | mouse-move | click | media-list | mount | eject | classify |
+watch | events`. Run
 `healthcheck` on first contact (see above); it also auto-runs ahead of destructive
 subcommands. `firmware-check` reports firmware currency and, where a device knows
 its vendor's latest, the update to contribute to the registry.

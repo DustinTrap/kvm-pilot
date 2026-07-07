@@ -14,7 +14,7 @@ Vision runs on Claude **or** any local OpenAI-compatible VLM (LM Studio, Ollama,
 vLLM, llama.cpp). Point it at a model on your own GPU and the screenshots never
 leave your network and cost nothing per frame.
 
-> **Status:** v0.1.0a7 — **early alpha.** First real-hardware runs have happened —
+> **Status:** v0.1.0a8 — **early alpha.** First real-hardware runs have happened —
 > a GL-RM1PE, with the read/`snapshot`/`healthcheck`/`logs` paths exercised live on
 > firmware V1.5.1 release2 and V1.9.1 release1 — but **most device+capability combos
 > remain unverified** (mocked HTTP/vision or emulators only), and the remote
@@ -86,8 +86,9 @@ pip install --pre "kvm-pilot[ws]"              # + WebSocket event streaming
 
 One install gives you the whole product: the **`kvm-pilot` CLI**, the **`kvm-pilot-mcp`
 MCP server** (for Claude Desktop / Claude Code and other agent hosts), and the
-bundled **Claude skill** — nothing to clone. The current release (`0.1.0a7`) is a
-**pre-release**, so `--pre` (or pinning `==0.1.0a7`) is required — a plain
+bundled **Claude skill** — nothing to clone. The current release line is a
+**pre-release** (see the version badge / CHANGELOG for the exact tag), so `--pre`
+(or pinning the exact version) is required — a plain
 `pip install kvm-pilot` deliberately picks up no alpha. The client/driver code
 imports only the standard library; the one runtime dependency is the `mcp` SDK
 (for the bundled server), and `totp`/`ws` are opt-in extras. (`0.1.0a1` is yanked
@@ -145,6 +146,8 @@ goes *before* the subcommand; `watch` keeps its own `--timeout` for the vision
 wait deadline.
 
 Profiles like `homelab` live in `~/.config/kvm-pilot/config.toml`. See
+[docs/cli.md](docs/cli.md) for the full command table (every subcommand, the
+capability it needs, and its gating), and
 [docs/configuration.md](docs/configuration.md) for the config-file format,
 every `KVM_PILOT_*` environment variable, and the precedence between flags,
 env, and profiles.

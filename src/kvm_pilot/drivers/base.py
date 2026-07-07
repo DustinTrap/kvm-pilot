@@ -6,10 +6,10 @@ single monolithic interface is the wrong shape. Instead each capability is a
 small, ``@runtime_checkable`` ``Protocol``: a driver implements only the ones
 its hardware actually supports, and advertises them via ``capabilities()``.
 
-This is **step 1** of the driver-plugin refactor — the protocols are defined
-here and the existing PiKVM client (``KVMClient``) implements them unchanged via
-``CapabilityMixin``. Concrete non-PiKVM drivers and a ``make_driver`` registry
-come in later steps; see ``docs/architecture.md``.
+The protocols are defined here; the PiKVM client (``KVMClient``) implements
+them via ``CapabilityMixin``, the ``make_driver`` registry lives in
+``drivers/__init__.py``, and the concrete non-PiKVM drivers (``FakeDriver``,
+``RedfishDriver``) prove the seam; see ``docs/architecture.md``.
 """
 
 from __future__ import annotations

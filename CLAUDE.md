@@ -104,9 +104,10 @@ python3 -m venv .venv && .venv/bin/pip install -e ".[dev,totp,ws]"
 .venv/bin/mypy src/kvm_pilot
 .venv/bin/pytest
 ```
-CI (`.github/workflows/ci.yml`) runs all three on Python 3.11/3.12/3.13, plus a
-security job (bandit + pip-audit) and an opt-in sushy-tools Redfish integration
-job — keep them green. See docs/CONTRIBUTING.md for the full pre-PR checklist.
+CI (`.github/workflows/ci.yml`) runs all three on Python 3.11/3.12/3.13/3.14
+(with a 75% coverage gate), plus a security job (bandit + pip-audit) and an
+opt-in sushy-tools Redfish integration job — keep them green. See
+docs/CONTRIBUTING.md for the full pre-PR checklist.
 
 ## Safety in tests & dev
 Never point destructive operations at real hardware from tests or examples. The
@@ -116,4 +117,5 @@ suite mocks the transport; to exercise a destructive path use `dry_run=True` or 
 ## Release
 The version lives in `src/kvm_pilot/__about__.py`. Releases publish to PyPI via
 GitHub Trusted Publishing (`.github/workflows/release.yml`, environment `pypi`)
-on a published GitHub Release. The current `0.1.0a1` is a yanked, opt-in alpha.
+on a published GitHub Release. The current line is an opt-in (`--pre`) alpha —
+see `__about__.py`/CHANGELOG for the exact version; `0.1.0a1` is yanked.

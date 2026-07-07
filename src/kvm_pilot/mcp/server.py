@@ -9,26 +9,31 @@ stdlib-only, importing ``mcp`` only here).
 
 SAFETY MODEL (see the co-located README.md for the operator-facing version):
   * The read-only tools (``info``, ``healthcheck``, ``capabilities``,
-    ``power_state``, ``logs``, ``snapshot``, ``classify_screen``) run with a
-    deny-all confirm callback and carry a ``readOnlyHint`` tool annotation.
-  * The destructive tools (``power`` and the HID act tools ``type_text`` /
-    ``press_key`` / ``send_shortcut`` / ``ctrl_alt_delete``) carry
+    ``power_state``, ``logs``, ``snapshot``, ``classify_screen``,
+    ``list_virtual_media``, ``ssh_reachable``, ``ssh_discover``) run with a
+    deny-all confirm callback and carry a ``readOnlyHint`` tool annotation
+    (``ssh_discover`` additionally requires ``confirm=true`` — an active
+    network scan is read-only but not harmless).
+  * The destructive tools (``power``, the HID act tools ``type_text`` /
+    ``press_key`` / ``send_shortcut`` / ``ctrl_alt_delete`` / ``mouse``, the
+    media tools ``mount_iso`` / ``eject``, and ``ssh_exec``) carry
     ``destructiveHint`` and are DISABLED until the operator opts the tool's
     *effect class* in via an env flag in the server's own environment
-    (``KVM_PILOT_MCP_ALLOW_POWER`` / ``KVM_PILOT_MCP_ALLOW_HID``). On top of that
-    each act call requires per-invocation approval — a human MCP elicitation when
-    the client supports it, else an explicit ``confirm=true`` under the operator's
-    standing policy. Tools are classified by effect not transport, so a reboot
-    (``ctrl_alt_delete``, a Ctrl+Alt+Del chord) needs the power gate, not the HID
-    gate. See ``act.py`` and the co-located README. Annotations are hints, never a
-    security boundary.
+    (``KVM_PILOT_MCP_ALLOW_POWER`` / ``_ALLOW_HID`` / ``_ALLOW_MEDIA`` /
+    ``_ALLOW_SSH``). On top of that each act call requires per-invocation
+    approval — a human MCP elicitation when the client supports it, else an
+    explicit ``confirm=true`` under the operator's standing policy. Tools are
+    classified by effect not transport, so a reboot (``ctrl_alt_delete``, a
+    Ctrl+Alt+Del chord) needs the power gate, not the HID gate. See ``act.py``
+    and the co-located README. Annotations are hints, never a security boundary.
   * ``KVM_PILOT_MCP_DRY_RUN=1`` builds every driver with ``dry_run=True``:
     destructive calls are logged and skipped, and results say so.
   * Drivers are built per call and closed afterwards — Redfish BMCs cap
     concurrent sessions device-side, so a leaked session locks operators out.
 
-EXPERIMENTAL: the core library is an untested alpha (never run on real
-hardware). Treat every result as unverified. See issue #7.
+Hardware validation is tracked per device+firmware+capability in the support
+matrix (the wiki Hardware-Compatibility page is the source of truth); most
+combos remain mock-only, so treat results on unlisted hardware as unverified.
 """
 
 from __future__ import annotations

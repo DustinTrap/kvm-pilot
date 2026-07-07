@@ -517,6 +517,8 @@ user feedback. **Not validated on real hardware** — see Notes.
   feedback are the explicit goals of this alpha. Reports welcome in the issue
   tracker.
 
+[Unreleased]: https://github.com/DustinTrap/kvm-pilot/compare/v0.1.0a8...HEAD
+[0.1.0a8]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a8
 [0.1.0a7]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a7
 [0.1.0a6]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a6
 [0.1.0a5]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a5

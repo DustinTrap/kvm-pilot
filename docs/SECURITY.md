@@ -58,10 +58,16 @@ What the design guarantees today:
   result causes no device-state change).
 - **`raw_text` is length-bounded** (the prompt caps the transcription) so a screen
   can't flood an agent's context.
-- **Over MCP, the destructive `power` tool is disabled unless the operator sets
-  `KVM_PILOT_MCP_ALLOW_POWER`** in the server environment — a screen-injected
-  agent cannot enable it, and the destructive *act* tools (type/key/mount) are not
-  exposed yet.
+- **Over MCP, every destructive tool is disabled until the operator opts its
+  effect class in** via the server's own environment — `power` behind
+  `KVM_PILOT_MCP_ALLOW_POWER`; the act tools `type_text`/`press_key`/
+  `send_shortcut`/`mouse` behind `KVM_PILOT_MCP_ALLOW_HID`;
+  `mount_iso`/`eject` behind `KVM_PILOT_MCP_ALLOW_MEDIA`; `ssh_exec` behind
+  `KVM_PILOT_MCP_ALLOW_SSH` — and each invocation additionally requires
+  approval (a human elicitation, or `confirm=true` under a standing policy).
+  A screen-injected agent cannot set server env vars, and a reboot chord
+  (Ctrl+Alt+Del) is classified by *effect*, so it needs the power gate even
+  over the HID transport.
 
 What you must still do: if you wire an agent to act on classifications, gate every
 destructive step behind human/policy approval — do not let free text from the

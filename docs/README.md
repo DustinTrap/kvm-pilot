@@ -15,6 +15,7 @@ on every push to `main` — edit the files here, never the wiki directly).
 ## Guides
 
 - [Architecture](architecture.md) — the driver-plugin design, capability protocols, and diagrams.
+- [CLI reference](cli.md) — every `kvm-pilot` subcommand: capability required, destructive gating, key flags.
 - [Configuration](configuration.md) — the config file, every `KVM_PILOT_*` env var, and precedence.
 - [Design decisions](decisions.md) — the "looks wrong but is intentional" record, newest first.
 - [Reflexes (RFC)](reflexes.md) — the post-GA edge-autonomy playbook runner: act locally on known steps, escalate surprises to the agent ([#117](https://github.com/DustinTrap/kvm-pilot/issues/117)).
