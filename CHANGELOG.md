@@ -6,6 +6,16 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **MCP `wait_for_state` tool** (#147 — the last #61 acceptance criterion):
+  block (bounded, 300 s server-side cap) until the screen reaches a named
+  boot/run phase, the MCP twin of CLI `watch`. Validates the phase token up
+  front, emits MCP progress per poll, returns the final `frame_ref` for a
+  follow-up `mouse` click, and returns a same-path `reached: false` result on
+  timeout. With no server-side vision key it fails fast pointing at
+  `classify_screen` polling instead of burning the timeout; cheap-gate phases
+  (power_off/no_signal/boot-progress) still wait keylessly.
+
 ## [0.1.0a9] — 2026-07-06
 
 Post-a8 sweep release: field-report fixes from the first Comet sessions, a

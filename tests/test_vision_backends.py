@@ -74,6 +74,19 @@ def test_default_max_tokens_bumped_to_1024():
     assert OpenAICompatBackend("http://x/v1", "m")._max_tokens == 1024
 
 
+# -- #147: credential visibility for server-side wait loops ----------------
+
+def test_anthropic_backend_credentialed_property(monkeypatch):
+    # The MCP server's wait_for_state pre-check reads this to fail fast instead
+    # of retrying a no-key VisionError until its deadline — including the env
+    # fallback the keyless-server deployment relies on.
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    assert AnthropicBackend().credentialed is False
+    assert AnthropicBackend(api_key="k").credentialed is True
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "env-k")
+    assert AnthropicBackend().credentialed is True
+
+
 # -- #50: vision-capable model resolution ---------------------------------
 
 def test_resolution_skips_non_vision_first_entry(monkeypatch):

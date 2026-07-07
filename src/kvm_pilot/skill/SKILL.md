@@ -46,6 +46,7 @@ remote before physical**, below).
 |---|---|---|
 | See the screen as a model-visible image | **MCP** `snapshot` | Returns a real image content block — no screenshot-file round-trip. CLI `snapshot` writes a file. The JSON payload carries `signal` (online/resolution/fps/format) and `unchanged_since_last_snapshot` — a byte-identical frame when the screen should have changed means stale/cached pixels: check `signal` + `logs` before trusting or acting on it. |
 | Classify boot/run phase | **MCP** `classify_screen` | Uses the server's vision backend if configured; **with no server key it falls back to caller-side** — hands you the screenshot + prompt to classify yourself (a `[json, image]` result). CLI: `classify` / `watch`. |
+| Wait for a boot/run phase | **MCP** `wait_for_state` or CLI `watch` | Bounded server-side wait (≤ 300 s per call — chain calls for long installs; the timeout result carries the last observed state). Success returns the final `frame_ref` for a follow-up `mouse` click. Phases the cheap gates can't resolve need server-side vision — with no server key it errors fast: poll `classify_screen` (caller-side) instead. |
 | Preflight audit (run first) | **MCP** `healthcheck` or CLI `healthcheck` | The intake gate — see below. |
 | Device info / host power state | **MCP** `info` / `power_state`, or CLI | Either works. |
 | List what the driver supports | **MCP** `capabilities` or CLI `capabilities` | Structural/offline — no network, no preflight. Use it to pick the right interface up front. |
@@ -54,7 +55,7 @@ remote before physical**, below).
 | Move / click the mouse (installers, BIOS, desktops) | **MCP** `mouse` | Absolute positioning; `percent` coords by default. A click must carry `observed_frame_ref` from a recent `snapshot` (refused if the host rebooted since). Needs `KVM_PILOT_MCP_ALLOW_HID`. |
 | See what media is already on the KVM | **MCP** `list_virtual_media` or CLI `media-list` | Read-only MSD inventory. **Check this before asking the user to download or upload an ISO** — the image may already be in storage from an earlier install; mount it instead of round-tripping gigabytes. |
 | Mount / eject install media | **MCP** `mount_iso` / `eject`, or CLI `mount` / `eject` | Virtual media (ISO path or URL). MCP needs `KVM_PILOT_MCP_ALLOW_MEDIA` + approval. |
-| firmware-check/update, events, watch | **CLI only** | The MCP server does not expose these. |
+| firmware-check/update, events | **CLI only** | The MCP server does not expose these. |
 | MSD mode switching | **Python library only** | Not in MCP or CLI. |
 | Change **host** power (on/off/cycle/reset) | **MCP `power`** (gated) or CLI `power` / `power-cycle` | Destructive — confirm each step. MCP `power` is operator-enabled + per-call approval. |
 | Reboot the **KVM appliance** / restart `kvmd` / inspect `/etc/kvmd` | **SSH to the appliance** | No kvm-pilot interface does this — out-of-band only. |
@@ -160,7 +161,8 @@ and cross-check signals:
 
 - **Parallel intake.** Gather `healthcheck` + `info` + `capabilities` + `logs`
   (+ `firmware-check`) at once rather than serially.
-- **Cross-signal during long waits.** While a vision `watch` waits for a boot
+- **Cross-signal during long waits.** While a vision wait (`wait_for_state` /
+  CLI `watch`) waits for a boot
   phase, tail `logs`/`events` alongside it, so a text signal can confirm or
   contradict the pixel read (the operator-side of #13's sensing hierarchy).
 - **Mix channels.** The in-session MCP image path and a CLI `events`/`logs`
@@ -290,8 +292,9 @@ destructive step with the user first unless they have explicitly said otherwise.
 ## CLI
 
 The CLI covers the **full surface** and is the only interface for
-`firmware-check`/`firmware-update`, `events`, `watch`, and `ssh-bootstrap`
-(see the interface matrix above — keyboard/mouse/media DO have MCP act tools
+`firmware-check`/`firmware-update`, `events`, and `ssh-bootstrap`
+(see the interface matrix above — `watch` now has an MCP twin,
+`wait_for_state`; keyboard/mouse/media DO have MCP act tools
 since 0.1.0a8). Use the MCP server for the visual loop (`snapshot`/`classify`)
 and the gated act/power tools inside an agent session; use the CLI for
 everything else and for one-off checks when no MCP host is in the loop.
