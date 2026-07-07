@@ -46,6 +46,8 @@ DEFAULT_DB_URL = (
 
 SEVERITIES = {"warning", "critical"}
 MOUSE_MODES = {"absolute", "relative", "none"}
+# Ordered lowest -> highest; a tuple so kvm_pilot.maturity can .index() it (#98).
+MATURITY_LEVELS = ("alpha", "beta", "rc", "ga")
 VMEDIA_FIDELITY = {"reliable", "reports-only", "none"}
 RISK_LEVELS = {"low", "medium", "high"}
 _DATE_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
@@ -199,6 +201,8 @@ def _validate_entry(e: Any) -> list[str]:
         errs.extend(f"known_bad[{j}]: {m}" for m in _validate_known_bad(bad))
     if "profile" in e:
         errs.extend(f"profile: {m}" for m in _validate_profile(e.get("profile")))
+    for j, v in enumerate(e.get("versions", []) or []):
+        errs.extend(f"versions[{j}]: {m}" for m in _validate_version_row(v))
     return errs
 
 
@@ -231,6 +235,35 @@ def _validate_profile(prof: Any) -> list[str]:
         errs.append("video must be non-empty when present")
     if "remote_update" in prof:
         errs.extend(f"remote_update: {m}" for m in _validate_remote_update(prof["remote_update"]))
+    return errs
+
+
+def _validate_version_row(v: Any) -> list[str]:
+    """A per-firmware-version row. ``maturity`` is DERIVED from the run ledger
+    by ``kvm_pilot.maturity`` (#98) — never hand-edit it; CI re-derives and
+    fails on drift."""
+    errs: list[str] = []
+    if not isinstance(v, dict):
+        return ["must be an object"]
+    if not str(v.get("version", "")).strip():
+        errs.append("version is required")
+    if "maturity" in v:
+        m = v["maturity"]
+        if not isinstance(m, dict):
+            return errs + ["maturity must be an object"]
+        if m.get("level") not in MATURITY_LEVELS:
+            errs.append(f"maturity.level must be one of {list(MATURITY_LEVELS)}")
+        caps = m.get("capabilities", {})
+        if not isinstance(caps, dict):
+            errs.append("maturity.capabilities must be an object")
+        else:
+            for name, level in caps.items():
+                if not str(name).strip():
+                    errs.append("maturity.capabilities keys must be non-empty")
+                if level not in MATURITY_LEVELS:
+                    errs.append(
+                        f"maturity.capabilities[{name!r}] must be one of {list(MATURITY_LEVELS)}"
+                    )
     return errs
 
 

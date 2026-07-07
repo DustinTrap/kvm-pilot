@@ -323,6 +323,19 @@ self-reports as `rpi/rpi4/v3`, so nothing in `/api/info` reveals the fork.
 `pikvm.py` re-exports the moved symbols for one release (the package is on
 PyPI); the public `from kvm_pilot import GLKVMDriver` path never changed.
 
+### Derived maturity lives in the shipped registry under schema v2, not behind #97's v3 (#98)
+The maturity levels `kvm_pilot.maturity` derives from the run ledger are written
+into the *bundled* `firmware_registry.json` as an **additive** optional
+`versions[]` key while `schema_version` stays 2 — deliberately not gated on
+#97's v3 restructure. Why: (a) deployed clients' hand-rolled validators ignore
+unknown entry keys, so a cache-refreshed registry bearing `versions[]` still
+validates on every released install; (b) the registry ships in the wheel, so
+#102's MCP/healthcheck consumers can read maturity via `load_registry()` with
+no access to the repo-only ledger; (c) blocking a pure function + CI drift gate
+on a breaking data migration it does not use would invert the dependency. When
+#97 lands v3 (known_bad into version rows, currency-reader migration,
+`additionalProperties` tightening) it ports these rows as-is.
+
 ## Orchestration — "Reflexes" edge-autonomy release (planned)
 
 These two records are **forward-looking**: the feature (an on-demand playbook

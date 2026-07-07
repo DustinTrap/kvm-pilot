@@ -20,7 +20,36 @@
       },
       "latest": "V1.9.1 release1",
       "source": "https://dl.gl-inet.com/kvm/rm1/stable",
-      "date": "2026-07-02"
+      "date": "2026-07-02",
+      "versions": [
+        {
+          "version": "V1.5.1 release2",
+          "maturity": {
+            "level": "alpha",
+            "capabilities": {
+              "firmware_update": "alpha",
+              "healthcheck": "beta",
+              "info": "beta",
+              "logs": "beta",
+              "power_state": "beta",
+              "snapshot": "beta"
+            }
+          }
+        },
+        {
+          "version": "V1.9.1 release1",
+          "maturity": {
+            "level": "beta",
+            "capabilities": {
+              "healthcheck": "beta",
+              "info": "beta",
+              "logs": "beta",
+              "power_state": "beta",
+              "snapshot": "beta"
+            }
+          }
+        }
+      ]
     }
   ]
 }
