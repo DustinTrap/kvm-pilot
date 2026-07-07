@@ -387,8 +387,10 @@ class PiKVMDriver(PowerMixin, CapabilityMixin):
         * ``streamer_idle`` — True when the on-demand encoder is producing no
           frames (``captured_fps==0`` and no JPEG-sink subscriber): a still may
           need the stream woken (#142).
-        * ``width``/``height``/``fps``/``format`` — capture geometry; ``None`` if
-          unreported (a JPEG path can't serve some formats/resolutions, #107).
+        * ``width``/``height``/``fps`` — capture geometry, or ``None`` when there
+          is no signal: ``resolution`` holds the *last-negotiated* mode and
+          ``captured_fps`` spins on no-signal, so both are stale/spurious then and
+          must not be read as current (#158). ``format`` — ``None`` if unreported.
         """
         state = self.get_streamer_state()
         source = self._streamer_source(state)
@@ -397,12 +399,17 @@ class PiKVMDriver(PowerMixin, CapabilityMixin):
         jpeg_sink = self._as_dict(self._as_dict(streamer.get("sinks")).get("jpeg"))
         res = self._as_dict(source.get("resolution"))
         fps = source.get("captured_fps", source.get("fps"))
+        hdmi_signal = hdmi.get("signal")
+        # V1.9.1 exposes source.real_resolution == "no_signal" when dark — more
+        # honest than the resolution dict (which keeps the last mode). Either
+        # negative signal means the geometry/fps below are stale/spurious (#158).
+        no_signal = hdmi_signal is False or source.get("real_resolution") == "no_signal"
         return {
             "online": source.get("online"),
-            "hdmi_signal": hdmi.get("signal"),
-            "width": res.get("width"),
-            "height": res.get("height"),
-            "fps": fps,
+            "hdmi_signal": hdmi_signal,
+            "width": None if no_signal else res.get("width"),
+            "height": None if no_signal else res.get("height"),
+            "fps": None if no_signal else fps,
             "format": source.get("format"),
             "streamer_idle": fps in (0, None) and jpeg_sink.get("has_clients") is False,
         }
@@ -424,7 +431,10 @@ class PiKVMDriver(PowerMixin, CapabilityMixin):
         hdmi = self._streamer_block(state).get("hdmi")
         if isinstance(hdmi, dict) and "signal" in hdmi:
             return bool(hdmi["signal"])  # authoritative on GL firmware
-        online = self._streamer_source(state).get("online")
+        source = self._streamer_source(state)
+        if source.get("real_resolution") == "no_signal":
+            return False  # V1.9.1 authoritative tell when the hdmi block is absent
+        online = source.get("online")
         return True if online is None else bool(online)
 
     # -- HID: keyboard ---------------------------------------------------

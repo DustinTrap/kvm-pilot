@@ -14,7 +14,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   prefers `hdmi.signal`; `video_signal_info()` exposes `hdmi_signal` +
   `streamer_idle`; the snapshot-503 diagnostic names the real cause (no signal /
   idle on-demand streamer / wedged encoder). Found and verified live on a bench
-  GL-RM1PE.
+  GL-RM1PE. Also nulls the **stale** resolution/fps `video_signal_info()`
+  returned when there is no signal (the `resolution` dict keeps the
+  last-negotiated mode; `captured_fps` spins on no-signal) — honoring V1.9.1's
+  authoritative `source.real_resolution == "no_signal"`; verified live on a
+  V1.9.1 unit (#158).
 
 ### Added
 - **Mouse click refuses a stale-by-age or non-server-issued `observed_frame_ref`**

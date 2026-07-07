@@ -24,25 +24,48 @@ def test_snapshot_rejects_non_jpeg_bytes(client, fake_http):
     assert "non-JPEG" in str(ei.value)
 
 
-def _gl_streamer(*, hdmi_signal, captured_fps=0, jpeg_clients=False, width=1920, height=1080):
+def _gl_streamer(*, hdmi_signal, captured_fps=0, jpeg_clients=False, width=1920,
+                 height=1080, real_resolution=None):
     """A GL-shaped /api/streamer body (nested under 'streamer', with the hdmi
     block that source.online alone can't substitute for — the #154 case)."""
+    source = {"online": True, "captured_fps": captured_fps,
+              "resolution": {"width": width, "height": height}}
+    if real_resolution is not None:
+        source["real_resolution"] = real_resolution
     return {"streamer": {
         "hdmi": {"signal": hdmi_signal},
         "sinks": {"jpeg": {"has_clients": jpeg_clients}},
-        "source": {"online": True, "captured_fps": captured_fps,
-                   "resolution": {"width": width, "height": height}},
+        "source": source,
     }}
 
 
-def test_video_signal_info_reads_hdmi_signal(client, fake_http):
+def test_video_signal_info_reads_hdmi_signal_and_nulls_stale_geometry(client, fake_http):
     # #154: source.online is True but there is no picture; the authoritative
-    # field is streamer.hdmi.signal, and it must surface in the readout.
-    fake_http.results["/api/streamer"] = _gl_streamer(hdmi_signal=False)
+    # field is streamer.hdmi.signal. #158: the resolution dict then holds the
+    # LAST-negotiated mode (stale), so geometry/fps must be nulled, not reported.
+    fake_http.results["/api/streamer"] = _gl_streamer(hdmi_signal=False, captured_fps=196,
+                                                      width=1600, height=900)
     info = client.video_signal_info()
     assert info["online"] is True and info["hdmi_signal"] is False
-    assert info["width"] == 1920 and info["height"] == 1080
-    assert info["streamer_idle"] is True
+    assert info["width"] is None and info["height"] is None and info["fps"] is None
+    assert info["streamer_idle"] is False  # 196fps spurious count -> not "idle"
+
+
+def test_video_signal_info_reports_geometry_when_signal_present(client, fake_http):
+    fake_http.results["/api/streamer"] = _gl_streamer(hdmi_signal=True, captured_fps=60,
+                                                      width=2560, height=1440)
+    info = client.video_signal_info()
+    assert info["hdmi_signal"] is True
+    assert info["width"] == 2560 and info["height"] == 1440 and info["fps"] == 60
+
+
+def test_video_signal_info_honors_real_resolution_no_signal(client, fake_http):
+    # #158: V1.9.1 exposes source.real_resolution == "no_signal" — authoritative
+    # even if hdmi.signal weren't there; the stale resolution dict is suppressed.
+    fake_http.results["/api/streamer"] = _gl_streamer(hdmi_signal=True, real_resolution="no_signal",
+                                                      width=1600, height=900)
+    info = client.video_signal_info()
+    assert info["width"] is None and info["height"] is None
 
 
 def test_has_video_signal_prefers_hdmi_over_source_online(fake_http):
@@ -53,7 +76,10 @@ def test_has_video_signal_prefers_hdmi_over_source_online(fake_http):
     assert c.has_video_signal() is False
     fake_http.results["/api/streamer"] = _gl_streamer(hdmi_signal=True, captured_fps=30)
     assert c.has_video_signal() is True
-    # Stock PiKVM (no hdmi block): fall back to source.online.
+    # No hdmi block but real_resolution says no_signal (#158) -> False.
+    fake_http.results["/api/streamer"] = {"source": {"online": True, "real_resolution": "no_signal"}}
+    assert c.has_video_signal() is False
+    # Stock PiKVM (no hdmi block, no real_resolution): fall back to source.online.
     fake_http.results["/api/streamer"] = {"source": {"online": True}}
     assert c.has_video_signal() is True
 
