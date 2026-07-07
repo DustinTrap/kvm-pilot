@@ -83,8 +83,17 @@ All of the per-field vars in the table above, plus:
 | `KVM_PILOT_VISION_MODEL` | Anthropic vision backend | Pin a vision model id; unset = auto-resolve the newest vision-capable model at runtime. |
 | `ANTHROPIC_API_KEY` | Anthropic vision backend | Required for `classify`/`watch` with the default backend (validated lazily, at first network use). |
 | `OPENAI_API_KEY` | local/OpenAI-compatible vision backend | Optional; most local servers ignore it (defaults to `not-needed`). |
-| `KVM_PILOT_MCP_ALLOW_POWER` | MCP server only | Gates the destructive `power` tool — see [`the MCP server README`](https://github.com/DustinTrap/kvm-pilot/blob/main/src/kvm_pilot/mcp/README.md). |
+| `KVM_PILOT_MCP_ALLOW_POWER` | MCP server only | Gates the destructive `power` tool and reboot chords (`ctrl_alt_delete`, Ctrl+Alt+Del via `send_shortcut`) — see [`the MCP server README`](https://github.com/DustinTrap/kvm-pilot/blob/main/src/kvm_pilot/mcp/README.md). |
+| `KVM_PILOT_MCP_ALLOW_HID` | MCP server only | Gates the HID act tools: `type_text`, `press_key`, `send_shortcut` (non-power chords), `mouse`. |
+| `KVM_PILOT_MCP_ALLOW_MEDIA` | MCP server only | Gates the virtual-media act tools: `mount_iso`, `eject`. |
+| `KVM_PILOT_MCP_ALLOW_SSH` | MCP server only | Gates `ssh_exec` (commands on the managed host's OS over the in-band SSH channel). |
+| `KVM_PILOT_MCP_PROFILES` | MCP server only | Fail-closed allowlist of config profiles the server may target (comma-separated). Unset = no allowlist (back-compat); set-but-empty = allow nothing. |
+| `KVM_PILOT_MCP_ELICIT` | MCP server only | Per-invocation human elicitation for act tools — on by default; set to `off` to fall back to requiring `confirm=true` under a standing policy. |
 | `KVM_PILOT_MCP_DRY_RUN` | MCP server only | Forces dry-run: destructive tool calls are logged, not sent — see [`the MCP server README`](https://github.com/DustinTrap/kvm-pilot/blob/main/src/kvm_pilot/mcp/README.md). |
+| `KVM_PILOT_VISION_BACKEND` | MCP server only | Vision backend for `classify_screen`: `anthropic` (default) or `local` (OpenAI-compatible). The CLI uses `--backend` instead. |
+| `KVM_PILOT_VISION_URL` | MCP server only | Endpoint of the `local` vision backend (e.g. `http://localhost:1234/v1`). The CLI uses `--vision-url` instead. |
+| `KVM_PILOT_SSH_HOST` / `KVM_PILOT_SSH_USER` / `KVM_PILOT_SSH_PORT` / `KVM_PILOT_SSH_KEY` | CLI, library, MCP server | The in-band SSH channel to the **managed host's OS** (not the KVM appliance) — powers `ssh-check`/`ssh-exec`/`ssh_reachable`/`ssh_exec` and the ssh-reachable healthcheck. Profile fields `ssh_host`/`ssh_user`/`ssh_port`/`ssh_key` are the config-file equivalents. |
+| `KVM_PILOT_SKIP_HEALTHCHECK` | CLI, MCP server | Skips the preflight healthcheck gate ahead of destructive commands. Not recommended outside CI. |
 | `KVM_PILOT_REDFISH_URL` | test suite only | Points the opt-in Redfish integration tests (`pytest tests/integration -m integration`) at an external emulator; not read by the library or CLI. |
 
 A ready-to-copy env template ships as

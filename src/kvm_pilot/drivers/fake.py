@@ -13,8 +13,9 @@ Destructive operations still route through ``SafetyPolicy.guard()`` using the
 same op identifiers as the real client, so dry-run and confirmation behave
 identically to a real device. That makes a ``FakeDriver`` a faithful stand-in
 for exercising the safety layer, the analyzer, and the CLI without touching
-hardware — which is exactly what an alpha that must *never run on real hardware*
-needs.
+hardware — tests and examples must never point destructive operations at real
+devices (see CLAUDE.md), and most device+capability combos in the support
+matrix are still unverified on hardware.
 """
 
 from __future__ import annotations
