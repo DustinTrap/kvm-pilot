@@ -7,6 +7,18 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **MCP act denials explain client-side approval failures** (#149): when an
+  elicitation approval is cancelled (`denied_reason: "approval cancel"` — a
+  new chat message dismisses the pending prompt), declined, or denied by the
+  approver (a mis-click does this), the act result now carries a
+  `remediation` field saying what happened — the approval died client-side,
+  the action never reached the device, read-only tools are unaffected — and
+  naming the operator's escape hatch: `KVM_PILOT_MCP_ELICIT=off` (the
+  `ALLOW_*` effect gate + per-call `confirm=true` become the standing
+  authorization; trade-off: no per-call human approval). Matching
+  troubleshooting entry in the MCP README and agent guidance in the bundled
+  skill. No gate is weakened; the repeat-failure hint and typed
+  cancelled-vs-denied outcomes remain open on #149/#72.
 - **Unattended Linux installs guide** (#129): `docs/unattended-install.md` —
   prefer text mode + SSH over driving a graphical installer via KVM HID, with
   the per-distro boot-arg matrix (Anaconda `inst.sshd`/`inst.text`, d-i

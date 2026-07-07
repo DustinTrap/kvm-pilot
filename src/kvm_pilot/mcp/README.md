@@ -66,6 +66,24 @@ come back as a normal result with `approved: false` and a reason — the agent c
 re-plan, never left hanging. Each result carries a stable `invocation_id` and both
 `transport` and `effect` (the signed/expiring audit receipt is a later step, #72).
 
+#### Troubleshooting: act tools denied with `approval cancel` / `denied by approver` (#149)
+
+**Symptom:** every act tool returns `approved: false` with `approver: null` and
+`denied_reason: "approval cancel"` (or `"denied by approver"` / `"approval
+decline"` after a mis-click or explicit no), while the read-only tools
+(`snapshot`, `info`, `logs`) keep working — it looks like the host is ignoring
+input. **Cause:** the client killed the approval prompt, not the device: chat
+clients tie a pending elicitation to the conversational turn, so sending a new
+chat message cancels the in-flight approval. The action never reached the
+target. The denial result names this in its `remediation` field. **Fix:** answer
+the approval prompt before sending another message — `approval cancel` is benign
+and retryable. If per-call approvals keep failing in that client, the operator
+can set `KVM_PILOT_MCP_ELICIT=off` in the server env and reconnect: the `ALLOW_*`
+effect gate plus per-call `confirm=true` then become the standing authorization.
+**Trade-off:** that disables per-call human approval — an operator decision, not
+a default. (A duration-scoped standing approval that would remove the
+per-keystroke re-prompt without giving up human sign-off is tracked in #72.)
+
 ### Which tools work with which driver
 
 | Driver kind | `info` | `healthcheck` | `capabilities` | `power_state` | `logs` | `snapshot` | `classify_screen` / `wait_for_state` | `power` |
@@ -161,7 +179,7 @@ kvm-pilot-mcp                    # start the stdio server (or: python -m kvm_pil
 | `KVM_PILOT_MCP_ALLOW_MEDIA` | **Operator-only** opt-in enabling virtual media (`mount_iso`, `eject`) |
 | `KVM_PILOT_MCP_ALLOW_SSH` | **Operator-only** opt-in that enables the `ssh_exec` tool (`1`/`true`/`yes`) |
 | `KVM_PILOT_MCP_PROFILES` | **Fail-closed** allowlist of profile names the server may target (comma-separated). Unset = no allowlist; set-but-empty = allow nothing; a target not on the list is refused (never a fall-back to all configured hosts) |
-| `KVM_PILOT_MCP_ELICIT` | Set to `off` to force the pre-authorized posture (env gate + `confirm=true`) even for elicitation-capable clients; otherwise a per-invocation human approval is requested when the client supports it |
+| `KVM_PILOT_MCP_ELICIT` | Set to `off` to force the pre-authorized posture (the `ALLOW_*` env gate + per-call `confirm=true` become the standing authorization) even for elicitation-capable clients; otherwise a per-invocation human approval is requested when the client supports it. The escape hatch when a chat client keeps cancelling pending approvals (`denied_reason: "approval cancel"`, see troubleshooting above) — trade-off: `off` disables per-call human approval, an operator decision |
 | `KVM_PILOT_SSH_HOST` / `KVM_PILOT_SSH_USER` / `KVM_PILOT_SSH_PORT` / `KVM_PILOT_SSH_KEY` | The **managed host's** SSH target (a different machine from the KVM) for `ssh_reachable` / `ssh_exec`; also settable per-profile as `ssh_host` etc. |
 | `KVM_PILOT_MCP_DRY_RUN` | Build every driver with `dry_run=True`; destructive calls are logged, never sent |
 | `KVM_PILOT_VISION_BACKEND` | Vision backend for `classify_screen` / `wait_for_state`: `anthropic` (default) or `local` (any OpenAI-compatible VLM: LM Studio, Ollama, vLLM) |
