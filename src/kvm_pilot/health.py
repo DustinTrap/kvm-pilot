@@ -791,7 +791,12 @@ def check_support_evidence(driver: Any) -> CheckResult | None:
         return None
     from .support_matrix import DESTRUCTIVE_CAPS, rollup
 
-    rows = rollup(vendor=vendor, product=product, firmware_version=version)
+    # exact_product: this check speaks for THIS device+firmware — the tool's
+    # substring match would otherwise report a sibling's evidence (e.g. an
+    # "RM1" ledger row for an "RM1PE" device) under this device's name.
+    rows = rollup(
+        vendor=vendor, product=product, firmware_version=version, exact_product=True
+    )
     if not rows:
         return CheckResult(
             id="support-evidence",

@@ -844,25 +844,74 @@ def test_keyless_waitable_phases_gate_on_target_not_current_frame():
     pikvm = server._keyless_waitable_phases(PiKVMDriver("h"))
     assert pikvm == {"power_off", "no_signal"}
     assert "desktop" not in pikvm
-    # BootProgress-capable drivers (BMCs, the fake) can report any phase token.
-    assert server._keyless_waitable_phases(FakeDriver(host="x")) >= set(ALL_PHASES)
+    # BootProgress-capable drivers (BMCs, the fake) can report any phase token
+    # EXCEPT unknown (_probe_boot_progress never emits it).
+    fake_waitable = server._keyless_waitable_phases(FakeDriver(host="x"))
+    assert fake_waitable == set(ALL_PHASES) - {"unknown"}
 
 
-def test_wait_for_state_keyless_refusal_names_the_waitable_set(monkeypatch):
-    """A keyless wait for a VLM-only phase fails fast with the typed pointer at
-    caller-side classify_screen polling — the wrapped refusal text, unit-level
-    (the MCP fake is BootProgress-capable, so end-to-end it can wait for
-    anything keylessly)."""
+class _StubContext:
+    """Minimal MCP Context for calling a tool in-process: no elicitation
+    capability, progress swallowed (a wait tool only needs report_progress,
+    which is best-effort)."""
+
+    class _Session:
+        def check_client_capability(self, _cap) -> bool:
+            return False
+
+    def __init__(self) -> None:
+        self.session = self._Session()
+
+    async def report_progress(self, *a, **k) -> None:
+        return None
+
+
+def _run_tool(coro):
+    return asyncio.run(asyncio.wait_for(coro, timeout=30))
+
+
+def test_wait_for_state_keyless_refuses_vlm_phase_end_to_end(config_file, monkeypatch):
+    """The production keyless gate (#147), driven through the real tool in-process:
+    an uncredentialed server + a driver whose cheap gates can't emit the target
+    phase must raise the typed refusal — NOT fall through and burn the timeout.
+    Kills the 'delete the gate block' mutation the subprocess fake can't (it is
+    BootProgress-capable, so end-to-end it can wait for any phase keylessly)."""
+    from mcp.server.fastmcp.exceptions import ToolError
+
+    import kvm_pilot.config as _cfg
     from kvm_pilot.mcp import server
+    from kvm_pilot.vision.anthropic import AnthropicBackend
+    monkeypatch.setattr(_cfg, "DEFAULT_CONFIG_PATH", config_file)
+    monkeypatch.setenv("KVM_PILOT_PROFILE", "fakebox")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("KVM_PILOT_MCP_DRY_RUN", "1")  # skip the preflight network path
+    # Force the uncredentialed backend and the real PiKVM/GLKVM keyless reality
+    # (only power_off/no_signal structurally observable).
+    monkeypatch.setattr(server, "_keyless_waitable_phases",
+                        lambda kvm: {server.PHASE_POWER_OFF, server.PHASE_NO_SIGNAL})
+    monkeypatch.setattr(server, "_vision_backend", lambda: AnthropicBackend(model="pinned"))
 
-    err = server._no_vision_error(
-        "desktop",
-        "no vision credentials configured; this driver's cheap gates can only "
-        "observe: no_signal, power_off",
-    )
-    msg = str(err)
+    with pytest.raises(ToolError) as ei:
+        _run_tool(server.wait_for_state(_StubContext(), phase="desktop", timeout=5))
+    msg = str(ei.value)
     assert "classify_screen" in msg and "caller-side" in msg
-    assert "power_off" in msg  # the agent is told what IS waitable keylessly
+
+
+def test_wait_for_state_keyless_reaches_cheap_phase_in_process(config_file, monkeypatch):
+    """The keyless gate ALLOWS a cheap-gate phase: an uncredentialed server still
+    waits for power_off on the (powered-off) fake, resolving it via the power
+    gate with no VLM call."""
+    import kvm_pilot.config as _cfg
+    from kvm_pilot.mcp import server
+    from kvm_pilot.vision.anthropic import AnthropicBackend
+    monkeypatch.setattr(_cfg, "DEFAULT_CONFIG_PATH", config_file)
+    monkeypatch.setenv("KVM_PILOT_PROFILE", "fakebox")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("KVM_PILOT_MCP_DRY_RUN", "1")
+    monkeypatch.setattr(server, "_vision_backend", lambda: AnthropicBackend(model="pinned"))
+
+    out = _run_tool(server.wait_for_state(_StubContext(), phase="power_off", timeout=5))
+    assert out["reached"] is True and out["phase"] == "power_off"
 
 
 def test_wait_timeout_clamped_to_cap_and_rejects_nonpositive():

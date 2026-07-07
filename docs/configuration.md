@@ -95,6 +95,7 @@ All of the per-field vars in the table above, plus:
 | `KVM_PILOT_SSH_HOST` / `KVM_PILOT_SSH_USER` / `KVM_PILOT_SSH_PORT` / `KVM_PILOT_SSH_KEY` | CLI, library, MCP server | The in-band SSH channel to the **managed host's OS** (not the KVM appliance) — powers `ssh-check`/`ssh-exec`/`ssh_reachable`/`ssh_exec` and the ssh-reachable healthcheck. Profile fields `ssh_host`/`ssh_user`/`ssh_port`/`ssh_key` are the config-file equivalents. |
 | `KVM_PILOT_SKIP_HEALTHCHECK` | CLI, MCP server | Skips the preflight healthcheck gate ahead of destructive commands. Not recommended outside CI. |
 | `KVM_PILOT_REDFISH_URL` | test suite only | Points the opt-in Redfish integration tests (`pytest tests/integration -m integration`) at an external emulator; not read by the library or CLI. |
+| `KVM_PILOT_TEST_LEDGER` | tests / advanced | Overrides the run-ledger source behind the `support_matrix` tool, the `capabilities` `live_evidence` annotation, and the `support-evidence` healthcheck (default: the copy bundled in the wheel). Used by the test suite; an operator may point it at an alternate ledger, but the "live evidence" it reports is only as trustworthy as that file. |
 
 A ready-to-copy env template ships as
 [`.env.example`](https://github.com/DustinTrap/kvm-pilot/blob/main/.env.example).
