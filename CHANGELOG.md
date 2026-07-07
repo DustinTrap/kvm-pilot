@@ -6,6 +6,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.0a10] — 2026-07-07
+
+Support-matrix subsystem (what's actually been proven on real hardware), a
+server-side screen-phase wait, and field-report fixes — all built and
+adversarially reviewed by a multi-agent workflow.
+
 ### Added
 - **MCP act denials explain client-side approval failures** (#149): when an
   elicitation approval is cancelled (`denied_reason: "approval cancel"` — a
@@ -53,6 +59,22 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   timeout. With no server-side vision key it fails fast pointing at
   `classify_screen` polling instead of burning the timeout; cheap-gate phases
   (power_off/no_signal/boot-progress) still wait keylessly.
+- **One-command dev emulator stack** (#21): `compose.yaml` + `Makefile`
+  (`make emulators` / `make integration` / `make emulators-down`) stand up the
+  Redfish reference emulator on loopback, and a new CI `emulator-stack` job
+  runs the integration tests through it so the dev stack can't drift from what
+  CI validates.
+
+### Fixed
+- **Support-matrix evidence now counts real-hardware runs only** — a synthetic
+  / emulator run no longer contributes a pass, a fail, or an "exercised" mark
+  to the `support_matrix` tool, the `capabilities` `live_evidence`, or the
+  `support-evidence` healthcheck (matching what `maturity` promotes on). The
+  healthcheck matches the exact device+firmware, so it can no longer report a
+  sibling model's evidence (an `RM1` row under an `RM1PE` device). Found by the
+  batch's adversarial review, along with a keyless `wait_for_state` gating gap,
+  a NaN-timeout hole, a CI-drift-gate crash on a malformed ledger date, and a
+  registry fold that dropped hand-authored version rows — all fixed with tests.
 
 ## [0.1.0a9] — 2026-07-06
 
@@ -619,7 +641,8 @@ user feedback. **Not validated on real hardware** — see Notes.
   feedback are the explicit goals of this alpha. Reports welcome in the issue
   tracker.
 
-[Unreleased]: https://github.com/DustinTrap/kvm-pilot/compare/v0.1.0a9...HEAD
+[Unreleased]: https://github.com/DustinTrap/kvm-pilot/compare/v0.1.0a10...HEAD
+[0.1.0a10]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a10
 [0.1.0a9]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a9
 [0.1.0a8]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a8
 [0.1.0a7]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a7
