@@ -76,6 +76,31 @@ def test_set_jiggler_toggles_state():  # #159 keep-awake
     assert ("set_jiggler", True) in d.actions
 
 
+def test_display_awake_enables_then_restores_off():  # #161 A1
+    d = FakeDriver()
+    assert d.jiggler_active is False
+    with d.display_awake():
+        assert d.jiggler_active is True   # held awake inside the block
+    assert d.jiggler_active is False      # restored to its prior (off) state
+
+
+def test_display_awake_leaves_already_on_jiggler_on():
+    d = FakeDriver()
+    d.set_jiggler(True)
+    with d.display_awake():
+        assert d.jiggler_active is True
+    assert d.jiggler_active is True       # was already on -> left on
+
+
+def test_display_awake_restores_even_on_exception():
+    d = FakeDriver()
+    with pytest.raises(ValueError):
+        with d.display_awake():
+            assert d.jiggler_active is True
+            raise ValueError("boom")
+    assert d.jiggler_active is False      # restored despite the exception
+
+
 def test_snapshot_roundtrips(tmp_path):
     d = FakeDriver(image=b"\xff\xd8custom")
     assert d.snapshot() == b"\xff\xd8custom"

@@ -22,7 +22,8 @@ import json
 import logging
 import ssl
 import time
-from collections.abc import Generator
+from collections.abc import Generator, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -481,6 +482,33 @@ class PiKVMDriver(PowerMixin, CapabilityMixin):
             if connected or time.monotonic() >= deadline:
                 return connected
             time.sleep(0.3)
+
+    @contextmanager
+    def display_awake(self) -> Iterator[None]:
+        """Hold the target display awake for the duration of a block (#161).
+
+        Enables kvmd's jiggler if it isn't already on, then restores the prior
+        state on exit (even on exception). Wrap a sustained vision/wait loop so the
+        display can't DPMS-sleep mid-session and blind the snapshot path — the real
+        root of the #126/#142 "snapshot fails though video works" reports.
+        Best-effort: if the jiggler can't be managed, it yields unchanged.
+        """
+        prior: bool | None = None
+        try:
+            try:
+                jig = self.get_hid_state().get("jiggler")
+                prior = bool(jig.get("active")) if isinstance(jig, dict) else None
+                if prior is False:
+                    self.set_jiggler(True)
+            except KVMPilotError:
+                prior = None  # can't manage the jiggler here; proceed without it
+            yield
+        finally:
+            if prior is False:  # we turned it on -> turn it back off
+                try:
+                    self.set_jiggler(False)
+                except KVMPilotError:
+                    pass
 
     def type_text(
         self, text: str, keymap: str = "en-us", slow: bool = False, delay: float = 0.0

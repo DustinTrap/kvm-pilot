@@ -91,6 +91,7 @@ All of the per-field vars in the table above, plus:
 | `KVM_PILOT_MCP_ALLOW_HID` | MCP server only | Gates the HID act tools: `type_text`, `press_key`, `send_shortcut` (non-power chords), `mouse`. |
 | `KVM_PILOT_MCP_ALLOW_MEDIA` | MCP server only | Gates the virtual-media act tools: `mount_iso`, `eject`. |
 | `KVM_PILOT_MCP_ALLOW_SSH` | MCP server only | Gates `ssh_exec` (commands on the managed host's OS over the in-band SSH channel). |
+| `KVM_PILOT_MCP_ALLOW_APPLIANCE` | MCP server only | Gates `appliance_reboot` (rebooting the KVM appliance itself over appliance-SSH to clear a wedged encoder). `appliance_status` is read-only and ungated. |
 | `KVM_PILOT_MCP_PROFILES` | MCP server only | Fail-closed allowlist of config profiles the server may target (comma-separated). Unset = no allowlist (back-compat); set-but-empty = allow nothing. |
 | `KVM_PILOT_MCP_ELICIT` | MCP server only | Per-invocation human elicitation for act tools — on by default; set to `off` to fall back to requiring `confirm=true` under a standing policy. |
 | `KVM_PILOT_MCP_FRAME_MAX_AGE` | MCP server only | Max age in seconds of the `snapshot` observation a `mouse` click may anchor to (default 60). Older or non-server-issued `observed_frame_ref`s are refused so a click can't land on a stale screen (#141). |

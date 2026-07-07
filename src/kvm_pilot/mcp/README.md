@@ -38,6 +38,8 @@ client/driver code stays stdlib-only; `mcp` is imported only in this subpackage.
 | `eject` | `destructiveHint` | Detach virtual media (inverse of `mount_iso`) — needs `KVM_PILOT_MCP_ALLOW_MEDIA` + approval |
 | `ssh_exec` | `destructiveHint` | Run a command on the managed host's OS over SSH — **disabled unless the operator opts in** (`KVM_PILOT_MCP_ALLOW_SSH`). `host=` overrides the target at runtime |
 | `ssh_discover` | `readOnlyHint` | Scan a CIDR for open SSH — **RISKY/opt-in** (active network scan; `confirm=true` required). Only to help find a target the user can't address, on networks they own |
+| `appliance_status` | `readOnlyHint` | Read-only diagnostics from the **KVM appliance's own OS** over appliance-SSH (load, D-state video threads). Note: load is ~10 even when idle on these units, so it is not a health signal — use `healthcheck`'s `encoder-wedge` finding |
+| `appliance_reboot` | `destructiveHint` | Reboot the **KVM appliance** (not the target) to clear a wedged encoder — **disabled unless the operator opts in** (`KVM_PILOT_MCP_ALLOW_APPLIANCE`) + `confirm=true`. Drops KVM control ~60s; target power untouched. Never automate it |
 
 Every tool result names the **host and driver it acted on**, and read-only
 tools always run with a deny-all confirm callback, so a bug in a read path can
@@ -178,6 +180,7 @@ kvm-pilot-mcp                    # start the stdio server (or: python -m kvm_pil
 | `KVM_PILOT_MCP_ALLOW_HID` | **Operator-only** opt-in enabling HID input (`type_text`, `press_key`, `mouse`, ordinary `send_shortcut`) |
 | `KVM_PILOT_MCP_ALLOW_MEDIA` | **Operator-only** opt-in enabling virtual media (`mount_iso`, `eject`) |
 | `KVM_PILOT_MCP_ALLOW_SSH` | **Operator-only** opt-in that enables the `ssh_exec` tool (`1`/`true`/`yes`) |
+| `KVM_PILOT_MCP_ALLOW_APPLIANCE` | **Operator-only** opt-in that enables `appliance_reboot` (rebooting the KVM appliance itself) (`1`/`true`/`yes`) |
 | `KVM_PILOT_MCP_PROFILES` | **Fail-closed** allowlist of profile names the server may target (comma-separated). Unset = no allowlist; set-but-empty = allow nothing; a target not on the list is refused (never a fall-back to all configured hosts) |
 | `KVM_PILOT_MCP_ELICIT` | Set to `off` to force the pre-authorized posture (the `ALLOW_*` env gate + per-call `confirm=true` become the standing authorization) even for elicitation-capable clients; otherwise a per-invocation human approval is requested when the client supports it. The escape hatch when a chat client keeps cancelling pending approvals (`denied_reason: "approval cancel"`, see troubleshooting above) — trade-off: `off` disables per-call human approval, an operator decision |
 | `KVM_PILOT_SSH_HOST` / `KVM_PILOT_SSH_USER` / `KVM_PILOT_SSH_PORT` / `KVM_PILOT_SSH_KEY` | The **managed host's** SSH target (a different machine from the KVM) for `ssh_reachable` / `ssh_exec`; also settable per-profile as `ssh_host` etc. |

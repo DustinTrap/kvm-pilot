@@ -21,7 +21,8 @@ matrix are still unverified on hardware.
 from __future__ import annotations
 
 import base64
-from collections.abc import Callable, Generator
+from collections.abc import Callable, Generator, Iterator
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Any
 
@@ -145,6 +146,18 @@ class FakeDriver(PowerMixin, CapabilityMixin):
         self.hid_connected = True
         self._record("recover_hid")
         return True
+
+    @contextmanager
+    def display_awake(self) -> Iterator[None]:
+        """Hold the display awake for a block (#161); restores prior jiggler state."""
+        prior = self.jiggler_active
+        if not prior:
+            self.set_jiggler(True)
+        try:
+            yield
+        finally:
+            if not prior:
+                self.set_jiggler(False)
 
     def type_text(self, text: str, **kw: Any) -> None:
         if self.safety.guard("hid.type_text", f"Type {len(text)} characters into {self.host}"):

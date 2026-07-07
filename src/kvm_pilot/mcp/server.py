@@ -47,7 +47,7 @@ import os
 import threading
 import time
 from collections.abc import Callable, Iterator
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from typing import TYPE_CHECKING, Literal, cast
 
 import anyio
@@ -557,8 +557,13 @@ async def wait_for_state(
                     pass
 
             start = time.monotonic()
+            # Hold the display awake across the wait so it can't DPMS-sleep and
+            # blind the poll loop (#161); drivers without a jiggler no-op via nullctx.
+            awake = getattr(kvm, "display_awake", nullcontext)
             try:
-                state = analyzer.wait_for_state(phase, timeout=timeout, hint=hint, on_poll=_note)
+                with awake():
+                    state = analyzer.wait_for_state(
+                        phase, timeout=timeout, hint=hint, on_poll=_note)
             except KVMTimeoutError as exc:
                 out = {
                     **_provenance(cfg), "reached": False, "waited_for": phase,
@@ -965,6 +970,62 @@ def ssh_exec(
     except CapabilityError as exc:
         raise ToolError(str(exc)) from exc
     return {**_provenance(cfg), **ch.ssh_exec(command)}
+
+
+@mcp.tool(annotations=_READ_ONLY)
+def appliance_status(profile: str | None = None) -> dict:
+    """Read-only diagnostics from the KVM APPLIANCE's own OS over SSH.
+
+    Targets the KVM appliance itself (its ``appliance_ssh`` channel), NOT the
+    managed target. Reports the 1-minute load and the RV1126 video-pipeline threads
+    in D-state. NOTE: on these units load sits at ~10 even when perfectly idle
+    (the driver parks those threads in D-state), so it is NOT a health signal on
+    its own — use the ``healthcheck`` ``encoder-wedge`` finding for the real tell.
+    """
+    cfg = resolve_host(profile or os.environ.get("KVM_PILOT_PROFILE"))
+    from kvm_pilot.ssh import ApplianceChannel
+
+    try:
+        ch = ApplianceChannel.from_config(cfg)
+    except CapabilityError as exc:
+        raise ToolError(str(exc)) from exc
+    return {
+        **_provenance(cfg),
+        "appliance": ch.target,
+        "loadavg_1m": ch.loadavg(),
+        "d_state_video_threads": ch.d_state_video_threads(),
+        "note": "loadavg is ~= the D-state thread count even when idle; not a health signal.",
+    }
+
+
+@mcp.tool(annotations=_DESTRUCTIVE)
+def appliance_reboot(confirm: bool = False, profile: str | None = None) -> dict:
+    """Reboot the KVM APPLIANCE (not the target) to clear a wedged encoder. DESTRUCTIVE.
+
+    Recovers the RV1126 encoder wedge (the only fix — the stuck threads are
+    unkillable kernel threads). Drops all KVM control for ~60s; the target's power
+    is untouched. Disabled unless the operator set ``KVM_PILOT_MCP_ALLOW_APPLIANCE``
+    in the server's own environment; ``confirm=true`` is required as a second factor.
+    There is no out-of-band power to the appliance, so use this deliberately, never
+    in an automated loop.
+    """
+    if not _env_flag("KVM_PILOT_MCP_ALLOW_APPLIANCE"):
+        raise ToolError(
+            "appliance reboot is disabled on this server. Only the human operator can "
+            "enable it, by setting the appliance-enable environment variable (documented "
+            "in the server's README.md) in the MCP server's own environment before "
+            "starting it. It cannot be enabled from within an agent session."
+        )
+    if not confirm:
+        raise ToolError("appliance_reboot was not confirmed")
+    cfg = resolve_host(profile or os.environ.get("KVM_PILOT_PROFILE"))
+    from kvm_pilot.ssh import ApplianceChannel
+
+    try:
+        ch = ApplianceChannel.from_config(cfg, confirm=allow_all, dry_run=_dry_run())
+    except CapabilityError as exc:
+        raise ToolError(str(exc)) from exc
+    return {**_provenance(cfg), **ch.reboot()}
 
 
 @mcp.tool(annotations=_READ_ONLY)

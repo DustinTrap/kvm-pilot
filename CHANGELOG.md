@@ -7,6 +7,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Auto keep-awake for sustained vision/wait sessions** (#161): a
+  `client.display_awake()` context manager wraps the CLI `watch` and MCP
+  `wait_for_state` poll loops so the target display can't DPMS-sleep and blind
+  the loop mid-wait; it restores the prior jiggler state on exit (even on error).
+- **MCP appliance tools** (#162): `appliance_status` (read-only load/D-state
+  diagnostics) and `appliance_reboot` (gated behind `KVM_PILOT_MCP_ALLOW_APPLIANCE`
+  + `confirm=true`) surface the appliance-SSH channel to agents.
 - **Appliance-SSH channel — an independent transport that can see/recover the
   encoder wedge REST can't** (#162): an opt-in, **key-based** SSH channel to the
   KVM appliance's OWN OS (root@`<kvm-ip>`, `appliance_ssh`/`appliance_ssh_key`),

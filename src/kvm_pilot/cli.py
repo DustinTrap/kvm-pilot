@@ -486,6 +486,8 @@ def cmd_classify(args) -> int:
 
 
 def cmd_watch(args) -> int:
+    from contextlib import nullcontext
+
     from .vision.base import ALL_PHASES
 
     if args.phase not in ALL_PHASES:
@@ -502,10 +504,14 @@ def cmd_watch(args) -> int:
     def _progress(state, elapsed):
         print(f"  [{elapsed:6.1f}s] {state.phase} ({state.confidence:.2f}): {state.description[:70]}")
 
+    # Hold the display awake for the whole wait so it can't DPMS-sleep mid-poll
+    # and blind the vision loop (#161); drivers without a jiggler no-op via nullctx.
+    awake = getattr(kvm, "display_awake", nullcontext)
     try:
-        final = analyzer.wait_for_state(
-            args.phase, timeout=args.timeout, hint=args.hint or "", on_poll=_progress
-        )
+        with awake():
+            final = analyzer.wait_for_state(
+                args.phase, timeout=args.timeout, hint=args.hint or "", on_poll=_progress
+            )
     except KVMPilotError as exc:
         print(f"watch failed: {exc}", file=sys.stderr)
         return 2
