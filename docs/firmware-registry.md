@@ -53,7 +53,7 @@ upgradeable one.)
           "recovery_required": true, "self_flash_blind": true, "notes": "…"
         }
       },
-      "versions": [                      // DERIVED from data/test_runs.jsonl (#98) — never hand-edit
+      "versions": [                      // DERIVED from src/kvm_pilot/data/test_runs.jsonl (#98) — never hand-edit
         {"version": "V1.9.1 release1",
          "maturity": {"level": "beta",
                       "capabilities": {"info": "beta", "snapshot": "beta"}}}
@@ -93,7 +93,9 @@ report adding `vmedia` once an ISO has actually been booted).
 Each entry's `versions[].maturity` records how proven a `(vendor, product,
 firmware_version)` combo is. The levels are **derived — never hand-set** — by
 `kvm_pilot.maturity` from **live** runs only (`source: "real"` in
-`data/test_runs.jsonl`); synthetic/mock runs never promote anything.
+`src/kvm_pilot/data/test_runs.jsonl` — shipped in the wheel since #102, so
+installed consumers can read the evidence offline); synthetic/mock runs never
+promote anything.
 
 | level | rule (per capability, from its live pass history) |
 |---|---|
@@ -106,7 +108,7 @@ The overall `level` is the `min()` of the exercised capabilities' levels.
 Regenerate with:
 
 ```bash
-python -m kvm_pilot.maturity --ledger data/test_runs.jsonl \
+python -m kvm_pilot.maturity --ledger src/kvm_pilot/data/test_runs.jsonl \
   --registry src/kvm_pilot/data/firmware_registry.json --write
 ```
 

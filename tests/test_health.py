@@ -558,3 +558,76 @@ def test_glkvm_firmware_identity(emu):
     fw = gl(emu).get_firmware_info()
     assert fw["vendor"] == "gl.inet"
     assert "product" in fw and "version" in fw
+
+
+# ---- support-evidence (run-ledger evidence + derived maturity, #102) ------ #
+
+
+def _ledger_run(caps, *, fw="V1.5.1 release2", source="real", run_id="r1"):
+    return {
+        "run_id": run_id, "source": source, "vendor": "gl.inet", "product": "RM1PE",
+        "firmware_version": fw, "driver": "glkvm", "utc_date": "2026-07-03T12:00:00Z",
+        "capabilities": [
+            {"capability": c, "passed": p, "outcome": o} for c, p, o in caps
+        ],
+    }
+
+
+def test_support_evidence_warns_on_recorded_live_failure(monkeypatch):
+    from kvm_pilot import health, support_matrix
+
+    monkeypatch.setattr(support_matrix, "load_ledger", lambda: [_ledger_run(
+        [("info", True, ""), ("firmware_update", False, "no flash: see #94/#95")]
+    )])
+    r = health.check_support_evidence(_fw(product="RM1PE", version="V1.5.1 release2"))
+    assert r.id == "support-evidence" and r.severity is Severity.WARNING
+    assert "live FAIL: firmware_update" in r.detail
+    assert "no flash: see #94/#95" in r.detail
+    # What was never exercised live is named, not silently omitted.
+    assert "never exercised live:" in r.detail and "virtual_media" in r.detail
+    # The failing/never-exercised destructive caps drive the remediation.
+    assert "firmware_update" in r.remediation and "power" in r.remediation
+
+
+def test_support_evidence_info_when_no_evidence(monkeypatch):
+    from kvm_pilot import health, support_matrix
+
+    monkeypatch.setattr(support_matrix, "load_ledger", lambda: [])
+    r = health.check_support_evidence(_fw(product="RM1PE", version="V1.5.1 release2"))
+    assert r.severity is Severity.INFO
+    assert "every capability on this exact device+firmware is unverified" in r.detail
+    assert "mock-only" in r.detail
+
+
+def test_support_evidence_info_when_all_recorded_passes(monkeypatch):
+    from kvm_pilot import health, support_matrix
+    from kvm_pilot.support_matrix import KNOWN_CAPS
+
+    monkeypatch.setattr(support_matrix, "load_ledger", lambda: [_ledger_run(
+        [(c, True, "") for c in KNOWN_CAPS]
+    )])
+    r = health.check_support_evidence(_fw(product="RM1PE", version="V1.5.1 release2"))
+    assert r.severity is Severity.INFO
+    assert "verified live: info (n=1)" in r.detail
+    assert r.remediation == ""  # nothing failed, nothing destructive unexercised
+
+
+def test_support_evidence_skips_without_firmware_identity():
+    from kvm_pilot import health
+
+    # FakeDriver has no get_firmware_info -> the check self-skips, like the
+    # other registry-backed checks.
+    assert health.check_support_evidence(FakeDriver()) is None
+
+
+def test_support_evidence_names_firmware_update_fail_on_bundled_ledger():
+    # NO monkeypatch: the ledger shipped in the package must yield the RM1PE
+    # V1.5.1 WARNING naming firmware_update — issue #102 acceptance criterion 2,
+    # pinned fully offline.
+    from kvm_pilot import health
+
+    r = health.check_support_evidence(_fw(product="RM1PE", version="V1.5.1 release2"))
+    assert r is not None and r.severity is Severity.WARNING
+    assert "firmware_update" in r.detail
+    # The derived maturity (#98) from the shipped registry rides along.
+    assert "maturity alpha" in r.detail

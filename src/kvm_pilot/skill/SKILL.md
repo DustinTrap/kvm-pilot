@@ -107,7 +107,9 @@ Prefer remote recovery, in this order, and present the options in this order:
 ### Enabling the MCP server
 
 **The tools it exposes**, all named `mcp__kvm-pilot__<tool>`:
-- Read-only: `info`, `power_state`, `capabilities`, `healthcheck`, `logs`,
+- Read-only: `info`, `power_state`, `capabilities`, `support_matrix` (what's
+  been exercised live per device+firmware, plus its derived maturity — check it
+  before trusting a capability that matters), `healthcheck`, `logs`,
   `snapshot` (model-visible JPEG), `classify_screen` (boot/run phase — uses a
   server-side vision backend if configured, else falls back to caller-side
   classification), `ssh_reachable`, `list_virtual_media` (MSD storage
@@ -286,8 +288,9 @@ clicks), GPIO, Redfish resets — are gated by `SafetyPolicy`
   returning `False` blocks the call with `SafetyError`.
 
 When acting on a user's real hardware, remember most device+capability combos
-are still unverified (check the Hardware-Compatibility matrix) — confirm each
-destructive step with the user first unless they have explicitly said otherwise.
+are still unverified (check the `support_matrix` MCP tool or the
+Hardware-Compatibility wiki page) — confirm each destructive step with the user
+first unless they have explicitly said otherwise.
 
 ## CLI
 

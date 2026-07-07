@@ -12,7 +12,7 @@ on:
     branches: [main]
     paths:
       - "docs/**"
-      - "data/test_runs.jsonl"
+      - "src/kvm_pilot/data/test_runs.jsonl"
       - "src/kvm_pilot/skill/SKILL.md"
       - "src/kvm_pilot/mcp/README.md"
       - ".github/scripts/build_wiki.py"
