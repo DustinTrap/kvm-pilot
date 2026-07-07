@@ -65,7 +65,7 @@ _IMAGE_EXTS = (".svg", ".png", ".jpg", ".jpeg", ".gif")
 # Generated (not mirrored from a doc) from the lossless run ledger. The ledger is
 # the git-friendly source of truth; we load it into an ephemeral in-memory SQLite
 # purely to aggregate, then render. See issue #96 / #105.
-HCL_LEDGER = ROOT / "data" / "test_runs.jsonl"
+HCL_LEDGER = ROOT / "src" / "kvm_pilot" / "data" / "test_runs.jsonl"
 HCL_PAGE = "Hardware-Compatibility.md"
 HCL_MIN_SAMPLES = 3  # a cell below this shows "insufficient data", not a verdict
 # capability -> is it destructive (safety-relevant verdict)? Column order preserved.

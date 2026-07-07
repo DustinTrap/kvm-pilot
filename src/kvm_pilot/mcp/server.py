@@ -9,9 +9,9 @@ stdlib-only, importing ``mcp`` only here).
 
 SAFETY MODEL (see the co-located README.md for the operator-facing version):
   * The read-only tools (``info``, ``healthcheck``, ``capabilities``,
-    ``power_state``, ``logs``, ``snapshot``, ``classify_screen``,
-    ``wait_for_state``, ``list_virtual_media``, ``ssh_reachable``,
-    ``ssh_discover``) run with a
+    ``support_matrix``, ``power_state``, ``logs``, ``snapshot``,
+    ``classify_screen``, ``wait_for_state``, ``list_virtual_media``,
+    ``ssh_reachable``, ``ssh_discover``) run with a
     deny-all confirm callback and carry a ``readOnlyHint`` tool annotation
     (``ssh_discover`` additionally requires ``confirm=true`` — an active
     network scan is read-only but not harmless).
@@ -251,11 +251,61 @@ def capabilities(profile: str | None = None) -> dict:
     Structural — makes no network call and runs no preflight; it answers "which
     tools/actions can this device serve?" so you can pick the right interface up
     front (a Redfish BMC has no video; a PiKVM has no BootProgress). Returned in
-    the capability enum's declaration order for stable output.
+    the capability enum's declaration order for stable output. ``live_evidence``
+    additionally names which device+firmware combos this driver has real-hardware
+    run evidence for — structural support is not live verification; call
+    ``support_matrix`` for per-combo evidence and ``healthcheck`` for this exact
+    device+firmware.
     """
     with _driver(profile, confirm=deny_all, preflight=False) as (cfg, kvm):
+        from kvm_pilot.support_matrix import rollup
+
         caps = kvm.capabilities()
-        return {**_provenance(cfg), "capabilities": [c.value for c in Capability if c in caps]}
+        exercised = rollup(driver=cfg.driver)
+        return {
+            **_provenance(cfg),
+            "capabilities": [c.value for c in Capability if c in caps],
+            "live_evidence": {
+                "combos": [
+                    f"{r['vendor']} {r['product']} {r['firmware_version']}" for r in exercised
+                ],
+                "note": (
+                    "structural capability != live-verified; call support_matrix for "
+                    "per-combo evidence and healthcheck for this device+firmware"
+                ),
+            },
+        }
+
+
+@mcp.tool(annotations=_READ_ONLY)
+def support_matrix(
+    vendor: str | None = None,
+    product: str | None = None,
+    firmware_version: str | None = None,
+) -> dict:
+    """What has actually been exercised on real hardware, per
+    device+firmware+capability (read-only, offline — no device call).
+
+    Aggregated from the test-run ledger shipped in the package (the same data
+    behind the wiki Hardware-Compatibility page), with each combo's derived
+    maturity level (#98) joined from the shipped firmware registry. This is
+    EVIDENCE, not a guarantee: a capability listed in ``never_exercised`` (or a
+    combo with no row at all) is unverified on that hardware — treat it as
+    mock-only/alpha maturity and confirm destructive steps with the user.
+    ``status`` is "fail" when every recorded live attempt failed (e.g. RM1PE
+    V1.5.1 firmware_update, #94/#95). Filters are case-insensitive; ``product``
+    matches as a substring.
+    """
+    from kvm_pilot.support_matrix import rollup
+
+    return {
+        "combos": rollup(vendor=vendor, product=product, firmware_version=firmware_version),
+        "note": (
+            "capabilities absent from a combo (or combos absent entirely) are "
+            "UNVERIFIED live; 'maturity' is the #98-derived level from the shipped "
+            "registry (null when the ledger backs no derived row)"
+        ),
+    }
 
 
 @mcp.tool(annotations=_READ_ONLY)

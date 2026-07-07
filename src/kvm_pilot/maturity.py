@@ -3,10 +3,10 @@ Support-matrix maturity: derive per-capability / overall levels from the run
 ledger (issue #98, part of #96).
 
 Maturity levels are **DERIVED, never hand-set**. The input is the append-only
-run ledger (``data/test_runs.jsonl`` in the repo); the output is the
-``versions[].maturity`` rows inside the shipped firmware registry
-(``src/kvm_pilot/data/firmware_registry.json``), so installed consumers (#102)
-read maturity from ``load_registry()`` without needing the repo-only ledger.
+run ledger (``src/kvm_pilot/data/test_runs.jsonl``, shipped in the wheel since
+#102); the output is the ``versions[].maturity`` rows inside the shipped
+firmware registry (``src/kvm_pilot/data/firmware_registry.json``), so installed
+consumers (#102) read maturity from ``load_registry()`` without re-deriving it.
 CI re-derives the levels and fails on drift, so a hand-edited level cannot
 survive a pull request.
 
@@ -74,7 +74,7 @@ GA_MIN_SPAN_DAYS = 14        # ... spanning >=14 days, zero failures in the wind
 
 # The command that regenerates the derived rows when drift is reported.
 REGEN_COMMAND = (
-    "python -m kvm_pilot.maturity --ledger data/test_runs.jsonl "
+    "python -m kvm_pilot.maturity --ledger src/kvm_pilot/data/test_runs.jsonl "
     "--registry src/kvm_pilot/data/firmware_registry.json --write"
 )
 
@@ -311,7 +311,9 @@ def main(argv: list[str] | None = None) -> int:
     p = argparse.ArgumentParser(
         description="Derive support-matrix maturity from the run ledger (#98)."
     )
-    p.add_argument("--ledger", required=True, help="JSONL run ledger (data/test_runs.jsonl)")
+    p.add_argument(
+        "--ledger", required=True, help="JSONL run ledger (src/kvm_pilot/data/test_runs.jsonl)"
+    )
     p.add_argument("--registry", required=True, help="firmware registry JSON to check/update")
     mode = p.add_mutually_exclusive_group(required=True)
     mode.add_argument("--check", action="store_true", help="fail (exit 5) on drift")

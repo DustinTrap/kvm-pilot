@@ -28,7 +28,7 @@ from kvm_pilot.maturity import (
 )
 
 _ROOT = Path(__file__).resolve().parents[1]
-_LEDGER = _ROOT / "data" / "test_runs.jsonl"
+_LEDGER = _ROOT / "src" / "kvm_pilot" / "data" / "test_runs.jsonl"
 _REGISTRY = _ROOT / "src" / "kvm_pilot" / "data" / "firmware_registry.json"
 
 

@@ -330,11 +330,30 @@ into the *bundled* `firmware_registry.json` as an **additive** optional
 #97's v3 restructure. Why: (a) deployed clients' hand-rolled validators ignore
 unknown entry keys, so a cache-refreshed registry bearing `versions[]` still
 validates on every released install; (b) the registry ships in the wheel, so
-#102's MCP/healthcheck consumers can read maturity via `load_registry()` with
-no access to the repo-only ledger; (c) blocking a pure function + CI drift gate
-on a breaking data migration it does not use would invert the dependency. When
-#97 lands v3 (known_bad into version rows, currency-reader migration,
-`additionalProperties` tightening) it ports these rows as-is.
+#102's MCP/healthcheck consumers can read maturity via `load_registry()`
+without re-deriving from the ledger (which was repo-only when this was decided;
+#102 later shipped the ledger in the wheel too); (c) blocking a pure function +
+CI drift gate on a breaking data migration it does not use would invert the
+dependency. When #97 lands v3 (known_bad into version rows, currency-reader
+migration, `additionalProperties` tightening) it ports these rows as-is.
+
+### support_matrix reports ledger evidence; maturity stays #98's derived output (#102)
+The MCP `support_matrix` tool and the `support-evidence` healthcheck finding
+report the raw run-ledger evidence — per-combo pass/fail counts, last outcomes,
+a `never_exercised` list — and *join* the maturity level from the shipped
+registry's #98-derived `versions[].maturity` rows. `kvm_pilot.support_matrix`
+never computes a level itself: hand-approximating (or re-deriving) levels in a
+second place would create exactly the derived-vs-committed drift #98's CI check
+exists to prevent. Two consequences: the ledger moved into the wheel
+(`src/kvm_pilot/data/test_runs.jsonl`) so the evidence answers offline from
+`pip install kvm-pilot` (batteries-included rule), and the `capabilities` tool's
+`live_evidence` annotation is **driver-granular**, not device+firmware — that
+tool is contractually offline (no network call, tested as such), so it cannot
+know which firmware it is facing; the device+firmware-granular annotation lives
+in `healthcheck` (`support-evidence`), which already probes firmware identity.
+The finding is INFO by default (no live evidence is the near-universal state
+for an alpha and must not inflate reports or feed the destructive gate) and
+WARNING only when a recorded live attempt actually failed.
 
 ## Orchestration — "Reflexes" edge-autonomy release (planned)
 

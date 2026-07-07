@@ -27,6 +27,7 @@ from mcp.client.stdio import stdio_client  # noqa: E402
 EXPECTED_TOOLS = {
     "info",
     "capabilities",
+    "support_matrix",
     "power_state",
     "logs",
     "snapshot",
@@ -859,3 +860,53 @@ def test_video_tools_error_cleanly_on_capability_less_driver(config_file):
     text = result.content[0].text
     assert "redfish" in text
     assert "video" in text
+
+
+# -- support_matrix (#102): offline evidence + derived maturity ---------------
+
+
+def test_support_matrix_tool_returns_rm1pe_seed_offline(config_file):
+    """Over real stdio, the tool answers from the ledger bundled in the package:
+    the RM1PE combos including the seeded V1.5.1 firmware_update live FAIL
+    (#94/#95) and each combo's #98-derived maturity — no device is contacted
+    (the tool takes no profile; the config's only non-fake host is bmc.invalid,
+    which would error loudly if touched)."""
+
+    async def interact(session):
+        return await session.call_tool("support_matrix", {"product": "RM1PE"})
+
+    parsed = result_json(run_session(server_env(config_file), interact))
+    by_fw = {c["firmware_version"]: c for c in parsed["combos"]}
+    assert {"V1.5.1 release2", "V1.9.1 release1"} <= set(by_fw)
+    old = by_fw["V1.5.1 release2"]
+    assert old["vendor"] == "gl.inet" and old["product"] == "RM1PE"
+    assert old["capabilities"]["firmware_update"]["status"] == "fail"
+    # The derived maturity (#98) is joined from the shipped registry.
+    assert old["maturity"]["capabilities"]["firmware_update"] == "alpha"
+    assert by_fw["V1.9.1 release1"]["maturity"]["level"] == "beta"
+    assert "UNVERIFIED" in parsed["note"]
+
+
+def test_support_matrix_unknown_combo_returns_empty_cleanly(config_file):
+    # An unknown device is an honest empty answer, not an error.
+    async def interact(session):
+        return await session.call_tool("support_matrix", {"vendor": "nonexistent"})
+
+    result = run_session(server_env(config_file), interact)
+    assert result.isError is False
+    assert result_json(result)["combos"] == []
+
+
+def test_capabilities_reports_live_evidence(config_file):
+    """capabilities now carries driver-granular live_evidence (#102): which
+    device+firmware combos this driver has ledger evidence for — [] for the
+    fake driver — plus a pointer at support_matrix/healthcheck. Existing keys
+    (driver, capability order) are unchanged."""
+
+    async def interact(session):
+        return await session.call_tool("capabilities", {})
+
+    parsed = result_json(run_session(server_env(config_file), interact))
+    assert parsed["driver"] == "fake"
+    assert parsed["live_evidence"]["combos"] == []
+    assert "support_matrix" in parsed["live_evidence"]["note"]

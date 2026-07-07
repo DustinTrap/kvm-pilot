@@ -18,8 +18,9 @@ client/driver code stays stdlib-only; `mcp` is imported only in this subpackage.
 | Tool | Annotations | What it does |
 |---|---|---|
 | `info` | `readOnlyHint` | Device / system info |
-| `healthcheck` | `readOnlyHint` | **Preflight audit** of the KVM itself — readiness/recovery, security posture, firmware currency (issue #80). Run this **first, on connecting to any device**, before trusting it for real work; a `CRITICAL` (e.g. no out-of-band recovery path) should gate any subsequent destructive op |
-| `capabilities` | `readOnlyHint` | Which capabilities the driver supports — **structural/offline** (no network, no preflight). Answers "which tools/actions can this device serve?" so you can pick the right interface up front |
+| `healthcheck` | `readOnlyHint` | **Preflight audit** of the KVM itself — readiness/recovery, security posture, firmware currency (issue #80). Run this **first, on connecting to any device**, before trusting it for real work; a `CRITICAL` (e.g. no out-of-band recovery path) should gate any subsequent destructive op. Includes a `support-evidence` finding naming what has (and has NOT) been live-verified on this exact device+firmware (#102) |
+| `capabilities` | `readOnlyHint` | Which capabilities the driver supports — **structural/offline** (no network, no preflight). Answers "which tools/actions can this device serve?" so you can pick the right interface up front. Also carries `live_evidence`: which device+firmware combos this driver has real-hardware run evidence for |
+| `support_matrix` | `readOnlyHint` | What has actually been **exercised on real hardware**, per device+firmware+capability — aggregated from the run ledger shipped in the package (the wiki Hardware-Compatibility data) plus each combo's derived maturity level (#98), offline, no device call. Anything in `never_exercised` (or a combo with no row) is unverified: confirm destructive steps with the user |
 | `power_state` | `readOnlyHint` | `powered_on` plus ATX detail where the driver has it |
 | `logs` | `readOnlyHint` | Device/host event log as text (`seek` = seconds of lookback). The text diagnostic when video/streamer/power looks wrong — it names a fault (e.g. a stuck encoder behind a `snapshot` 503) a screenshot can't |
 | `snapshot` | `readOnlyHint` | Current screen, returned as a real JPEG **image** content block the model can see. The JSON payload carries the live `signal` state (online/resolution/fps/format) and `unchanged_since_last_snapshot` — byte-identical pixels across an expected screen change are stale/cached: verify via `signal` + `logs` before acting (#141/#143) |
@@ -75,6 +76,8 @@ re-plan, never left hanging. Each result carries a stable `invocation_id` and bo
 
 A tool the active driver cannot serve returns a clean MCP tool error naming
 the driver kind and the missing capability (it never `AttributeError`s).
+`support_matrix` takes no profile and contacts no device — it works identically
+for every driver.
 
 ### What this server does *not* expose — use another interface
 

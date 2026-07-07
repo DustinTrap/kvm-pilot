@@ -41,6 +41,8 @@ def _isolated_health_cache(tmp_path, monkeypatch):
     # ~/.cache copy (loader falls back to the bundled registry).
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path / "cache"))
     monkeypatch.delenv("KVM_PILOT_FIRMWARE_DB", raising=False)
+    # ... and the run-ledger override, so evidence tests read the bundled copy.
+    monkeypatch.delenv("KVM_PILOT_TEST_LEDGER", raising=False)
     from kvm_pilot.health import reset_session_audit
 
     reset_session_audit()

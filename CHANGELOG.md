@@ -7,13 +7,25 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **MCP `support_matrix` tool + `support-evidence` healthcheck finding**
+  (#102, part of #96): a read-only, offline lookup of what has actually been
+  exercised on real hardware, per `(vendor, product, firmware_version)` ×
+  capability — pass/fail counts, last outcomes, a `never_exercised` list, and
+  the #98-derived maturity level joined from the shipped registry. The
+  `capabilities` tool now carries a driver-granular `live_evidence`
+  annotation, and `healthcheck` gains a `support-evidence` finding naming what
+  has (and has NOT) been live-verified on the exact device+firmware (WARNING
+  when a recorded live attempt failed, e.g. RM1PE V1.5.1 `firmware_update`,
+  #94/#95). The run ledger now ships in the wheel
+  (`src/kvm_pilot/data/test_runs.jsonl`, moved from `data/`), so the evidence
+  travels with `pip install kvm-pilot`.
 - **Support-matrix maturity, derived from the run ledger** (#98, part of #96):
   `kvm_pilot.maturity` computes per-capability and overall levels
   (alpha/beta/rc/ga) for every `(vendor, product, firmware_version)` combo
-  from live runs in `data/test_runs.jsonl` and folds them into the shipped
-  registry's new additive `versions[].maturity` rows (schema stays v2).
-  Levels are derived, never hand-set — a CI test re-derives them from the
-  ledger and fails on drift.
+  from live runs in `src/kvm_pilot/data/test_runs.jsonl` and folds them into
+  the shipped registry's new additive `versions[].maturity` rows (schema
+  stays v2). Levels are derived, never hand-set — a CI test re-derives them
+  from the ledger and fails on drift.
 - **MCP `wait_for_state` tool** (#147 — the last #61 acceptance criterion):
   block (bounded, 300 s server-side cap) until the screen reaches a named
   boot/run phase, the MCP twin of CLI `watch`. Validates the phase token up

@@ -752,6 +752,89 @@ def check_capability_profile(driver: Any) -> CheckResult | None:
     )
 
 
+def check_support_evidence(driver: Any) -> CheckResult | None:
+    """Report what has (and has NOT) been exercised live on this exact
+    device+firmware, from the run ledger shipped in the package (#102, part of
+    #96, evidence source #105).
+
+    Evidence, never hand-set levels: the raw pass/fail counts come from
+    ``support_matrix.rollup``, and the maturity label riding along is #98's
+    *derived* level joined from the shipped registry — this check computes no
+    level itself (that would recreate the drift #98's CI gate prevents). INFO
+    by default: "no live evidence" is the near-universal state for an alpha
+    and must not inflate reports or feed the destructive gate (same rationale
+    as ssh-reachable). WARNING only when a recorded live attempt actually
+    FAILED on this firmware (e.g. RM1PE V1.5.1 firmware_update, #94/#95).
+    """
+    fn = getattr(driver, "get_firmware_info", None)
+    if fn is None:
+        return None
+    try:
+        fw = fn()
+    except KVMPilotError:
+        return None
+    vendor = (fw.get("vendor") or "").strip()
+    product = fw.get("product") or ""
+    version = fw.get("version") or ""
+    if not (vendor and product and version):
+        return None
+    from .support_matrix import DESTRUCTIVE_CAPS, rollup
+
+    rows = rollup(vendor=vendor, product=product, firmware_version=version)
+    if not rows:
+        return CheckResult(
+            id="support-evidence",
+            pillar=Pillar.READINESS,
+            severity=Severity.INFO,
+            title="Live-test evidence",
+            detail=(
+                f"No live test runs recorded for {product} {version} — every "
+                "capability on this exact device+firmware is unverified "
+                "(mock-only maturity)."
+            ),
+            remediation=(
+                "Treat results as unverified; see the support_matrix MCP tool / "
+                "the wiki Hardware-Compatibility page for exercised combos."
+            ),
+        )
+    row = rows[0]
+    caps = row["capabilities"]
+    passing = [c for c, s in caps.items() if not s["fails"]]
+    failing = [c for c, s in caps.items() if s["fails"]]
+    parts: list[str] = []
+    if passing:
+        parts.append(
+            "verified live: " + ", ".join(f"{c} (n={caps[c]['passes']})" for c in passing)
+        )
+    if failing:
+        parts.append(
+            "live FAIL: "
+            + ", ".join(
+                f"{c} ({caps[c]['passes']}/{caps[c]['passes'] + caps[c]['fails']} — "
+                f"{caps[c]['last_outcome']})"
+                for c in failing
+            )
+        )
+    if row["never_exercised"]:
+        parts.append("never exercised live: " + ", ".join(row["never_exercised"]))
+    maturity = row.get("maturity")
+    label = f" (maturity {maturity['level']}, derived #98)" if maturity else ""
+    unproven = [c for c in failing + row["never_exercised"] if c in DESTRUCTIVE_CAPS]
+    return CheckResult(
+        id="support-evidence",
+        pillar=Pillar.READINESS,
+        severity=Severity.WARNING if failing else Severity.INFO,
+        title="Live-test evidence",
+        detail=f"Live evidence for {product} {version}{label}: " + "; ".join(parts) + ".",
+        remediation=(
+            f"Do not rely on {', '.join(unproven)} on this firmware without "
+            "operator confirmation."
+            if unproven
+            else ""
+        ),
+    )
+
+
 # The registry — each check self-guards, so the same list serves every driver.
 CHECKS: list[Check] = [
     check_api_reachable,
@@ -767,6 +850,7 @@ CHECKS: list[Check] = [
     check_firmware_quirks,
     check_firmware_currency,
     check_capability_profile,
+    check_support_evidence,
 ]
 
 
