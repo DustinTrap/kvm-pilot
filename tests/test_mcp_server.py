@@ -584,7 +584,9 @@ def test_logs_tool_returns_text_with_provenance(config_file):
 
 def test_list_virtual_media_inventories_msd_storage(config_file):
     """Read-only MSD inventory (#127): lets an agent find an ISO already on the
-    device instead of asking the user to download/upload it again."""
+    device instead of asking the user to download/upload it again. Also forwards
+    the driver's host-visible gadget name as ``host_visible_as`` (#78) so the
+    agent knows which boot-menu entry proves the media is really presented."""
 
     async def interact(session):
         return await session.call_tool("list_virtual_media", {})
@@ -594,6 +596,7 @@ def test_list_virtual_media_inventories_msd_storage(config_file):
     parsed = result_json(result)
     assert parsed["host"] == "fakebox.local"
     assert "online" in parsed["msd"] and "storage" in parsed["msd"]
+    assert parsed["host_visible_as"] == "Fake Optical Drive"
 
 
 def test_snapshot_returns_a_real_image(config_file):

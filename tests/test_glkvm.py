@@ -11,6 +11,7 @@ from emulator import EmulatorServer
 from kvm_pilot import GLKVMDriver
 from kvm_pilot.client import PiKVMDriver
 from kvm_pilot.drivers.base import Capability
+from kvm_pilot.drivers.pikvm import BliKVMDriver
 from kvm_pilot.errors import ApiDisabledError, SafetyError
 from kvm_pilot.safety import deny_all
 
@@ -89,6 +90,23 @@ def test_observed_atx_power_quirk_matches_its_firmware():
     assert by_id["atx-power-state-always-off"].source == "observed"
     other = {q.id for q in GLKVMDriver("h").known_quirks(firmware="9.99")}
     assert "atx-power-state-always-off" not in other
+
+
+# -- host-visible virtual-media device name (#78) ---------------------------
+
+
+def test_glkvm_declares_host_visible_vmedia_name():
+    # Observed on a real GL-RM1PE (#78): the Dell T7610 F12 boot menu listed
+    # "UEFI: Glinet Optical Drive 1.00" exactly when /api/msd flipped
+    # online=true. A substring (the "1.00" USB revision may vary), not a regex.
+    assert GLKVMDriver("h").virtual_media_host_pattern == "Glinet Optical Drive"
+
+
+def test_vmedia_host_name_unset_for_unobserved_brands():
+    # The #78 table rows for stock PiKVM and BliKVM stay blank until real
+    # hardware fills them — never invent unobserved device data.
+    assert PiKVMDriver("h").virtual_media_host_pattern is None
+    assert BliKVMDriver("h").virtual_media_host_pattern is None
 
 
 # -- GL product firmware version (what the UI shows: /api/upgrade/version) --

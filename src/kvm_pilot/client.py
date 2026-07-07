@@ -87,6 +87,13 @@ class PiKVMDriver(PowerMixin, CapabilityMixin):
     # Vendor identity for the firmware registry; subclasses override (GL/BliKVM).
     _vendor: str = "pikvm"
 
+    # Host-visible virtual-media device name (#78): substring of the device name
+    # the TARGET host shows (e.g. in its one-time boot menu) when this brand's
+    # MSD gadget is truly presented. A positive readiness signal — a bare generic
+    # "CD/DVD Drive" entry without it means the medium is not really inserted.
+    # None until observed on real hardware for a brand; do not invent values.
+    virtual_media_host_pattern: str | None = None
+
     # ATX power ops don't block on the state change, so hard_cycle (from
     # PowerMixin) settles between the off and on. Overridable per call.
     _hard_cycle_off_delay: float = 5.0
