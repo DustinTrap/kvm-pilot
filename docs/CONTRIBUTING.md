@@ -25,9 +25,11 @@ All of these are installed by the `[dev]` extra above; run `pip-audit` inside
 the project venv so it scans the same environment CI does.
 
 CI runs the lint/type/test trio on Python 3.11, 3.12, 3.13, and 3.14, **plus** a
-`security` job (`bandit` + `pip-audit`) and a `redfish-integration` job that
+`security` job (`bandit` + `pip-audit`), a `redfish-integration` job that
 drives the Redfish CLI path end-to-end against the DMTF-conformant sushy-tools
-emulator. PRs should keep them all green. If your change touches the Redfish
+emulator, and an `emulator-stack` job that brings up `compose.yaml` via
+`make emulators` and runs the same integration tests through it. PRs should
+keep them all green. If your change touches the Redfish
 driver or CLI dispatch, run what CI runs:
 `pip install "sushy-tools==2.2.0" && pytest tests/integration -m integration`
 (without `sushy-emulator` on PATH those tests silently skip).
@@ -61,6 +63,49 @@ with no device. See `tests/conftest.py` for the fakes. For end-to-end transport
 coverage, `tests/test_emulator.py` drives the real `KVMClient` against a
 pure-stdlib fake kvmd (`tests/emulator.py`) on `127.0.0.1` — no Docker, runs on
 macOS and Linux.
+
+### Emulator stack (`make emulators`)
+
+With Docker installed, `make emulators` (or `docker compose up --wait`) stands
+up the local emulator stack from the root `compose.yaml` (#21):
+
+| Service   | Emulator                          | Endpoint                          | Credentials |
+|-----------|-----------------------------------|-----------------------------------|-------------|
+| `redfish` | sushy-tools `2.2.0` (`--fake`)    | `http://127.0.0.1:8000/redfish/v1/` | Basic auth accepted but not checked |
+
+Point the CLI at it:
+
+```bash
+kvm-pilot --driver redfish --host 127.0.0.1 --port 8000 --scheme http \
+  --redfish-auth basic --user admin --passwd password info
+```
+
+`make integration` runs `tests/integration` against the running stack (it sets
+`KVM_PILOT_REDFISH_URL=http://127.0.0.1:8000`, the first source the integration
+conftest checks). `make emulators-down` stops the stack, `make emulators-logs`
+follows it. The stack publishes on loopback only — an emulator answering to
+fake credentials must never listen on the LAN — and the port is fixed at 8000;
+if that collides with something local, edit `compose.yaml`.
+
+**kvmd-testenv** (Linux only): `make kvmd-testenv` clones
+[pikvm/kvmd](https://github.com/pikvm/kvmd) into `.kvmd-testenv/` and delegates
+to upstream's own `make run`, which serves the real kvmd API on
+`http://127.0.0.1:8080` (https on 4430), credentials `admin`/`admin`. Run
+`healthcheck` as first contact (the intake gate), then e.g.:
+
+```bash
+kvm-pilot --driver pikvm --host 127.0.0.1 --port 8080 --scheme http \
+  --user admin --passwd admin info
+```
+
+Prerequisites are hard: upstream's recipe runs a privileged container,
+`sudo modprobe`s the `gpio_mockup` kernel module, and passes through a V4L2
+`/dev/video0` (a webcam, or `v4l2loopback-dkms`) — it exits early without
+them, so this target cannot run on macOS or in a stock CI runner. It is not a
+compose service for the same reason. Automated tests against it are tracked in
+#16.
+
+**ipmi_sim** is absent from the stack until #62 lands an IPMI driver.
 
 ## Recommended Claude skills
 

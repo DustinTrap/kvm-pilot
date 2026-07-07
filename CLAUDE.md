@@ -104,10 +104,16 @@ python3 -m venv .venv && .venv/bin/pip install -e ".[dev,totp,ws]"
 .venv/bin/mypy src/kvm_pilot
 .venv/bin/pytest
 ```
+`make emulators` starts the local emulator stack (Redfish reference on
+127.0.0.1:8000) and `make integration` runs tests/integration against it;
+`make kvmd-testenv` (Linux only) runs the genuine kvmd daemon. Details:
+docs/CONTRIBUTING.md.
+
 CI (`.github/workflows/ci.yml`) runs all three on Python 3.11/3.12/3.13/3.14
-(with a 75% coverage gate), plus a security job (bandit + pip-audit) and an
-opt-in sushy-tools Redfish integration job — keep them green. See
-docs/CONTRIBUTING.md for the full pre-PR checklist.
+(with a 75% coverage gate), plus a security job (bandit + pip-audit), an
+opt-in sushy-tools Redfish integration job, and an `emulator-stack` job that
+stands up `compose.yaml` and runs the integration tests through it — keep them
+green. See docs/CONTRIBUTING.md for the full pre-PR checklist.
 
 ## Safety in tests & dev
 Never point destructive operations at real hardware from tests or examples. The

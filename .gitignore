@@ -31,6 +31,9 @@ config.toml
 .idea/
 .DS_Store
 
+# Dev emulator stack (make kvmd-testenv clone)
+.kvmd-testenv/
+
 # Captured screenshots from runs
 *.jpg
 *.jpeg

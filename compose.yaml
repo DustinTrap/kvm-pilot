@@ -1,0 +1,24 @@
+# Local emulator stack for hardware-free development (#21).
+#   make emulators   (or: docker compose up --wait)
+# Legs intentionally absent:
+#   - kvmd-testenv: upstream's recipe needs host devices (gpio_mockup, /dev/video0)
+#     and source bind-mounts -> not self-containable in compose; use `make kvmd-testenv`.
+#   - ipmi_sim: no IPMI driver exists yet (#62); joins here when it lands.
+services:
+  redfish:
+    # Same emulator + version the CI redfish-integration job pip-installs
+    # (sushy-tools==2.2.0), so the compose leg and pip leg cannot drift.
+    build:
+      context: .
+      dockerfile_inline: |
+        FROM python:3.12-slim
+        RUN pip install --no-cache-dir "sushy-tools==2.2.0"
+        CMD ["sushy-emulator", "--fake", "-i", "0.0.0.0", "-p", "8000"]
+    ports:
+      - "127.0.0.1:8000:8000"   # loopback only — fake creds must not listen on LAN
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/redfish/v1/', timeout=2)"]
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 5s
