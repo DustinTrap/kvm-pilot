@@ -31,6 +31,7 @@ import hashlib
 import json
 import os
 import threading
+import time
 import uuid
 from dataclasses import dataclass
 from typing import Any
@@ -370,9 +371,40 @@ def bumps_generation(effect: EffectClass) -> bool:
     return effect in _GENERATION_BUMPING
 
 
+# When each frame_ref was minted (monotonic seconds) — the #141 content-age
+# guard. Generation only bumps on media/power effects, so a frame_ref stays
+# "valid" while the screen changes on its own (boot progresses, installer
+# advances, a placeholder frame persists); an agent could carry a minutes-old
+# observation into a click. This lets the mouse tool refuse a stale-by-age ref
+# and any ref this server didn't issue. In-memory; cleared on restart (which,
+# with the generation reset, conservatively invalidates prior observations).
+_FRAME_MINTED: dict[str, float] = {}
+_FRAME_MAX_TRACKED = 512
+
+
 def frame_ref(host: str, image: bytes) -> str:
-    """An observation token ``host:generation:shorthash`` for a captured frame."""
-    return f"{host}:{generation(host)}:{hashlib.sha256(image).hexdigest()[:16]}"
+    """An observation token ``host:generation:shorthash`` for a captured frame.
+
+    Minting stamps the frame's capture time (#141) so a later click can be
+    refused if the observation is stale. An identical image re-mints the same
+    ref and refreshes its timestamp — a genuinely-current static screen stays
+    fresh; the "should have changed" case is caught separately by ``note_frame``.
+    """
+    ref = f"{host}:{generation(host)}:{hashlib.sha256(image).hexdigest()[:16]}"
+    with _gen_lock:
+        _FRAME_MINTED[ref] = time.monotonic()
+        if len(_FRAME_MINTED) > _FRAME_MAX_TRACKED:  # bound growth: drop the oldest half
+            cutoff = sorted(_FRAME_MINTED.values())[len(_FRAME_MINTED) // 2]
+            for k in [k for k, v in _FRAME_MINTED.items() if v < cutoff]:
+                del _FRAME_MINTED[k]
+    return ref
+
+
+def frame_age(ref: str) -> float | None:
+    """Seconds since ``ref`` was minted by this server, or None if it never was."""
+    with _gen_lock:
+        minted = _FRAME_MINTED.get(ref)
+    return None if minted is None else max(0.0, time.monotonic() - minted)
 
 
 # Last content hash returned per host — the #141 staleness tell: a byte-identical

@@ -89,6 +89,7 @@ All of the per-field vars in the table above, plus:
 | `KVM_PILOT_MCP_ALLOW_SSH` | MCP server only | Gates `ssh_exec` (commands on the managed host's OS over the in-band SSH channel). |
 | `KVM_PILOT_MCP_PROFILES` | MCP server only | Fail-closed allowlist of config profiles the server may target (comma-separated). Unset = no allowlist (back-compat); set-but-empty = allow nothing. |
 | `KVM_PILOT_MCP_ELICIT` | MCP server only | Per-invocation human elicitation for act tools — on by default; set to `off` to fall back to requiring `confirm=true` under a standing policy. |
+| `KVM_PILOT_MCP_FRAME_MAX_AGE` | MCP server only | Max age in seconds of the `snapshot` observation a `mouse` click may anchor to (default 60). Older or non-server-issued `observed_frame_ref`s are refused so a click can't land on a stale screen (#141). |
 | `KVM_PILOT_MCP_DRY_RUN` | MCP server only | Forces dry-run: destructive tool calls are logged, not sent — see [`the MCP server README`](https://github.com/DustinTrap/kvm-pilot/blob/main/src/kvm_pilot/mcp/README.md). |
 | `KVM_PILOT_VISION_BACKEND` | MCP server only | Vision backend for `classify_screen`: `anthropic` (default) or `local` (OpenAI-compatible). The CLI uses `--backend` instead. |
 | `KVM_PILOT_VISION_URL` | MCP server only | Endpoint of the `local` vision backend (e.g. `http://localhost:1234/v1`). The CLI uses `--vision-url` instead. |

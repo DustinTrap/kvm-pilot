@@ -425,6 +425,38 @@ def test_mouse_click_malformed_ref_refused(config_file):
     assert "valid frame reference" in parsed["denied_reason"]
 
 
+def test_mouse_frame_age_guard_refuses_stale_and_unknown_refs():
+    """#141: generation only bumps on power/media, so a frame can go stale while
+    the screen changes on its own. The mouse guard refuses an observation older
+    than the bound, and any ref this server never issued (fabricated / pre-restart)."""
+    import time
+
+    from kvm_pilot.mcp import act, server
+
+    host = "frameage-test-host"  # unique so no other test's generation bump leaks in
+    # A fresh, server-minted ref for the current generation passes every check.
+    ref = act.frame_ref(host, b"\xff\xd8\xff-a-frame")
+    assert server._mouse_stale(host, ref) is None
+    # Age it past the bound -> refused as stale-by-age (generation still matches).
+    with act._gen_lock:
+        act._FRAME_MINTED[ref] = time.monotonic() - (server._MOUSE_FRAME_MAX_AGE + 30)
+    stale = server._mouse_stale(host, ref)
+    assert stale and "old" in stale
+    # A well-formed ref with the right generation that this server never minted.
+    unknown = f"{host}:{act.generation(host)}:deadbeefdeadbeef"
+    unknown_reason = server._mouse_stale(host, unknown)
+    assert unknown_reason and "not issued by this server" in unknown_reason
+
+
+def test_mouse_frame_max_age_env_override(monkeypatch):
+    monkeypatch.setenv("KVM_PILOT_MCP_FRAME_MAX_AGE", "5")
+    from kvm_pilot.mcp import server
+
+    assert server._mouse_frame_max_age() == 5.0
+    monkeypatch.setenv("KVM_PILOT_MCP_FRAME_MAX_AGE", "nonsense")
+    assert server._mouse_frame_max_age() == 60.0  # bad value -> safe default
+
+
 # -- media tools (#61) -------------------------------------------------------
 
 

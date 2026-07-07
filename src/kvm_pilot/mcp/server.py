@@ -725,8 +725,26 @@ async def ctrl_alt_delete(
     )
 
 
+def _mouse_frame_max_age() -> float:
+    """Max age (s) of the observation a mouse click may anchor to (#141).
+
+    Env-overridable (``KVM_PILOT_MCP_FRAME_MAX_AGE``); a generous default so a
+    look-then-click stays fluid, tight enough that a minutes-old frame is refused.
+    """
+    raw = os.environ.get("KVM_PILOT_MCP_FRAME_MAX_AGE", "").strip()
+    try:
+        val = float(raw)
+        return val if val > 0 else 60.0
+    except ValueError:
+        return 60.0
+
+
+_MOUSE_FRAME_MAX_AGE = _mouse_frame_max_age()
+
+
 def _mouse_stale(host: str, observed_frame_ref: str | None) -> str | None:
-    """A denial reason if the observation is missing or from a stale generation, else None."""
+    """A denial reason if the observation is missing, malformed, from a stale
+    generation, or stale by age (#141), else None."""
     if not observed_frame_ref:
         return "a mouse click requires observed_frame_ref from a prior snapshot"
     obs_gen = act.frame_ref_generation(observed_frame_ref)
@@ -736,6 +754,22 @@ def _mouse_stale(host: str, observed_frame_ref: str | None) -> str | None:
         return (
             "frame was observed before a power/media state change on this host; "
             "re-snapshot and retry so the click can't land on a stale screen"
+        )
+    # Content-age guard (#141): generation only bumps on power/media, so a frame
+    # can go stale while the screen changes on its own. Refuse an observation
+    # older than the bound, or one this server never issued (fabricated, or from
+    # before a restart) — the agent must click against a fresh, real snapshot.
+    age = act.frame_age(observed_frame_ref)
+    if age is None:
+        return (
+            "observed_frame_ref was not issued by this server (fabricated, or the "
+            "server restarted since) — take a fresh snapshot and use its frame_ref"
+        )
+    if age > _MOUSE_FRAME_MAX_AGE:
+        return (
+            f"observed_frame_ref is {age:.0f}s old (limit {_MOUSE_FRAME_MAX_AGE:.0f}s) — "
+            "the screen may have changed since you looked; re-snapshot and retry so "
+            "the click can't land on a stale screen"
         )
     return None
 
@@ -771,10 +805,12 @@ async def mouse(
     """Move the mouse (and optionally click) on the host. DESTRUCTIVE (HID input).
 
     Absolute positioning depends on current screen state, so a **click** must carry
-    the ``observed_frame_ref`` it was planned against (from a prior ``snapshot``). If
-    the host has since rebooted or swapped media (its frame *generation* changed) the
-    call is refused so the click can't land on a stale screen — re-``snapshot`` and
-    retry. A move-only call (``button`` omitted) needs no ref.
+    the ``observed_frame_ref`` it was planned against (from a prior ``snapshot``). It
+    is refused if the host rebooted or swapped media since (frame *generation*
+    changed), if the observation is older than ``KVM_PILOT_MCP_FRAME_MAX_AGE`` (60s
+    default — the screen may have changed on its own, #141), or if the ref wasn't
+    issued by this server — so the click can't land on a stale screen. Re-``snapshot``
+    and retry. A move-only call (``button`` omitted) needs no ref.
 
     ``coord_space``: ``percent`` (0.0-1.0, default — robust to a resolution change),
     ``pixel`` (screen pixels; needs a driver that reports resolution), or ``raw``
