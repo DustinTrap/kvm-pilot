@@ -16,17 +16,21 @@ _COMPOSE = (_ROOT / "compose.yaml").read_text()
 _MAKEFILE = (_ROOT / "Makefile").read_text()
 _CI = (_ROOT / ".github" / "workflows" / "ci.yml").read_text()
 
-_SUSHY_PIN = re.compile(r"sushy-tools==([\d.]+)")
+# Match the version only where it is actually INSTALLED (a `pip install ...`
+# line), not anywhere it is mentioned — a stale doc/comment version must not be
+# what the pins are compared on.
+_SUSHY_INSTALL = re.compile(r'pip install[^\n]*?"?sushy-tools==([\d.]+)')
 
 
 def test_compose_pins_same_sushy_version_as_ci():
-    compose_pin = _SUSHY_PIN.search(_COMPOSE)
-    ci_pin = _SUSHY_PIN.search(_CI)
-    assert compose_pin, "compose.yaml must pin sushy-tools==X.Y.Z"
-    assert ci_pin, "ci.yml must pin sushy-tools==X.Y.Z"
-    assert compose_pin.group(1) == ci_pin.group(1), (
+    compose_pins = _SUSHY_INSTALL.findall(_COMPOSE)
+    ci_pins = _SUSHY_INSTALL.findall(_CI)
+    assert compose_pins, "compose.yaml must `pip install sushy-tools==X.Y.Z`"
+    assert ci_pins, "ci.yml must `pip install sushy-tools==X.Y.Z`"
+    # Every install site (both files) must agree on one version.
+    assert set(compose_pins) | set(ci_pins) == {compose_pins[0]}, (
         "the compose Redfish leg and the CI pip leg must install the same "
-        f"sushy-tools version (compose={compose_pin.group(1)}, ci={ci_pin.group(1)})"
+        f"sushy-tools version (compose={compose_pins}, ci={ci_pins})"
     )
 
 
@@ -44,7 +48,14 @@ def test_makefile_integration_target_points_at_compose_port():
 
 def test_compose_publishes_loopback_only():
     # An emulator that answers to fake credentials must never listen on the LAN.
-    mappings = re.findall(r'-\s*"([^"]+:\d+:\d+)"', _COMPOSE)
+    # Match every `ports:` short-syntax entry — quoted or not, two-part
+    # ("8000:8000", which binds ALL interfaces) or three-part
+    # ("127.0.0.1:8000:8000") — so a LAN-exposing mapping can't slip past.
+    mappings = re.findall(
+        r'^\s*-\s*"?((?:[\w.]+:)?\d+:\d+)"?\s*(?:#.*)?$', _COMPOSE, re.MULTILINE
+    )
     assert mappings, "compose.yaml declares no port mappings"
+    # Loopback-only means an explicit 127.0.0.1: host-IP prefix; a bare
+    # "host:container" (no IP) publishes on 0.0.0.0.
     non_loopback = [m for m in mappings if not m.startswith("127.0.0.1:")]
     assert not non_loopback, f"port mappings must bind 127.0.0.1 only: {non_loopback}"

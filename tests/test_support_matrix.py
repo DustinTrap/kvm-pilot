@@ -30,6 +30,9 @@ def _run(run_id: str, caps: list[tuple[str, bool]], *, vendor: str = "acme",
 def test_rollup_groups_per_device_firmware_capability():
     records = [
         _run("r1", [("info", True), ("snapshot", True), ("firmware_update", False)]),
+        # A SYNTHETIC run on the same combo — it must NOT change any per-capability
+        # evidence (this is live-hardware evidence). It flips snapshot to a fail
+        # and adds an info pass; both must be ignored.
         _run("r2", [("info", True), ("snapshot", False)], utc="2026-07-04T09:00:00Z",
              source="synthetic"),
         _run("r3", [("info", True)], fw="V2.0"),  # second combo: same device, new firmware
@@ -39,16 +42,19 @@ def test_rollup_groups_per_device_firmware_capability():
         ("acme", "KVM1", "V1.0"), ("acme", "KVM1", "V2.0"),
     ]
     v1 = rows[0]
-    assert v1["runs"] == 2 and v1["real_runs"] == 1 and v1["synthetic_runs"] == 1
+    # runs is the LIVE count; the synthetic run shows only as context.
+    assert v1["runs"] == 1 and v1["real_runs"] == 1 and v1["synthetic_runs"] == 1
     assert v1["drivers"] == ["glkvm"]
-    assert v1["last_run_utc"] == "2026-07-04T09:00:00Z"
+    # last_run_utc is the last LIVE run — the later synthetic run does not move it.
+    assert v1["last_run_utc"] == "2026-07-03T12:00:00Z"
     caps = v1["capabilities"]
     assert caps["info"] == {
-        "passes": 2, "fails": 0, "destructive": False, "status": "pass",
-        "last_utc": "2026-07-04T09:00:00Z", "last_outcome": "",
+        "passes": 1, "fails": 0, "destructive": False, "status": "pass",
+        "last_utc": "2026-07-03T12:00:00Z", "last_outcome": "",
     }
-    assert caps["snapshot"]["status"] == "mixed"          # 1 pass + 1 fail
-    assert caps["firmware_update"]["status"] == "fail"    # every attempt failed
+    assert caps["snapshot"]["status"] == "pass"           # the synthetic fail is ignored
+    assert caps["snapshot"]["fails"] == 0
+    assert caps["firmware_update"]["status"] == "fail"    # every live attempt failed
     assert caps["firmware_update"]["destructive"] is True
     assert caps["snapshot"]["destructive"] is False
     # never_exercised preserves KNOWN_CAPS order.
@@ -58,6 +64,26 @@ def test_rollup_groups_per_device_firmware_capability():
     # An unregistered combo has no derived maturity row (#98) to join.
     assert v1["maturity"] is None
     assert set(DESTRUCTIVE_CAPS) == {"virtual_media", "power", "firmware_update"}
+
+
+def test_rollup_omits_synthetic_only_combos():
+    # A combo that was only ever run synthetically has no live evidence, so it
+    # produces no row at all (the healthcheck then reports "unverified").
+    rows = rollup([_run("s1", [("info", True)], source="synthetic")])
+    assert rows == []
+
+
+def test_rollup_exact_product_does_not_match_a_sibling():
+    # The healthcheck path (exact_product=True) must not let an "RM1PE" device
+    # pick up an "RM1" ledger row via the default bidirectional substring.
+    records = [
+        _run("a", [("info", True)], vendor="gl.inet", product="RM1"),
+        _run("b", [("power", True)], vendor="gl.inet", product="RM1PE"),
+    ]
+    loose = rollup(records, vendor="gl.inet", product="RM1PE")
+    assert {r["product"] for r in loose} == {"RM1", "RM1PE"}      # substring pulls both
+    exact = rollup(records, vendor="gl.inet", product="RM1PE", exact_product=True)
+    assert [r["product"] for r in exact] == ["RM1PE"]            # only THIS device
 
 
 def test_rollup_dedupes_run_id():

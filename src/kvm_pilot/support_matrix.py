@@ -12,6 +12,12 @@ this same ledger and folded into the shipped firmware registry — this module
 never derives levels itself (that is #98's job, guarded by a CI drift check);
 it only joins the committed result in.
 
+**Only real-hardware runs count as evidence** (``source == "real"``), matching
+what ``kvm_pilot.maturity`` promotes on: a synthetic/emulator run exercises the
+code path but proves nothing about the device, so it never contributes a pass,
+a fail, or an "exercised" mark. Combos that were only ever run synthetically
+produce no row at all. Run counts still report the synthetic total for context.
+
 Evidence is not a guarantee: a capability in ``never_exercised`` (or a combo
 with no row at all) is unverified on that hardware — treat it as mock-only
 maturity. Stdlib-only, offline: it never contacts a device.
@@ -89,21 +95,29 @@ def rollup(
     product: str | None = None,
     firmware_version: str | None = None,
     driver: str | None = None,
+    exact_product: bool = False,
 ) -> list[dict[str, Any]]:
-    """Aggregate ledger records into per-combo evidence rows (JSON-safe).
+    """Aggregate ledger records into per-combo *live* evidence rows (JSON-safe).
 
     Dedupes on ``run_id`` (first wins — the same contract as the wiki page's
     ``INSERT OR IGNORE`` ingestion). Filters: ``vendor``/``firmware_version``
     exact case-insensitive; ``product`` case-insensitive substring in either
-    direction (so ``RM1`` finds ``RM1PE`` and a messy device board string finds
-    its registry-style short name); ``driver`` exact.
+    direction by default (so ``RM1`` finds ``RM1PE`` and a messy device board
+    string finds its registry-style short name) — pass ``exact_product=True``
+    for an exact match (the healthcheck wants THIS device, not a substring
+    sibling); ``driver`` exact.
+
+    **Per-capability evidence counts real-hardware runs only** (``source ==
+    "real"``): a synthetic run never contributes a pass, a fail, or an
+    "exercised" mark. A combo with no real runs produces no row.
 
     Each row:  ``vendor``/``product``/``firmware_version``, the ``drivers``
-    that produced runs, run counts (``runs``/``real_runs``/``synthetic_runs``),
-    ``last_run_utc``, per-capability ``{passes, fails, status, destructive,
-    last_utc, last_outcome}``, ``never_exercised`` (``KNOWN_CAPS`` order), and
-    ``maturity`` — the #98-derived levels from the shipped registry (``None``
-    when the registry has no derived row for the combo).
+    that produced live runs, run counts (``runs``/``real_runs``/
+    ``synthetic_runs`` — ``runs`` is the real count; ``synthetic_runs`` is
+    context only), ``last_run_utc``, per-capability ``{passes, fails, status,
+    destructive, last_utc, last_outcome}``, ``never_exercised`` (``KNOWN_CAPS``
+    order), and ``maturity`` — the #98-derived levels from the shipped registry
+    (``None`` when the registry has no derived row for the combo).
     """
     if records is None:
         records = load_ledger()
@@ -125,7 +139,10 @@ def rollup(
             continue
         if product is not None:
             have, want = p.lower(), product.strip().lower()
-            if want not in have and have not in want:
+            if exact_product:
+                if have != want:
+                    continue
+            elif want not in have and have not in want:
                 continue
         if firmware_version is not None and fw.lower() != firmware_version.strip().lower():
             continue
@@ -138,8 +155,11 @@ def rollup(
     for key in sorted(groups):
         v, p, fw = key
         recs = groups[key]
+        real_recs = [r for r in recs if r.get("source") == "real"]
+        if not real_recs:
+            continue  # no live evidence for this combo -> no row (see docstring)
         caps: dict[str, dict[str, Any]] = {}
-        for rec in recs:
+        for rec in real_recs:
             when = str(rec.get("utc_date", ""))
             for c in rec.get("capabilities", []) or []:
                 name = str(c.get("capability", "")).strip()
@@ -157,16 +177,15 @@ def rollup(
             cap["status"] = (
                 "pass" if not cap["fails"] else "fail" if not cap["passes"] else "mixed"
             )
-        real = sum(1 for r in recs if r.get("source") == "real")
         rows.append({
             "vendor": v,
             "product": p,
             "firmware_version": fw,
-            "drivers": sorted({str(r["driver"]) for r in recs if r.get("driver")}),
-            "runs": len(recs),
-            "real_runs": real,
-            "synthetic_runs": len(recs) - real,
-            "last_run_utc": max(str(r.get("utc_date", "")) for r in recs),
+            "drivers": sorted({str(r["driver"]) for r in real_recs if r.get("driver")}),
+            "runs": len(real_recs),
+            "real_runs": len(real_recs),
+            "synthetic_runs": len(recs) - len(real_recs),
+            "last_run_utc": max(str(r.get("utc_date", "")) for r in real_recs),
             "capabilities": caps,
             "never_exercised": [c for c in KNOWN_CAPS if c not in caps],
             "maturity": maturity.get((v.lower(), p.lower(), fw.lower())),

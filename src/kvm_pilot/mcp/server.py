@@ -69,7 +69,7 @@ from kvm_pilot.vision import (
     VisionBackend,
     make_backend,
 )
-from kvm_pilot.vision.base import PHASE_NO_SIGNAL, PHASE_POWER_OFF
+from kvm_pilot.vision.base import PHASE_NO_SIGNAL, PHASE_POWER_OFF, PHASE_UNKNOWN
 
 if TYPE_CHECKING:
     # ``_driver(capability=…)`` guarantees the driver supports the capability at
@@ -467,7 +467,10 @@ def _keyless_waitable_phases(kvm: KVMDriver) -> set[str]:
     if hasattr(kvm, "has_video_signal"):
         phases.add(PHASE_NO_SIGNAL)
     if getattr(kvm, "get_boot_progress", None) is not None:
-        phases.update(ALL_PHASES)
+        # BootProgress maps a device's structured state to a phase token, but
+        # never to PHASE_UNKNOWN (_probe_boot_progress drops that), so it is not
+        # keylessly waitable — exclude it from the structural set.
+        phases.update(p for p in ALL_PHASES if p != PHASE_UNKNOWN)
     return phases
 
 

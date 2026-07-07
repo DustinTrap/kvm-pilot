@@ -23,7 +23,7 @@
         "date": {"type": "string", "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2}$"},
         "known_bad": {"type": "array", "items": {"$ref": "#/definitions/known_bad"}},
         "profile": {"$ref": "#/definitions/profile"},
-        "versions": {"type": "array", "items": {"$ref": "#/definitions/version_row"}, "description": "Per-firmware-version rows. Their maturity is DERIVED from data/test_runs.jsonl by kvm_pilot.maturity (#98) — never hand-edit; CI re-derives and fails on drift."}
+        "versions": {"type": "array", "items": {"$ref": "#/definitions/version_row"}, "description": "Per-firmware-version rows. Their maturity is DERIVED from the run ledger (src/kvm_pilot/data/test_runs.jsonl) by kvm_pilot.maturity (#98) — never hand-edit; CI re-derives and fails on drift."}
       }
     },
     "version_row": {
@@ -36,7 +36,7 @@
           "type": "object",
           "required": ["level"],
           "additionalProperties": false,
-          "description": "DERIVED from data/test_runs.jsonl by kvm_pilot.maturity (#98) — never hand-edit; CI re-derives and fails on drift.",
+          "description": "DERIVED from the run ledger (src/kvm_pilot/data/test_runs.jsonl) by kvm_pilot.maturity (#98) — never hand-edit; CI re-derives and fails on drift.",
           "properties": {
             "level": {"enum": ["alpha", "beta", "rc", "ga"], "description": "Overall level for this combo: the minimum of the exercised capabilities' levels."},
             "capabilities": {"type": "object", "additionalProperties": {"enum": ["alpha", "beta", "rc", "ga"]}, "description": "Every capability exercised live for this combo, with its derived level."}

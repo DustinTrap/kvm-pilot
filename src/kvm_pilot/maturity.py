@@ -99,7 +99,12 @@ def load_ledger(path: Path) -> list[dict[str, Any]]:
     for line in path.read_text("utf-8").splitlines():
         if not line.strip():
             continue
-        rec = json.loads(line)
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue  # a malformed append must not crash the CI drift gate
+        if not isinstance(rec, dict):
+            continue
         run_id = rec.get("run_id")
         if run_id is not None:
             if run_id in seen:
@@ -112,6 +117,21 @@ def load_ledger(path: Path) -> list[dict[str, Any]]:
 # --------------------------------------------------------------------------- #
 # The promotion ladder (pure)                                                 #
 # --------------------------------------------------------------------------- #
+
+
+def _parse_utc_date(value: Any) -> date | None:
+    """A ledger record's UTC calendar day, or None if missing/unparseable.
+
+    A real-source run with no/garbage ``utc_date`` cannot be placed in a
+    promotion window, so it is dropped rather than crashing the derivation (and
+    the CI drift gate that runs it) with a KeyError/ValueError.
+    """
+    if not value:
+        return None
+    try:
+        return datetime.fromisoformat(str(value)).date()
+    except ValueError:
+        return None
 
 
 def _capability_level(events: list[tuple[date, bool]]) -> str:
@@ -144,7 +164,9 @@ def compute_maturity(records: list[dict[str, Any]]) -> dict[str, Any]:
     for rec in records:
         if rec.get("source") != "real":
             continue
-        when = datetime.fromisoformat(str(rec["utc_date"])).date()
+        when = _parse_utc_date(rec.get("utc_date"))
+        if when is None:
+            continue  # undated/malformed run can't be placed in a promotion window
         for cap in rec.get("capabilities", []) or []:
             name = str(cap.get("capability", "")).strip()
             if name:
@@ -193,11 +215,13 @@ def fold_into_registry(
 ) -> dict[str, Any]:
     """Fold the derived matrix into a *copy* of the registry and return it.
 
-    Replaces each backed entry's ``versions`` with derived rows (sorted by
-    version for determinism) and strips stale maturity rows from entries the
-    ledger no longer backs, so a ``--write`` always clears drift. Never touches
-    ``updated`` — a recompute that changes nothing must be a byte-level no-op.
-    Idempotent.
+    The ``maturity`` key on each ``versions[]`` row is derived; any OTHER keys on
+    a row (e.g. a future hand-authored ``known_bad`` from #97) are preserved.
+    A backed combo's ``maturity`` is set/updated; a version the ledger no longer
+    backs loses only its ``maturity`` (and the row is dropped if nothing else
+    remains on it), so a ``--write`` always clears maturity drift without
+    deleting non-derived data. Never touches ``updated`` — a recompute that
+    changes nothing must be a byte-level no-op. Idempotent.
     """
     reg: dict[str, Any] = json.loads(json.dumps(registry))  # deep copy, like merge_submission
     reg.setdefault("schema_version", 2)
@@ -212,9 +236,22 @@ def fold_into_registry(
         if entry is None:
             entry = {"vendor": vendor, "product": product}
             reg["firmware"].append(entry)
-        entry["versions"] = [
-            {"version": fw, "maturity": rows[fw]} for fw in sorted(rows, key=_ver_tuple)
-        ]
+        existing = {
+            str(r.get("version", "")): r
+            for r in entry.get("versions", []) or []
+            if isinstance(r, dict)
+        }
+        merged: list[dict[str, Any]] = []
+        for fw in sorted(set(rows) | set(existing), key=_ver_tuple):
+            row = existing.get(fw, {"version": fw})
+            if fw in rows:
+                row["maturity"] = rows[fw]
+            else:
+                row.pop("maturity", None)  # ledger no longer backs this version's maturity
+                if set(row) <= {"version"}:
+                    continue  # nothing but the version left -> drop the empty row
+            merged.append(row)
+        entry["versions"] = merged
 
     backed = {(v.strip().lower(), p.strip().lower()) for v, p in by_device}
     for entry in reg["firmware"]:
