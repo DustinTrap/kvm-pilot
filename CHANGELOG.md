@@ -6,6 +6,24 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **Video liveness reads `streamer.hdmi.signal`, not `source.online`** (#154):
+  on GL firmware `source.online` stays True with no picture, so kvm-pilot
+  reported "video signal live" when there was none and the vision loop 503'd on
+  a snapshot instead of cheaply concluding `no_signal`. `has_video_signal()` now
+  prefers `hdmi.signal`; `video_signal_info()` exposes `hdmi_signal` +
+  `streamer_idle`; the snapshot-503 diagnostic names the real cause (no signal /
+  idle on-demand streamer / wedged encoder). Found and verified live on a bench
+  GL-RM1PE.
+
+### Added
+- **Mouse click refuses a stale-by-age or non-server-issued `observed_frame_ref`**
+  (#141): frame generation only bumps on power/media, so an observation could go
+  stale while the screen changed on its own (boot progressing, a placeholder
+  frame persisting) and still be carried into a click. The `mouse` tool now also
+  refuses an observation older than `KVM_PILOT_MCP_FRAME_MAX_AGE` (60s default)
+  or any `frame_ref` this server did not issue.
+
 ## [0.1.0a10] — 2026-07-07
 
 Support-matrix subsystem (what's actually been proven on real hardware), a
