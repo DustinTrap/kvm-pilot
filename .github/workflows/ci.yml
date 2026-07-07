@@ -112,6 +112,32 @@ jobs:
       - name: Integration tests vs sushy-emulator (--fake)
         run: pytest tests/integration -m integration -v
 
+  emulator-stack:
+    # #21: the dev stack must come up and serve the same integration tests as the
+    # pip-installed sushy job, so compose/Makefile drift can't rot silently.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6.3.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Validate compose file
+        run: docker compose -f compose.yaml config -q
+      - name: Install
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev]"
+      - name: Bring up the emulator stack
+        run: make emulators
+      - name: Integration tests vs the compose stack
+        run: make integration PYTEST=pytest
+      - name: Tear down the stack
+        if: always()
+        run: make emulators-down
+
   security:
     runs-on: ubuntu-latest
     steps:
