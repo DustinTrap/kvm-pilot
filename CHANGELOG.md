@@ -6,6 +6,16 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **`keep-awake` — toggle the target-display jiggler** (#159): `kvm-pilot
+  keep-awake on|off` (and `client.set_jiggler(active)`) drives kvmd's mouse
+  jiggler so the target's display doesn't DPMS-sleep out from under a
+  vision/snapshot session. An asleep display reports `hdmi.signal=false` and the
+  snapshot path fails — the actual root cause of the #126/#142 "snapshot 503s
+  even though video works" reports, confirmed live: with the display asleep
+  snapshot returns H.264/503; with the jiggler holding it awake at 1600x900,
+  snapshot returns a clean JPEG. Benign HID movement (no click/key), so ungated.
+
 ## [0.1.0a11] — 2026-07-07
 
 The honest-sensor release: kvm-pilot now correctly diagnoses real GLKVM

@@ -68,6 +68,14 @@ def test_hid_is_recorded():
     assert d.shortcuts == ["ControlLeft,AltLeft,Delete"]
 
 
+def test_set_jiggler_toggles_state():  # #159 keep-awake
+    d = FakeDriver()
+    assert d.get_hid_state()["jiggler"]["active"] is False
+    assert d.set_jiggler(True)["active"] is True
+    assert d.get_hid_state()["jiggler"]["active"] is True
+    assert ("set_jiggler", True) in d.actions
+
+
 def test_snapshot_roundtrips(tmp_path):
     d = FakeDriver(image=b"\xff\xd8custom")
     assert d.snapshot() == b"\xff\xd8custom"

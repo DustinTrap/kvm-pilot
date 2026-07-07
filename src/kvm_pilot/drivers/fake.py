@@ -72,6 +72,7 @@ class FakeDriver(PowerMixin, CapabilityMixin):
         self.phase = phase
         self.video_signal = video_signal
         self.hid_connected = hid_connected
+        self.jiggler_active = False
         self.ocr_text = ocr_text
         self.logs = logs
         self._events = list(events or [])
@@ -130,7 +131,14 @@ class FakeDriver(PowerMixin, CapabilityMixin):
             "online": self.hid_connected,
             "keyboard": {"online": self.hid_connected},
             "mouse": {"online": self.hid_connected, "absolute": True},
+            "jiggler": {"active": self.jiggler_active, "enabled": True, "interval": 20},
         }
+
+    def set_jiggler(self, active: bool) -> dict:
+        """Toggle the keep-awake jiggler (#159); ungated, benign movement."""
+        self.jiggler_active = active
+        self._record("set_jiggler", active)
+        return {"active": active, "enabled": True, "interval": 20}
 
     def type_text(self, text: str, **kw: Any) -> None:
         if self.safety.guard("hid.type_text", f"Type {len(text)} characters into {self.host}"):
