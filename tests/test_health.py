@@ -493,6 +493,22 @@ def test_encoder_wedge_below_threshold_is_a_transient_blip():
     assert check_encoder_wedge(FakeDriver(logs="rv1126: resolution failed\n" * 2)) is None
 
 
+def test_access_paths_labels_domains_and_flags_no_oob():
+    # #162: the lockout view. FakeDriver has REST + console-HID + (wired) OOB, but
+    # no appliance/target SSH configured. Paths are labeled by failure domain.
+    from kvm_pilot.health import access_paths
+
+    result = access_paths(FakeDriver())
+    by_path = {p["path"]: p for p in result["paths"]}
+    assert set(by_path) == {"kvmd-rest", "appliance-ssh", "target-ssh", "oob-power", "console-hid"}
+    assert by_path["kvmd-rest"]["live"] is True
+    assert by_path["appliance-ssh"]["configured"] is False  # not set up -> not counted
+    assert by_path["console-hid"]["live"] is True
+    # independent_domains dedups by failure domain, not path count.
+    assert result["summary"]["independent_domains"] <= result["summary"]["live_count"]
+    assert isinstance(result["summary"]["out_of_band_live"], bool)
+
+
 def test_encoder_wedge_skips_driver_without_logs():
     assert check_encoder_wedge(stub()) is None
 

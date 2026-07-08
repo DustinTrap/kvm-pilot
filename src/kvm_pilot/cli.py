@@ -477,6 +477,27 @@ def cmd_appliance(args) -> int:
     return 0
 
 
+def cmd_paths(args) -> int:
+    # The lockout-exposure view: which independent recovery paths are live (#162).
+    from .health import access_paths
+    kvm = _build_client(args)
+    result = access_paths(kvm)
+    if args.json:
+        print(json.dumps(result, indent=2, default=str))
+        return 0
+    print(f"Access paths for {_driver_label(kvm)}@{getattr(kvm, 'host', '?')}:")
+    for p in result["paths"]:
+        status = "live" if p["live"] else ("DOWN" if p["configured"] else "not configured")
+        print(f"  [{status:15}] {p['path']:15} ({p['kind']})")
+    s = result["summary"]
+    print(f"\n{s['live_count']} path(s) live across {s['independent_domains']} independent "
+          f"failure domain(s); out-of-band power: {'YES' if s['out_of_band_live'] else 'NONE'}")
+    if not s["out_of_band_live"]:
+        print("  WARNING: no out-of-band power — a fully hung appliance/target cannot be "
+              "recovered remotely; every live path shares the appliance's fate.")
+    return 0
+
+
 def cmd_classify(args) -> int:
     kvm = _rich_client(args, Capability.VIDEO)
     analyzer = _make_analyzer(kvm, args)
@@ -1011,6 +1032,13 @@ def build_parser() -> argparse.ArgumentParser:
                    help="loadavg (read-only diagnostics) or reboot (gated recovery)")
     _add_common(p)
     p.set_defaults(func=cmd_appliance)
+
+    p = sub.add_parser(
+        "paths",
+        help="Show which independent recovery paths are live (lockout exposure) (#162)")
+    p.add_argument("--json", action="store_true", help="Emit the raw path map as JSON")
+    _add_common(p)
+    p.set_defaults(func=cmd_paths)
 
     p = sub.add_parser("classify", help="Classify the current screen once")
     _add_common(p)

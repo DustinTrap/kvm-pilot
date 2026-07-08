@@ -361,6 +361,82 @@ def check_recovery_path(driver: Any) -> CheckResult | None:
     )
 
 
+def access_paths(driver: Any) -> dict:
+    """The lockout-exposure view: which INDEPENDENT recovery paths are live for a
+    device (rock-solid access, #162). Each path is labeled by its failure
+    *domain*, so ``independent_domains`` never oversells redundancy when several
+    paths ride the same appliance — the only truly hardware-independent domain is
+    out-of-band power; every in-band path dies with the appliance or its network.
+    """
+    paths: list[dict] = []
+
+    get_info = getattr(driver, "get_info", None)
+    rest_live: bool | None = None
+    if get_info is not None:
+        try:
+            get_info()
+            rest_live = True
+        except KVMPilotError:
+            rest_live = False
+    paths.append({
+        "path": "kvmd-rest", "domain": "appliance", "kind": "primary",
+        "configured": get_info is not None, "live": rest_live,
+        "detail": "The kvmd REST API — degrades exactly when the box gets sick.",
+    })
+
+    chan = getattr(driver, "appliance_channel", None)
+    paths.append({
+        "path": "appliance-ssh", "domain": "appliance", "kind": "in-band-independent",
+        "configured": chan is not None,
+        "live": chan.ssh_reachable() if chan is not None else None,
+        "detail": ("SSH to the KVM's own OS (independent daemon on :22); observes/"
+                   "recovers the encoder wedge REST can't."
+                   if chan is not None else "Not configured (set appliance_ssh)."),
+    })
+
+    tchan = getattr(driver, "ssh_channel", None)
+    paths.append({
+        "path": "target-ssh", "domain": "target-network", "kind": "in-band",
+        "configured": tchan is not None,
+        "live": tchan.ssh_reachable() if tchan is not None else None,
+        "detail": ("SSH to the managed OS itself; recover from inside when KVM "
+                   "video/HID is flaky."
+                   if tchan is not None else "Not configured (set ssh_host)."),
+    })
+
+    rec = check_recovery_path(driver)
+    oob_live = rec is not None and rec.severity is Severity.OK
+    paths.append({
+        "path": "oob-power", "domain": "out-of-band", "kind": "out-of-band",
+        "configured": oob_live, "live": oob_live if rec is not None else None,
+        "detail": (rec.detail if rec is not None else "unknown")
+        + " The ONLY path that survives a fully hung appliance/target.",
+    })
+
+    hid_fn = getattr(driver, "get_hid_state", None)
+    hid_live: bool | None = None
+    if hid_fn is not None:
+        try:
+            hid_live = bool(_result(hid_fn()).get("connected"))
+        except KVMPilotError:
+            hid_live = False
+    paths.append({
+        "path": "console-hid", "domain": "appliance", "kind": "in-band",
+        "configured": hid_fn is not None, "live": hid_live,
+        "detail": "Ctrl+Alt+Del over the emulated keyboard (only if the OS honors it).",
+    })
+
+    live = [p for p in paths if p["live"]]
+    return {
+        "paths": paths,
+        "summary": {
+            "live_count": len(live),
+            "independent_domains": len({p["domain"] for p in live}),
+            "out_of_band_live": any(p["path"] == "oob-power" and p["live"] for p in paths),
+        },
+    }
+
+
 def check_video_signal(driver: Any) -> CheckResult | None:
     """Live video from the host. Volatile."""
     fn = getattr(driver, "has_video_signal", None)

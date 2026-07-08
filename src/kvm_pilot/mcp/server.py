@@ -1029,6 +1029,22 @@ def appliance_reboot(confirm: bool = False, profile: str | None = None) -> dict:
 
 
 @mcp.tool(annotations=_READ_ONLY)
+def access_paths(profile: str | None = None) -> dict:
+    """Which INDEPENDENT recovery paths are live for the device — the lockout view.
+
+    Rolls up the REST API, appliance-SSH, target-SSH, out-of-band power, and
+    console-HID paths, each labeled by its failure *domain* so redundancy is not
+    oversold: several live paths that all ride the same appliance are ONE
+    independent domain. `summary.out_of_band_live=false` means every path shares
+    the appliance's fate — a fully hung box can't be recovered remotely.
+    """
+    with _driver(profile, confirm=deny_all, capability=Capability.SYSTEM_INFO) as (cfg, kvm):
+        from kvm_pilot.health import access_paths as _access_paths
+
+        return {**_provenance(cfg), **_access_paths(kvm)}
+
+
+@mcp.tool(annotations=_READ_ONLY)
 def ssh_discover(cidr: str, confirm: bool = False, port: int = 22) -> dict:
     """Scan a CIDR for hosts with an open SSH port. RISKY — opt-in.
 

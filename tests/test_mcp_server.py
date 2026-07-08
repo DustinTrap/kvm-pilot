@@ -48,6 +48,7 @@ EXPECTED_TOOLS = {
     "list_virtual_media",
     "appliance_status",
     "appliance_reboot",
+    "access_paths",
 }
 # Tools that change state (readOnlyHint=False, destructiveHint=True).
 DESTRUCTIVE_TOOLS = {
@@ -563,6 +564,20 @@ def test_appliance_status_errors_when_not_enabled(config_file):
     result = run_session(server_env(config_file), interact)
     assert result.isError is True
     assert "not enabled" in result.content[0].text
+
+
+def test_access_paths_reports_the_lockout_view(config_file):
+    """#162: access_paths rolls up the independent recovery paths + a summary."""
+
+    async def interact(session):
+        return await session.call_tool("access_paths", {})
+
+    result = run_session(server_env(config_file), interact)
+    assert result.isError is False
+    parsed = result_json(result)
+    assert "paths" in parsed and "summary" in parsed
+    assert any(p["path"] == "kvmd-rest" for p in parsed["paths"])
+    assert "out_of_band_live" in parsed["summary"]
 
 
 def test_ssh_reachable_host_override_unblocks_unconfigured_profile(config_file):
