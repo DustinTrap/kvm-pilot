@@ -61,13 +61,16 @@
 - **My ed25519 key installed on two connected hosts** for the a13/a14 in-band benchmark
   (operator-approved): `dtrapani@10.0.1.165` (RHEL) + `dtrapani@10.0.1.18` (server11). Remove
   from each host's `~/.ssh/authorized_keys` if unwanted (comment `kvmbench`).
-- **.20 connected host (RHEL @ .165):** left **logged in** as Dustin Trapani (GNOME desktop,
-  a terminal window open); **keep-awake ON**; **routing patched at runtime** (br0 route replaced —
-  reverts on reboot). Encoder restored to default H.264.
-- **WHITESKELETON (10.0.1.19):** **OpenSSH Server enabled + running** (disable with
-  `Stop-Service sshd; Set-Service sshd -StartupType Disabled`). An **admin PowerShell window is
-  open** on its desktop. Left logged in; keep-awake ON; display + encoder default. **In-band key
-  NOT installed** (gated).
+- **All three connected hosts were rebooted this session (test #6, operator-approved):** each
+  returned to a usable login/lock screen (server11 ~2.5 min in-band-confirmed; RHEL + WHITESKELETON
+  ~130 s console-confirmed). So current state is **at the login/lock screen, NOT logged in**.
+- **.20 connected host (RHEL @ .165):** **at GDM login** (Dustin Trapani); **in-band is DEAD again** —
+  the reboot reverted the runtime `br0` route fix, so re-run `sudo ip route replace 10.0.1.0/24 dev
+  wlp0s20f3 src 10.0.1.165` (or make it persistent) to restore in-band. keep-awake ON; encoder H.264.
+- **WHITESKELETON (10.0.1.19):** rebooted → **at the Windows lock screen** (its previously-open apps —
+  Steam/VLC/browsers/ComfyUI — were closed by the reboot). **OpenSSH Server still enabled + running**
+  (disable with `Stop-Service sshd; Set-Service sshd -StartupType Disabled`). keep-awake ON; encoder
+  H.264. **In-band key NOT installed** (gated). The admin PowerShell window is gone (rebooted).
 - **.11/.20/.39 KVMs: keep-awake / jiggler ON.** Scorecard cache in `~/.config/kvm-pilot/scorecards/`.
 - **.39 firmware is V1.9.1.** .11/.20 appliance-SSH keys still onboarded.
 
