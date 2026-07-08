@@ -28,11 +28,12 @@
             "level": "alpha",
             "capabilities": {
               "firmware_update": "alpha",
-              "healthcheck": "beta",
-              "info": "beta",
-              "logs": "beta",
-              "power_state": "beta",
-              "snapshot": "beta"
+              "healthcheck": "rc",
+              "info": "rc",
+              "logs": "rc",
+              "power_state": "rc",
+              "snapshot": "beta",
+              "virtual_media": "beta"
             }
           }
         },
@@ -45,7 +46,8 @@
               "info": "beta",
               "logs": "beta",
               "power_state": "beta",
-              "snapshot": "beta"
+              "snapshot": "beta",
+              "virtual_media": "beta"
             }
           }
         }

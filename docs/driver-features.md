@@ -128,12 +128,12 @@ Structural set: `system_info, power, hid, video, virtual_media, gpio, events, lo
 | Capability | CLI / MCP surface | Reliability | Testing level | Notes / quirks |
 |---|---|---|---|---|
 | `system_info` | `info` · MCP `info` | conditional | live:gl.inet RM1PE@V1.5.1 (beta), @V1.9.1 (beta) | Fields present and correct, but the raw identity **lies** (rpi/rpi4 on RV1126); trust `get_firmware_info` (reads `/api/upgrade/version`). Dual version numbers (GL product vs kvmd component). |
-| `power` | `power`, `power-cycle` · MCP `power`, `power_state` | **false-report** | read: live (untrusted); actuate: unverified | ATX **always reports off / enabled=false / LEDs false** on RM1PE even when running — `is_powered_on()` and the *result* of on/off/cycle **cannot be confirmed via ATX**. Verify visually (snapshot/vision). Power *actuation* has **no ledger run** (`never_exercised: power`). |
+| `power` | `power`, `power-cycle` · MCP `power`, `power_state` | **false-report** | read: live (untrusted); actuate: never (ATX unwired) | ATX **always reports off / enabled=false / LEDs false** on RM1PE even when running — `is_powered_on()` and the *result* of on/off/cycle **cannot be confirmed via ATX**. Verify visually (snapshot/vision). On unwired ATX, actuation now fails with a **clear `CapabilityError`** ("power control unavailable — see `kvm-pilot paths`") instead of an opaque `HTTP 500` (#174). Actuation itself has **no ledger run** (`never_exercised: power` — no OOB power on the fleet). |
 | `hid` | `type`, `key`, `mouse-move`, `click` · MCP `type_text`, `press_key`, `send_shortcut`, `ctrl_alt_delete`, `mouse` | conditional | emulator; live-observed (not yet in ledger) | Works, but the emulated USB HID gadget can drop to **busy/unplugged** on real RM1PE units (#155), blanking keyboard/mouse until re-enumerated. Mitigations shipped: `recover_hid` (#160), keep-awake jiggler (#159), `display_awake` (#161). Not captured as a formal ledger capability yet — a **sweep gap**. |
-| `video` | `snapshot`, `classify`, `watch` · MCP `snapshot`, `classify_screen`, `wait_for_state` | conditional | live:gl.inet RM1PE@V1.9.1 (beta, 6/6 pass); @V1.5.1 mixed (1 pass / 1 fail) | Reliable on **V1.9.1** (cached JPEG, decoupled from the encoder). On **V1.5.1** the JPEG endpoint returns **H.264 bytes mislabeled `image/jpeg`** at >1080p (#107) — formerly a silent false-report, **now surfaced** as `SnapshotFormatError`. Separate **503** modes: display asleep/DPMS (`hdmi.signal=false`, #126/#142) or idle on-demand streamer; the driver attaches the live streamer state to explain which. |
-| `virtual_media` | `media-list`, `mount`, `eject` · MCP `list_virtual_media`, `mount_iso`, `eject` | **false-report** | emulator; live-observed insert (#78), not in ledger | GL accepts the mount calls and reports `connected=true` while `online` stays **false** and the host sees nothing when the MSD toggle is off (#77). Mitigation: `mount_iso` polls `/api/msd` for `online` and raises `MediaOfflineError`. Positive tell observed live: host boot menu showed "Glinet Optical Drive" when truly presented (#78). `never_exercised: virtual_media` in the ledger. |
+| `video` | `snapshot`, `classify`, `watch` · MCP `snapshot`, `classify_screen`, `wait_for_state` | conditional (V1.9.1) / false-report (V1.5.1) | live:gl.inet RM1PE@V1.9.1 (snapshot PASS); @V1.5.1 (snapshot FAIL, H.264) | **Headless snapshot now works (#142):** GL's encoder is on-demand — a snapshot with no video client 503'd forever (`streamer: null`). The driver now registers a stream client over kvmd `/api/ws` to start it, then snapshots, with a `streamer_warm()` keep-alive (~0.1s/frame). **Live-verified 1600×900 JPEG on V1.9.1.** On **V1.5.1** the encoder emits an undecodable H.264 **P-frame** (no SPS/PPS/IDR, #107/#151) — surfaced as `SnapshotFormatError`, not a false success. The 503 detail now names the offline-streamer case honestly (#173) instead of "encoder wedged". |
+| `virtual_media` | `media-list`, `mount`, `eject` · MCP `list_virtual_media`, `mount_iso`, `eject` | conditional | **live: RM1PE @V1.9.1 + @V1.5.1 (mount→online→eject PASS, 2026-07-07)** | Now **live-verified on all three units**: `mount_iso` uploaded a test ISO, `/api/msd` reported `online=true`, and `eject` detached it. The historical false-report — GL reports `connected=true` while `online` stays **false** when the MSD toggle is off (#77) — is guarded by `mount_iso` polling for `online` and raising `MediaOfflineError`. Positive tell (#78): host boot menu shows "Glinet Optical Drive" when truly presented. |
 | `gpio` | library API (`gpio_switch`/`gpio_pulse`); no CLI/MCP | unverified | emulator/mock | Inherited from the PiKVM base, but **RM1PE exposes no GPIO channels** (`ATX enabled=false, no GPIO`). Present in the API surface, effectively unusable on this hardware. |
-| `events` | `events` (needs `ws` extra) | unverified | mock | WebSocket event stream; no real-hardware run. |
+| `events` | `events` (`websocket-client`, now a base dep) | unverified | live-connected (not asserted) | WebSocket event stream over kvmd `/api/ws`. Connects live and returns frames (same channel #142 uses to start the streamer); not yet asserted against a specific state change, so kept `unverified`. |
 | `logs` | `logs` · MCP `logs` | **reliable** | live:gl.inet RM1PE@V1.5.1 (beta), @V1.9.1 (beta) | kvmd `/api/log`; `seek` = seconds of lookback. Verified on both firmwares — it's how the RV1126 encoder wedge (venc/vpss/vvi in D-state) was diagnosed. `follow`/tail is refused (blocking transport). |
 | `boot_progress` | `boot-progress` | n/a | n/a | Not implemented by the PiKVM family — boot phase comes from **vision** (`classify`), not a structured enum. |
 | `sensors` | `sensors` | n/a | n/a | `Sensors` protocol not implemented. Raw Prometheus metrics exist (`get_metrics`, `/api/export`) but are not the structured capability. |
@@ -243,38 +243,47 @@ Structural set: `system_info, power, hid, video, virtual_media, gpio, events, lo
 
 ---
 
-## Live-fleet sweep evidence (in progress)
+## Live-fleet sweep evidence (2026-07-07)
 
-> **Status: sweep underway — this section is a hook, not yet complete.**
+> **Status: sweep complete.** Full findings + reliability matrix:
+> [#176](https://github.com/DustinTrap/kvm-pilot/issues/176). The runs are in
+> `src/kvm_pilot/data/test_runs.jsonl`; `kvm_pilot.maturity` derived the levels
+> below (drift-checked in CI).
 
-A live reliability sweep of the GL fleet — **`.11`** (`homelab`, GL-RM1PE),
-**`.20`** (`homelab2`), and **`.39`** — is in progress to move `glkvm` ratings
-above from "unverified / observed-but-not-in-ledger" to ledger-backed evidence,
-especially for the capabilities with **no current ledger run**: `hid`,
-`virtual_media`, `power` **actuation**, `gpio`, and `events`. It follows the
-reusable [Hardware reliability test plan](test-plan.md)
-([#172](https://github.com/DustinTrap/kvm-pilot/issues/172)) — every function,
-in multiple device states, cross-checked against independent ground truth to
-catch false reports. As runs are captured they land in
-`src/kvm_pilot/data/test_runs.jsonl`, `kvm_pilot.maturity` re-derives the
-levels, and the `glkvm` table's Reliability / Testing-level columns are
-refreshed to match.
+A full-fleet reliability sweep of **`.11`** (`homelab`), **`.20`** (`homelab2`),
+and **`.39`** (`bench`) — all GL-RM1PE — ran every CLI subcommand + MCP tool
+multiple times, cross-checked against appliance-SSH + native-REST ground truth
+per the [test plan](test-plan.md). Headline results that changed the `glkvm`
+ratings above:
 
-Until then, the only ledger-backed `glkvm` evidence is the 2026-07-03 GL-RM1PE
-runs (V1.5.1 release2 and V1.9.1 release1) reflected above. Confirm the current
-truth any time with:
+- **`video` / `snapshot` — fixed for the headless case ([#142](https://github.com/DustinTrap/kvm-pilot/issues/142)).**
+  The RCA: GL's encoder is on-demand and runs only while a video client is
+  connected, so a headless `snapshot` 503'd forever (`streamer: null`) — the
+  100% failure the sweep found on all three idle units. The driver now registers
+  a stream client over kvmd's `/api/ws` to start the encoder, then snapshots
+  (`streamer_warm()` keeps it warm, ~0.1s/frame). **Verified live returning a
+  valid 1600×900 JPEG on V1.9.1 (`.11`/`.20`)** → `snapshot` is now a ledger PASS
+  on V1.9.1. On V1.5.1 (`.39`) the streamer starts but emits an undecodable H.264
+  P-frame ([#107](https://github.com/DustinTrap/kvm-pilot/issues/107)/[#151](https://github.com/DustinTrap/kvm-pilot/issues/151)) — an honest fail, not a false success.
+- **`virtual_media` — promoted from `never_exercised` to live-verified** on all
+  three (mount → `online=true` → eject).
+- **`power` — the opaque `HTTP 500` on unwired ATX is fixed**
+  ([#174](https://github.com/DustinTrap/kvm-pilot/issues/174)) to a clear
+  "power control unavailable" `CapabilityError`. Actuation is still
+  `never_exercised` (ATX unwired on the whole fleet — no OOB power).
 
-```bash
-kvm-pilot capabilities --driver glkvm --host <ip>     # structural set (offline)
-# live evidence + derived maturity:
-python -c "from kvm_pilot.support_matrix import rollup; import json; print(json.dumps(rollup(), indent=2, default=str))"
-```
+Ledger-derived maturity after the sweep (confirm any time with
+`python -c "from kvm_pilot.support_matrix import rollup; import json; print(json.dumps(rollup(), indent=2, default=str))"`):
 
-| Unit | Model / target | Firmware | Sweep status | Capabilities newly exercised |
-|---|---|---|---|---|
-| `.11` | GL-RM1PE (`homelab`) | _tbd_ | pending | _to be filled from the sweep_ |
-| `.20` | `homelab2` | _tbd_ | pending | _to be filled from the sweep_ |
-| `.39` | _tbd_ | _tbd_ | pending | _to be filled from the sweep_ |
+| Unit(s) | Model | Firmware | Maturity | Live PASS | Live FAIL / never |
+|---|---|---|---|---|---|
+| `.11`, `.20` | GL-RM1PE | V1.9.1 release1 | **beta** | info, snapshot, healthcheck, logs, power_state, virtual_media | never: power (ATX unwired), firmware_update |
+| `.39` | GL-RM1PE | V1.5.1 release2 | **alpha** | info, healthcheck, logs, power_state, virtual_media | FAIL: snapshot (H.264, #107/#151), firmware_update (no-op #94/#95); never: power |
+
+Not exercised this sweep (honest gaps): `hid` **delivery** (no video/in-band SSH to
+confirm a keystroke landed — command path only), `gpio` (unwired), `events`
+(connects, but not asserted against a state change), `classify`/`watch` vision
+(skipped), and appliance-reboot recovery (not triggered on a healthy box).
 
 ## See also
 
