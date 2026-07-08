@@ -138,6 +138,7 @@ class HTTP:
         totp_secret: str | None = None,
         max_retries: int = 3,
         backoff_base: float = 0.5,
+        breaker_threshold: int = 3,
         not_found_hint: str | None = None,
         ssl_ca_file: str | None = None,
     ):
@@ -148,6 +149,12 @@ class HTTP:
         self._totp_secret = totp_secret
         self._max_retries = max(0, max_retries)
         self._backoff_base = backoff_base
+        # Consecutive-failure damper (#164): a wedged device makes every call burn
+        # max_retries+1 attempts × backoff (~3.5s measured live). After this many
+        # calls fail terminally in a row, drop to a single attempt so a poll loop
+        # fast-fails instead of hammering a down box; any device response resets it.
+        self._breaker_threshold = max(0, breaker_threshold)
+        self._consecutive_failures = 0
         # Appended to a 404's error (and promotes it to ApiDisabledError) — set by
         # the GLKVM driver, whose firmware 404s every /api/* until the API is enabled.
         self._not_found_hint = not_found_hint
@@ -249,11 +256,14 @@ class HTTP:
         # A file-like body cannot be re-sent after a partial read, so never retry
         # a streaming upload (the caller also passes retry=False for it).
         streaming = data is not None and not isinstance(data, (bytes, bytearray))
-        attempts = self._max_retries + 1 if (retry and not streaming) else 1
+        # When the damper is open (device confirmed down), make a single attempt so
+        # a poll loop fast-fails instead of burning the full backoff every call (#164).
+        retrying = retry and not streaming and not self.breaker_open
+        attempts = self._max_retries + 1 if retrying else 1
         last_exc: Exception | None = None
         for attempt in range(attempts):
             try:
-                return self._request_once(
+                result = self._request_once(
                     method,
                     path,
                     params=params,
@@ -268,9 +278,27 @@ class HTTP:
                 if attempt < attempts - 1 and self._is_retryable(exc, method):
                     time.sleep(self._backoff_base * (2 ** attempt))
                     continue
+                # Terminal: a transport-down failure (503/timeout/conn) advances the
+                # damper; any definitive device response (2xx here, or a 4xx/auth
+                # error below) means the box is up, so it resets.
+                self._consecutive_failures = (
+                    self._consecutive_failures + 1 if self._is_retryable(exc, method) else 0
+                )
                 raise
+            self._consecutive_failures = 0
+            return result
         assert last_exc is not None  # pragma: no cover
         raise last_exc
+
+    @property
+    def breaker_open(self) -> bool:
+        """True when consecutive transport-down failures have crossed the threshold
+        (#164): the device looks wedged, so calls fast-fail (one attempt) until it
+        responds again. A threshold of 0 disables the damper."""
+        return (
+            self._breaker_threshold > 0
+            and self._consecutive_failures >= self._breaker_threshold
+        )
 
     def _request_once(
         self,
