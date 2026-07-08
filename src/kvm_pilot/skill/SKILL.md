@@ -364,11 +364,12 @@ and the gated act/power tools inside an agent session; use the CLI for
 everything else and for one-off checks when no MCP host is in the loop.
 
 The full command set (see [docs/cli.md](https://github.com/DustinTrap/kvm-pilot/blob/main/docs/cli.md)
-for the reference table): `kvm-pilot info | capabilities | healthcheck |
-firmware-check | firmware-update | snapshot | sensors | logs | ssh-check |
-ssh-exec | ssh-discover | ssh-bootstrap | boot-progress | power | power-cycle |
-type | key | mouse-move | click | media-list | mount | eject | classify |
-watch | events`. Run
+for the reference table): `kvm-pilot info | capabilities | benchmark | route |
+host-exec | healthcheck | firmware-check | firmware-update | snapshot | sensors |
+logs | ssh-check | ssh-exec | ssh-discover | ssh-bootstrap | boot-progress |
+power | power-cycle | type | key | mouse-move | click | media-list | mount |
+eject | keep-awake | recover-hid | appliance | paths | classify | watch |
+events`. Run
 `healthcheck` on first contact (see above); it also auto-runs ahead of destructive
 subcommands. `firmware-check` reports firmware currency and, where a device knows
 its vendor's latest, the update to contribute to the registry.
