@@ -15,9 +15,11 @@ on every push to `main` — edit the files here, never the wiki directly).
 ## Guides
 
 - [Architecture](architecture.md) — the driver-plugin design, capability protocols, and diagrams.
+- [Driver features](driver-features.md) — the complete per-driver capability list with per-feature reliability + testing level (honest maturity; points at the support-matrix source of truth) ([#171](https://github.com/DustinTrap/kvm-pilot/issues/171)).
 - [CLI reference](cli.md) — every `kvm-pilot` subcommand: capability required, destructive gating, key flags.
 - [Configuration](configuration.md) — the config file, every `KVM_PILOT_*` env var, and precedence.
 - [Design decisions](decisions.md) — the "looks wrong but is intentional" record, newest first.
+- [Hardware reliability test plan](test-plan.md) — the reusable full-fleet sweep procedure: exercise every CLI + MCP function across device states, cross-check each result against independent ground truth to catch false reports, and feed the support matrix ([#172](https://github.com/DustinTrap/kvm-pilot/issues/172)).
 - [Reflexes (RFC)](reflexes.md) — the post-GA edge-autonomy playbook runner: act locally on known steps, escalate surprises to the agent ([#117](https://github.com/DustinTrap/kvm-pilot/issues/117)).
 - [Redfish reference](redfish.md) — the BMC driver: hypermedia navigation, auth, and firmware quirks.
 - [Firmware registry](firmware-registry.md) — the firmware-currency check, the community registry data model, and the GitHub-based single-source-of-truth + ingestion design (#80 follow-up).
