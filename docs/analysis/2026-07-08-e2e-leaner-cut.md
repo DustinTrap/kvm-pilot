@@ -47,7 +47,12 @@ The first analysis ([2026-07-08-perf-a13-a14](2026-07-08-perf-a13-a14.md)) timed
 
 ## Scope run vs deferred
 - **Run (a13 vs a14, clean):** health, run_command, discover_ip, screenshot, wake — on .11 + .20 (in-band + KVM plane) and .39 (KVM plane). `identify_state` ≈ screenshot cost + classification (same snapshot → flat).
-- **Deferred:** `.39` in-band health/run-command/discover (WHITESKELETON's in-band key install is gated on the operator), `#6 reboot` (host-modifying — gated), and `#9 BIOS` / `#10 ISO-boot` (dropped from the leaner cut). `#1 wake` and `#2 login` were also exercised interactively (both succeeded; login to .20's GDM took a few seconds).
+- **#6 reboot → confirm recovery — RUN on all three (observational, system-bound, flat a13≈a14):** OS-initiated (no OOB power on the fleet), recovery confirmed at a usable login/lock screen.
+  - `.11` server11 (Fedora) — in-band `sudo systemctl reboot`, back to SSH-usable in **~2–2.5 min** (in-band confirmed).
+  - `.20` RHEL — in-band reboot, back to the GDM login in **~130 s** (console-confirmed; **the reboot reverted the `br0` route fix**, so in-band to `.165` needs re-applying).
+  - `.39` WHITESKELETON — console `shutdown /r`, back to the Windows lock screen in **~130 s** (console-confirmed).
+  - a14 doesn't change reboot — the whole time is the machine's own boot; the only thing measured is that a14 doesn't *add* overhead (it doesn't).
+- **Deferred:** `.39` in-band health/run-command/discover (WHITESKELETON's in-band key install stays gated on the operator), and `#9 BIOS` / `#10 ISO-boot` (dropped from the leaner cut). `#1 wake` and `#2 login` were exercised interactively (both succeeded; login to .20's GDM took a few seconds).
 
 ## Reproduce
 - Harness: `e2eharness.py` — `<a13py|a14py> e2eharness.py <label> <profile> [ssh_host ssh_user ssh_key]`.
