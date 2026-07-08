@@ -37,6 +37,8 @@ PAGES: list[tuple[str, str, str | None]] = [
     ("docs/README.md", "Home.md", None),
     ("docs/getting-started.md", "getting-started.md", "Getting started"),
     ("docs/architecture.md", "architecture.md", "Architecture"),
+    ("docs/driver-features.md", "driver-features.md", "Driver features"),
+    ("docs/test-plan.md", "test-plan.md", "Test plan"),
     ("docs/cli.md", "cli.md", "CLI reference"),
     ("docs/configuration.md", "configuration.md", "Configuration"),
     ("docs/decisions.md", "decisions.md", "Design decisions"),
