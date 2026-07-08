@@ -6,6 +6,33 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **`snapshot` 503 no longer misdiagnoses an idle on-demand streamer as a wedged
+  encoder** (#173): with `streamer: null` (on-demand, no video client) the
+  `_snapshot_unavailable_detail` explanation fell through to "HDMI present and
+  capturing … encoder wedged (#142)", sending the operator to an appliance reboot
+  that isn't the fix. It now leads with an honest `streamer_offline` branch — "the
+  on-demand streamer is not running; `/api/streamer/snapshot` does not start it on
+  GL — open the WebRTC stream/web console or use trigger-then-wait (#142)." The
+  `video-signal` healthcheck remediation was corrected the same way (it previously
+  claimed "a snapshot will start it", false on GL). Reproduced + verified live on
+  the .11/.20 (V1.9.1) and .39 (V1.5.1) fleet.
+- **`power`/`power-cycle` on an unwired ATX now fail with a clear message instead
+  of an opaque `HTTP 500`** (#174): GL units report `/api/atx` `enabled=false`
+  (no power cable to the host header), and a power POST then 500s with "Server got
+  itself in trouble". The driver now preflights `atx.enabled` (only on a call it is
+  really about to send — dry-run/denied calls still touch nothing) and raises a
+  clear `CapabilityError` pointing at `kvm-pilot paths`. Verified live on all three
+  units.
+
+### Added
+- **GLKVM quirk `snapshot-needs-video-client`** (observed, #142/#173): documents
+  that the video encoder is on-demand and headless `snapshot`/`classify`/`watch`
+  are unavailable with no active video client — surfaced by `healthcheck`.
+- **Driver-features reference** (`docs/driver-features.md`, #171) and a reusable
+  **hardware reliability test plan** (`docs/test-plan.md`, #172), both published to
+  the wiki (registered in `build_wiki.py` `PAGES`).
+
 ## [0.1.0a12] — 2026-07-07
 
 The resilient-access release. An independent, opt-in appliance-SSH transport

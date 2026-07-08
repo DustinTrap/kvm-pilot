@@ -468,7 +468,9 @@ def check_video_signal(driver: Any) -> CheckResult | None:
             severity=Severity.INFO,
             title="Video signal",
             detail="Capture subsystem idle (on-demand streamer not started) — signal "
-            "unconfirmed; a snapshot will start it.",
+            "unconfirmed. On GL the encoder starts only for an active video client, "
+            "and a snapshot does NOT start it (#173); open the WebRTC stream/web "
+            "console or use the trigger-then-wait recovery (#142) to get a frame.",
             cacheable=False,
         )
     if alive:
