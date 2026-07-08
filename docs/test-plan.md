@@ -470,6 +470,52 @@ sweep** (`.11` RM1PE, `.20`, `.39`).
 
 ---
 
+## 12. Performance benchmarking (where the time goes)
+
+Reliability's sibling: **measure where time actually goes before optimizing.** The
+bottleneck differs by interface *and* by device, so a guess is usually wrong — the
+data below already refuted one "obvious" optimization.
+
+### Repeatable harnesses
+- **Interface scorecard** — `kvm-pilot benchmark --profile <p>` measures per-command
+  latency + capability across every interface (library / ssh / winrm); `--save`
+  persists it, `--select <cmd>` prints the router's pick, `route`/`host-exec` use it.
+  This is the primary, first-class perf tool (#181).
+- **Startup / import cost** — `python -X importtime -c "import kvm_pilot.cli"` (heaviest
+  sub-imports) and `time kvm-pilot --help` (the cold-start floor).
+- **Per-op profile** — `python -m cProfile -s cumtime -m kvm_pilot info --profile <p>`.
+- **Connection-reuse A/B** — urllib (new connection per call, what the driver uses)
+  vs a kept-open `http.client.HTTPSConnection`, to size the TLS-handshake share.
+
+### Findings (2026-07-08 — GL fleet + real Linux hosts)
+- **Interface ladder** (median /op): library ≈ MCP (~0.15–0.18 s) ≪ CLI-default
+  (~1.28 s — the per-op preflight) ≪≪ Claude-in-Chrome (seconds + a full-frame JPEG).
+- **Per-(device, command) variance is large** — `get_logs` 67 ms on `.11` vs **593 ms**
+  on `.20`. Profile per device; don't assume uniform costs.
+- **SSH is *setup*-bound → persistence is a 10× win.** `ssh_exec` 263 ms fresh → **26 ms**
+  over a reused ControlMaster. **Implemented** (`SSHChannel(persist=True)`).
+- **HTTP / the KVM API is *device*-bound, NOT handshake-bound.** Connection keep-alive
+  is only **~1.1×** (167 → 152 ms) because the GL device's response (~150 ms) dwarfs the
+  ~15 ms TLS handshake. So HTTP connection pooling is **not worth a transport rewrite**
+  on these devices — *re-measure on a fast BMC (Redfish) before revisiting.* (This is the
+  optimization the profiling refuted.)
+- **CLI cold-start floor ~57 ms** — dominated by the stdlib HTTP import chain
+  (urllib / ssl / cookiejar); acceptable, and amortized away by the persistent MCP server.
+- **Per-op preflight (#80) adds ~1 s** — intentional intake for `info`/`snapshot`; skipped
+  on the hot-path `benchmark`/`route`/`host-exec`.
+
+### Optimization status
+| Optimization | Status | Note |
+|---|---|---|
+| Persistent SSH (ControlMaster) | ✅ done | the real 10× win |
+| Skip preflight on hot-path commands | ✅ done | reserve the ~1 s intake for first contact |
+| Interface selection (router) | ✅ done | pick the cheapest *capable* interface per device/state |
+| Prefer MCP / library over repeated CLI | ✅ doctrine | avoids ~57 ms startup + preflight per call |
+| HTTP keep-alive / pooling | ⏸ deferred | 1.1× on GL (device-bound); re-measure on a fast BMC |
+| CLI startup lazy-imports | ⏸ marginal | ~57 ms floor is mostly stdlib HTTP |
+
+---
+
 ## Related
 
 - [CLI reference](cli.md) · [MCP server](../src/kvm_pilot/mcp/README.md) —
