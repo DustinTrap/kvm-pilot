@@ -85,6 +85,13 @@ else
     echo "RESUME.md: last committed $(git log -1 --format='%cs' -- RESUME.md 2>/dev/null) ($R_SHA)"
     NEWER="$(git rev-list --count "${R_SHA}..HEAD" 2>/dev/null || echo 0)"
     [ "${NEWER:-0}" -gt 0 ] && echo "RESUME_LIKELY_STALE: $NEWER commit(s) landed after RESUME.md's last commit — refresh it (hint)"
+    # Stamp-lag: the internal "@ <sha>" stamp can trail the file's own history if a commit
+    # updated RESUME.md without bumping the stamp — reads "fresh" to the checks above but lies. (v0.6.0)
+    STAMP_SHA="$(grep -m1 'Last updated' RESUME.md | grep -oE '[0-9a-f]{7,40}' | head -1)"
+    if [ -n "$STAMP_SHA" ] && git cat-file -e "$STAMP_SHA" 2>/dev/null; then
+      LAG="$(git rev-list --count "${STAMP_SHA}..${R_SHA}" 2>/dev/null || echo 0)"
+      [ "${LAG:-0}" -ge 2 ] && echo "RESUME_STAMP_STALE: stamp @ $STAMP_SHA is $LAG commits behind RESUME.md's own last commit ($R_SHA) — a commit updated the file without re-stamping; bump 'Last updated' to HEAD"
+    fi
     # --porcelain shows untracked (??) too, so this catches working-tree edits.
     [ -n "$(git status --porcelain -- RESUME.md 2>/dev/null)" ] && echo "RESUME_UNCOMMITTED: edited since its last commit — commit it"
   fi
