@@ -20,6 +20,8 @@ invalidates so the caller re-benchmarks just those.
 
 from __future__ import annotations
 
+import json
+import os
 from dataclasses import dataclass
 from enum import StrEnum
 
@@ -139,3 +141,52 @@ def is_stale(row: CommandResult, trigger: Trigger) -> bool:
 def stale_rows(scorecard: Scorecard, trigger: Trigger) -> list[CommandResult]:
     """The scorecard rows a ``trigger`` invalidates (re-benchmark exactly these)."""
     return [r for r in scorecard.results if is_stale(r, trigger)]
+
+
+# -- persistence: a remembered per-device profile --------------------------
+#
+# So the router doesn't re-benchmark on every call, a scorecard is cached to
+# disk per host and reloaded — with a firmware check that drops the KVM-plane
+# rows if the device was reflashed (they're the ones a flash can change; #180).
+
+_SCORECARD_DIR = os.path.join(
+    os.environ.get("XDG_CONFIG_HOME", os.path.join(os.path.expanduser("~"), ".config")),
+    "kvm-pilot", "scorecards",
+)
+
+
+def scorecard_path(host: str, *, base: str | None = None) -> str:
+    safe = host.replace("/", "_").replace(":", "_")
+    return os.path.join(base or _SCORECARD_DIR, f"{safe}.json")
+
+
+def save_scorecard(card: Scorecard, path: str | None = None) -> str:
+    path = path or scorecard_path(card.host)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(card.to_dict(), fh, indent=2)
+    return path
+
+
+def load_scorecard(path: str) -> Scorecard:
+    with open(path, encoding="utf-8") as fh:
+        return Scorecard.from_dict(json.load(fh))
+
+
+def load_for(
+    host: str, *, firmware: str | None = None, path: str | None = None
+) -> Scorecard | None:
+    """The cached scorecard for ``host``, or ``None`` if there's no cache.
+
+    If ``firmware`` differs from when it was saved, the KVM-plane rows are
+    dropped (a flash can change any of them, #180) so the caller re-benchmarks
+    just those; the in-band OS-plane rows and the record are kept.
+    """
+    path = path or scorecard_path(host)
+    if not os.path.exists(path):
+        return None
+    card = load_scorecard(path)
+    if firmware is not None and card.firmware != firmware:
+        card.results = [r for r in card.results if not is_stale(r, Trigger.FIRMWARE)]
+        card.firmware = firmware
+    return card
