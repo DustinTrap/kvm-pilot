@@ -6,6 +6,18 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.0a12] — 2026-07-07
+
+The resilient-access release. An independent, opt-in appliance-SSH transport
+that can observe and recover the RV1126 encoder wedge the REST API can't see;
+self-healing healthcheck AutoFixes and auto keep-awake for the common access
+failures; a lockout-exposure map; and reliability hardening — fast-fail on a
+wedged device, honest video-signal reporting, and multi-frame vision consensus.
+Every fix was grounded in, and validated on, a live GL-RM1PE fleet — and the
+reliability work was reprioritized by testing each assumption on real hardware
+(the scariest "landmines" turned out to be Redfish-shaped and unreproducible on
+GL, so they're tracked, not shipped blind).
+
 ### Fixed
 - **`video-signal` healthcheck no longer reports a false "live" on an idle
   streamer** (#165): when the on-demand streamer has no subscriber, `/api/streamer`
@@ -749,7 +761,8 @@ user feedback. **Not validated on real hardware** — see Notes.
   feedback are the explicit goals of this alpha. Reports welcome in the issue
   tracker.
 
-[Unreleased]: https://github.com/DustinTrap/kvm-pilot/compare/v0.1.0a11...HEAD
+[Unreleased]: https://github.com/DustinTrap/kvm-pilot/compare/v0.1.0a12...HEAD
+[0.1.0a12]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a12
 [0.1.0a11]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a11
 [0.1.0a10]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a10
 [0.1.0a9]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a9
