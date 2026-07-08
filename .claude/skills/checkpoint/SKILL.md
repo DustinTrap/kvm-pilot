@@ -27,21 +27,22 @@ It is the mirror of a morning sweep (which asks *what happened while I was away?
 2. **Interpret each surface against the rubric below** — the judgement calls the script can't make. Do not skip a surface because it "looked fine"; read the facts.
 3. **Emit the risk-ordered table + one-line verdict** (format at the bottom). Highest-risk first.
 4. **Always produce the resume handoff** (§ Mandatory handoff) — this happens even on an all-✅ scan.
-5. **Offer the exact fix for every ⚠️**; run only the low-risk ones **on the operator's go** (commit-by-name, `git fetch --tags`, save-memory, fix-a-doc). Never promote/release; never blind-add.
+5. **Offer the exact fix for every ⚠️**; run only the low-risk ones **on the operator's go** (commit-by-name, save-memory, fix-a-doc). Never promote/release; never blind-add.
+6. **Meta-reflect and self-improve** (§ Self-improvement) — the last thing you do. Did the scan raise a **false positive** (flagged something fine), **miss** something you only caught by hand, or produce **noise**? Did the table help? If yes, amend `scan.sh`/`SKILL.md` *in this same run* to encode the fix and add a § Version history row pairing the change with the real incident. This step is why the skill is worth more each run.
 
 ## Rubric — interpret the scan, surface by surface (risk-ordered)
 
 ### C1 · Version control & working tree — *highest risk: unsaved code is unrecoverable*
 - `UNCOMMITTED` > 0 → ⚠️ commit by name: `git -C kvm-pilot commit -m "…" -- <paths>`. **Never `git add -A`/`.`** (`.gitignore` covers venv/artifacts/`config.toml`/`.env`, but a stray secret or large file under a new name would be committed irreversibly — stage by name).
 - `UNTRACKED_NOT_IGNORED` > 0 → ⚠️ eyeball each: is it source to track, or a stray artifact/secret to ignore/delete? Never bulk-add.
-- `ON_PROTECTED_BRANCH: yes (main)` **with** uncommitted or new work → ⚠️ you're working on the release branch; move to a feature branch (`git -C kvm-pilot switch -c <branch>`). Being on `main` with a clean tree (just after a merge) is ✅.
-- `UNPUSHED (ahead)` > 0 on a **feature** branch → ⚠️ offer to push it. (Don't push `main` beyond noting; that's release-adjacent.)
+- `ON_PROTECTED_BRANCH: yes (main)` — **normal here, ✅, not a reason to branch.** kvm-pilot is issue-per-finding **direct-commit-to-`main`** (CLAUDE.md; agent work is not branched). The C1 risk is *unsaved work*, not the branch — do **not** advise `switch -c`. *(v0.2.0: the prior version wrongly assumed a feature-branch/PR flow.)*
+- `UNPUSHED (ahead)` > 0 → ⚠️ **push it** (`git -C kvm-pilot push`). On this project pushing `main` runs CI and backs the work up; it does **not** release (a release needs `gh release create`). Commits left only-local are the actual work-at-risk. *(v0.2.0.)*
 - `BEHIND` > 0 → ⚠️ note; rebase before more work.
 - `DEBUG_MARKERS_IN_DIFF` > 0 (`breakpoint()`/`pdb`/`console.log`/`FIXME`/`XXX`) → ⚠️ remove before commit. Also eyeball the diff for stray `print(` added to **library** modules (`client.py`, `health.py`, drivers/ — the CLI uses `print` legitimately, so the scan doesn't flag it).
 
 ### C2 · Tracking & the resume pointer — *fold tracking + resume + release-state into ONE pass*
 - **Tracked?** kvm-pilot is **issue-per-finding** (see CLAUDE.md): every meaningful change has a GitHub issue. From `RECENT COMMITS`, confirm this session's work references its issues. Untracked meaningful work → ⚠️ open/point at an issue.
-- `TAG_LAG` present → ⚠️ local tags lag the remote (releases are cut via `gh release`, which tags only the remote). Safe fix: `git -C kvm-pilot fetch --tags`.
+- `LOCAL_TAG_LAG` present → **context, NOT a ⚠️ and NOT counted in the tally.** After `gh release` the local tags always trail the remote (which is authoritative); no work is at risk. Only run `git -C kvm-pilot fetch --tags` if you specifically need local tags. *(v0.2.0: this fired as a false positive on the first live run — a released session read as "1 item needs attention" when nothing did.)*
 - `RELEASE_STATE` — context only; **checkpoint does not judge releasability.** "version == latest release" just means nothing is sitting unreleased.
 - **Resume pointer** — judged in § Mandatory handoff (its own verdict): is the newest session memory current vs. what actually happened this session?
 
@@ -58,6 +59,7 @@ Sources of truth that can lie about shipped behavior: `README.md`, `CHANGELOG.md
 - **Never hand-edit the GitHub wiki** — it is auto-generated from `docs/` + `mcp/README.md` + `SKILL.md` by `wiki-sync`. Edit the sources.
 
 ### C5 · Loose ends — *cheap, last*
+- **Device / hardware state left non-default** (kvm-pilot-specific — *this tool mutates real hardware*) → note it in the handoff, don't silently leave it. If the session enabled `keep-awake`/jiggler, rebooted an appliance or target, mounted media, or changed power, the fleet isn't in its resting state and the next session should know. The scan can't see this (querying devices isn't read-only-cheap) — it's a **model-judged handoff note**, not a scanned flag. *(v0.2.0: added after a session left the jiggler enabled on two units and rebooted a target, none of it captured.)*
 - `WORKTREES` > 1 → ⚠️ stray worktree; `git worktree remove` if done.
 - `DOCKER_RUNNING` ≠ none → ⚠️ the redfish-integration sushy-tools container may be left up; stop it if idle.
 - Background jobs/agents from this session still running (check TaskList / your own shells) → ⚠️ stop them.
@@ -94,4 +96,24 @@ Bottom line: SAFE TO STOP  —or—  N items need attention (C2, C4).
 Glyphs: ✅ clean · ⚠️ needs action · ⏭️ n/a this session. Table + one-line verdict; expand each ⚠️ into its exact command directly beneath the table. The bottom line must be consistent with the rows.
 
 ## Self-check before you sign off
-Did every surface actually get interpreted (none skipped as "looked fine")? Is the resume-pointer verdict based on the pointer's *current* state vs. what happened this session? Did you judge memory *worthiness*, not just index integrity? Does every ⚠️ carry an exact command? Did you avoid every unapproved mutation and never suggest a blind-add? Is the bottom line a plain verdict consistent with the rows, and did the handoff actually get written?
+Did every surface actually get interpreted (none skipped as "looked fine")? Is the resume-pointer verdict based on the pointer's *current* state vs. what happened this session? Did you judge memory *worthiness*, not just index integrity? Does every ⚠️ carry an exact command? Did you avoid every unapproved mutation and never suggest a blind-add? Is the bottom line a plain verdict consistent with the rows, and did the handoff actually get written? Did you run the § Self-improvement meta-reflection?
+
+## What this deliberately leaves out
+The scope is **"nothing lost," nothing more.** On purpose it does **not**:
+- **Score releasability** — whether the code is *good enough to ship* is a separate concern (and releasing is a human call; #4's PyPI gate is intentionally out of band).
+- **Run the green bar** (`ruff`/`mypy`/`pytest`) or any slow suite — a checkpoint is a seconds-long sweep; it reports whether *this session* already ran it green, it doesn't re-run it.
+- **Do the morning sweep** — "what changed / is prod healthy / any telemetry alarms" is the *other* skill; checkpoint is the evening mirror.
+- **Audit unchanged surfaces** — a doc/module untouched this session is ⏭️, never opened.
+- **Verify hardware health** — that a device *works* is `healthcheck`'s job; checkpoint only *notes* device state left non-default (C5).
+
+## Self-improvement
+This skill is expected to be imperfect and to **harden every run**. Treat each misfire as a bug to fix on the spot:
+- The **meta-reflection** (procedure step 6) is not optional — it is the mechanism. A false positive, a missed check, or noisy output is a defect in *this skill*, and the fix is an edit to `scan.sh`/`SKILL.md` in the same run.
+- Every amendment **obeys the report-and-offer rule**: propose the diff, apply on confirmation. (An operator explicitly asking to *build/harden* the skill is that confirmation for that run.)
+- Every amendment **adds a § Version history row** pairing the change with the *real incident* that motivated it — so the "why" is never lost and a future session doesn't reintroduce it. **The version-history table is this skill's memory of its own evolution**; read it at the top of a run to avoid re-fixing a known false positive.
+
+## Version history
+| Version | Change | Lesson / incident that drove it |
+|---|---|---|
+| 0.1.0 | Initial skill: five risk-ordered surfaces (VCS · tracking+resume · memory · docs · loose-ends), read-only `scan.sh`, mandatory memory-as-resume-pointer handoff, hard rules. | First cut (prior session). |
+| 0.2.0 | **First live run (this session).** (1) `TAG_LAG` demoted from a ⚠️-with-fix to a neutral `LOCAL_TAG_LAG` context line + excluded from the tally. (2) C1 rubric rewritten for kvm-pilot's real **direct-commit-to-`main`** workflow — stop advising "move to a feature branch," and treat unpushed-`main` as ⚠️ (push runs CI/backs up; it isn't a release). (3) Added a **device-state** loose end (this tool mutates real hardware). (4) Added this **Self-improvement** section, the meta-reflection procedure step, an explicit **leaves-out** scope, and this table. | Run on a just-released session: `TAG_LAG` made an all-clean checkpoint read "1 item needs attention" (local tag `v0.1.0a10` trailing remote `v0.1.0a12` — expected after `gh release`); the branch rubric contradicted the project's own direct-to-`main` doctrine; and the session had left the jiggler on two units + rebooted a target with nothing capturing it. |
