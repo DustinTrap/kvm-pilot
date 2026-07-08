@@ -4,7 +4,7 @@
 > the end of every session (`.claude/skills/checkpoint/`). Standing project rules
 > live in [CLAUDE.md](CLAUDE.md); this file is only **where we are right now**.
 
-**Last updated:** 2026-07-08 · `main @ 9708ea7` · **v0.1.0a14** (published to PyPI)
+**Last updated:** 2026-07-08 · `main @ 4848c09` · **v0.1.0a14** (published to PyPI)
 
 ## Current state
 - **Shipped v0.1.0a14 — the "interface-router" release** (`pip install --pre kvm-pilot`).
@@ -53,9 +53,13 @@
   not the account password, and the agent was correctly blocked from planting its own key.
   Resume by: `dusti` password (→ SSH_ASKPASS) or a user-installed key. Then benchmark
   in-band vs the KVM plane and feed the scorecard.
+- **#187 — implement the MJPEG snapshot fix** in `drivers/glkvm.py`: on a non-JPEG snapshot at
+  native res, `POST /api/streamer/set_params?video_format=1` (MJPEG) → retry → restore. **Verified
+  live this session** on .20 + .39; the cleanest answer to the native-res snapshot gap (supersedes
+  the #151 keyframe-decode approach). Watch the #107 encoder-wedge above 1080p.
 - **#185 — HTTP keep-alive**: re-measure on a fast BMC (Redfish) before implementing.
-- Older open items: **#151** (H.264 keyframe decode, deferred), **#175** (docs-parity CI
-  guard), path-to-`b1` (2nd hardware family + OOB power + HID verify).
+- Older open items: **#151** (H.264 keyframe decode — likely closed by #187), **#175** (docs-parity
+  CI guard), path-to-`b1` (2nd hardware family + OOB power + HID verify).
 
 ## Device state left non-default (this tool mutates real hardware)
 - **My ed25519 key installed on two connected hosts** for the a13/a14 in-band benchmark
