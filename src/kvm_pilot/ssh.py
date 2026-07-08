@@ -110,7 +110,7 @@ class SSHChannel:
         # path keeps the socket under macOS's ~104-char sun_path limit; ssh
         # expands the %h/%p/%r tokens. ControlMaster is a no-op on Windows ssh.
         self.persist = persist
-        _tmp = "/tmp" if os.path.isdir("/tmp") else tempfile.gettempdir()  # noqa: S108
+        _tmp = "/tmp" if os.path.isdir("/tmp") else tempfile.gettempdir()  # noqa: S108  # nosec B108 - a ControlMaster socket under a short /tmp path (macOS sun_path limit); user-owned
         self._control_path = os.path.join(_tmp, "kvm-pilot-cm-%h-%p-%r")
         # Opt-in password auth for the *target* channel (distinct from the
         # key-only appliance channel, #183). Dep-free: the password is fed via
@@ -277,7 +277,7 @@ class SSHChannel:
         if not self.persist or shutil.which("ssh") is None:
             return
         try:
-            subprocess.run(  # nosec B603 - fixed args, no shell
+            subprocess.run(  # nosec B603 B607 - fixed args and no shell; system ssh from PATH is intentional
                 ["ssh", "-O", "exit", "-o", f"ControlPath={self._control_path}", self.target],
                 capture_output=True,
                 timeout=5,
