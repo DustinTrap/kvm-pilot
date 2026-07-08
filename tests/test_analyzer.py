@@ -52,11 +52,46 @@ def test_classify_returns_phase():
 
 
 def test_wait_for_state_reached_after_polls():
+    # #166: consensus=2 (default) needs the target on two consecutive model polls;
+    # FakeBackend repeats its last phase, so grub_menu is seen at calls 3 and 4.
     backend = FakeBackend(["booting", "booting", "grub_menu"])
     analyzer = ScreenAnalyzer(FakeKVM(), backend, default_poll_interval=0.0)
     state = analyzer.wait_for_state("grub_menu", timeout=5.0)
     assert state.phase == "grub_menu"
-    assert backend.calls == 3
+    assert backend.calls == 4
+
+
+def test_consensus_ignores_a_single_transient_frame():
+    # #166: one lone target frame (the live-seen black mid-boot / a one-off misread)
+    # must NOT end the wait — the classifier never sees it twice in a row.
+    backend = FakeBackend(["booting", "grub_menu", "booting", "booting"])  # then repeats booting
+    analyzer = ScreenAnalyzer(FakeKVM(), backend, default_poll_interval=0.0)
+    with pytest.raises(TimeoutError):
+        analyzer.wait_for_state("grub_menu", timeout=0.3)
+
+
+def test_consensus_one_returns_on_first_qualifying_frame():
+    backend = FakeBackend(["grub_menu"])
+    analyzer = ScreenAnalyzer(FakeKVM(), backend, default_poll_interval=0.0)
+    state = analyzer.wait_for_state("grub_menu", timeout=5.0, consensus=1)
+    assert state.phase == "grub_menu" and backend.calls == 1
+
+
+def test_consensus_fast_paths_deterministic_cheap_gate():
+    # A device-state cheap gate (no_signal, no frame classified) is authoritative:
+    # it returns on the FIRST poll despite consensus=2, and never calls the model.
+    class DarkKVM:
+        def snapshot_base64(self, quality: int = 85) -> str:
+            return "x"
+
+        def has_video_signal(self) -> bool:
+            return False
+
+    backend = FakeBackend(["desktop"])
+    analyzer = ScreenAnalyzer(DarkKVM(), backend, default_poll_interval=0.0)
+    state = analyzer.wait_for_state("no_signal", timeout=5.0)
+    assert state.phase == "no_signal"
+    assert backend.calls == 0  # resolved by the cheap gate, no model consulted
 
 
 def test_wait_for_state_times_out():
