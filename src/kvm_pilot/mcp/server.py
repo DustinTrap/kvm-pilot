@@ -557,11 +557,13 @@ async def wait_for_state(
                     pass
 
             start = time.monotonic()
-            # Hold the display awake across the wait so it can't DPMS-sleep and
-            # blind the poll loop (#161); drivers without a jiggler no-op via nullctx.
+            # Hold the display awake AND (on GL) keep the on-demand encoder warm for
+            # the wait, so the poll loop can't DPMS-sleep (#161) or 503 on a cold
+            # streamer (#142); drivers lacking either no-op via nullctx.
             awake = getattr(kvm, "display_awake", nullcontext)
+            warm = getattr(kvm, "streamer_warm", nullcontext)
             try:
-                with awake():
+                with warm(), awake():
                     state = analyzer.wait_for_state(
                         phase, timeout=timeout, hint=hint, on_poll=_note)
             except KVMTimeoutError as exc:

@@ -40,9 +40,12 @@ to it for current truth.
   (`client.py`, `drivers/`, `http.py`, `vision/`) import only the standard library;
   a third-party need (`mcp` for the server, `pyotp`/`ws` for a feature) is imported
   lazily inside its own subpackage/function (see `http.py:_totp_now`,
-  `client.py:watch_events`), never at core import. The *distribution* still depends
-  on `mcp` (the bundled server) — that's deliberate; see [batteries-included rule
-  above and issue #109]. `totp`/`ws` remain opt-in extras for now.
+  `client.py:watch_events`/`_connect_event_ws`), never at core import. The
+  *distribution* depends on `mcp` (the bundled server) and `websocket-client` —
+  that's deliberate; see [batteries-included rule above and issue #109].
+  `websocket-client` became a **base** dependency once headless GL `snapshot` needed
+  it to start GL's on-demand streamer (#142) — a core user-facing surface can't hide
+  behind an extra. `totp` remains an opt-in extra; `ws` is a no-op back-compat alias.
 - **No hard-coded model versions.** The Anthropic vision backend resolves the
   newest model at runtime (`src/kvm_pilot/vision/anthropic.py`); never bake a
   `claude-*` version string into the code.

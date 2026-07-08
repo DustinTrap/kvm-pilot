@@ -35,12 +35,14 @@ not invent per-firmware quirks.
 from __future__ import annotations
 
 import logging
+import threading
 import time
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
 from ..client import PiKVMDriver
-from ..errors import KVMPilotError
+from ..errors import KVMPilotError, UnavailableError
 
 logger = logging.getLogger("kvm_pilot.glkvm")
 
@@ -115,9 +117,12 @@ GLKVM_QUIRKS: list[Quirk] = [
             "idle unit — the common AI-agent case (observed on V1.5.1 and V1.9.1, #142/#173)."
         ),
         workaround=(
-            "Establish a video session first (open the WebRTC stream / web console), "
-            "or use the trigger-then-wait recovery (#142), then snapshot. keep-awake "
-            "does not help — the streamer is off regardless of whether the display is awake."
+            "kvm-pilot now auto-recovers this: `snapshot` registers a stream client "
+            "over kvmd's WS to start the on-demand encoder, then retries (#142). For a "
+            "snapshot-heavy flow, wrap it in `driver.streamer_warm()` (also used by "
+            "`watch`) to hold the encoder warm so every frame is instant. Needs the ws "
+            "dependency (now a base install). keep-awake does not help — the streamer is "
+            "off regardless of whether the display is awake."
         ),
         firmware="all",
         source="observed",
@@ -142,6 +147,119 @@ class GLKVMDriver(PiKVMDriver):
     # absent while /api/msd reported online=false. Substring match — the "1.00"
     # USB revision may vary.
     virtual_media_host_pattern = "Glinet Optical Drive"
+
+    # -- Video: on-demand-streamer recovery (#142) ------------------------
+
+    def snapshot(self) -> bytes:
+        """Capture the screen, recovering GL's on-demand streamer if it is asleep (#142).
+
+        GL runs the video encoder only while a video client is connected, and the
+        JPEG snapshot path cannot start it — so a headless snapshot 503s with
+        ``streamer: null`` (the common AI-agent case; see ``snapshot-needs-video-client``
+        in ``GLKVM_QUIRKS``). On *that specific* failure this registers a stream
+        client (kvmd's ``/api/ws`` in stream mode), waits for the encoder to come up,
+        and retries; the streamer stays up briefly after the client leaves, so the
+        frame lands. Any other 503 — a *running* streamer that still fails (a genuine
+        wedge or a mid-reinit) — is re-raised unchanged, and without the ``ws`` extra
+        it degrades to the base honest error.
+        """
+        try:
+            return super().snapshot()
+        except UnavailableError as exc:
+            try:
+                offline = bool(self.video_signal_info().get("streamer_offline"))
+            except KVMPilotError:
+                offline = False
+            if not offline:
+                raise  # a running streamer that still 503s is a different fault
+            return self._snapshot_via_stream_trigger(exc)
+
+    def _snapshot_via_stream_trigger(
+        self, original: UnavailableError, *, wait: float = 10.0, poll: float = 0.5
+    ) -> bytes:
+        """Hold a stream client open to start the on-demand encoder, then snapshot."""
+        try:
+            ws = self._connect_event_ws(stream=True)
+        except ImportError:
+            # Auto-recovery needs the ws extra; fall back to the honest 503 (#173).
+            raise original from None
+        logger.info(
+            "snapshot: GL streamer was offline (no video client); opened a stream "
+            "client to start the on-demand encoder (#142)"
+        )
+        try:
+            deadline = time.monotonic() + wait
+            while time.monotonic() < deadline:
+                time.sleep(poll)
+                try:
+                    if not self.video_signal_info().get("streamer_offline"):
+                        return super().snapshot()  # encoder up -> a real frame
+                except UnavailableError:
+                    continue  # encoder still spinning up — keep waiting
+                except KVMPilotError:
+                    break  # e.g. SnapshotFormatError (H.264 at this res, #107/#151);
+                    # waiting won't turn H.264 into JPEG — surface it now, don't spin.
+        finally:
+            try:
+                ws.close()
+            except Exception:  # noqa: BLE001 - best-effort close
+                pass
+        # Grace window after close covers a last try; else the base raises honestly.
+        return super().snapshot()
+
+    @contextmanager
+    def streamer_warm(self, *, drain_interval: float = 1.0):
+        """Keep-alive: hold a video client open so GL's on-demand encoder stays
+        running for the whole block — every ``snapshot`` inside is instant, with no
+        ~1.5s cold start (#142). Pure code, no vision/LLM: wrap any snapshot-driven
+        flow (a vision loop, an agent look→act cycle, a boot watch) to raise its
+        success rate, since the encoder is warm before the first look instead of
+        503-ing on it.
+
+        A background thread holds kvmd's ``/api/ws`` (stream mode) open and drains
+        frames so the socket can't back up over a long hold; the client is closed on
+        exit and the encoder lapses after its grace period. Best-effort and never
+        raises: if the WS can't be opened it yields un-warmed (each ``snapshot``
+        still self-recovers per call), so it is always safe to wrap.
+        """
+        ws = None
+        try:
+            ws = self._connect_event_ws(stream=True)
+        except Exception as exc:  # noqa: BLE001 - warming is best-effort
+            logger.debug("streamer_warm: could not open a stream client (%s); "
+                         "snapshots will self-recover per call", exc)
+            yield
+            return
+        logger.info("streamer_warm: holding a stream client open to keep the GL "
+                    "encoder warm (#142)")
+        stop = threading.Event()
+
+        def _drain() -> None:
+            import websocket  # ws extra (a base dependency); for the timeout type
+            try:
+                ws.settimeout(drain_interval)
+                while not stop.is_set():
+                    try:
+                        msg = ws.recv()
+                    except websocket.WebSocketTimeoutException:
+                        continue  # no frame this interval — keep the client registered
+                    except Exception:  # noqa: BLE001 - a dropped WS ends the warm-up
+                        break
+                    if not msg:
+                        break  # server closed the stream
+            finally:
+                try:
+                    ws.close()
+                except Exception:  # noqa: BLE001 - best-effort close
+                    pass
+
+        t = threading.Thread(target=_drain, name="glkvm-streamer-warm", daemon=True)
+        t.start()
+        try:
+            yield
+        finally:
+            stop.set()
+            t.join(timeout=drain_interval + 2.0)
 
     def get_firmware_info(self) -> dict:
         """GL reports its **product** firmware (what the UI shows) at

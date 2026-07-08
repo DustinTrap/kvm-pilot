@@ -31,16 +31,23 @@ classifiers = [
     "Topic :: Utilities",
     "Typing :: Typed",
 ]
-# The client/driver code is stdlib-only at import time; `mcp` is a base dependency
-# because the bundled MCP server ships in the wheel and must run from a plain
-# `pip install kvm-pilot` (see the batteries-included rule in CLAUDE.md, #109).
-# Cap below 2.0: mcp 2.x relocated `mcp.server.fastmcp` (FastMCP/Image), which the
-# server imports. The cap also stops `pip install --pre kvm-pilot` from pulling the
-# mcp 2.x beta into a fresh env (#110).
-dependencies = ["mcp>=1.10,<2"]
+# The client/driver code is stdlib-only at import time (websocket is lazily
+# imported inside its own methods). `mcp` and `websocket-client` are base
+# dependencies because they back core user-facing surfaces that must run from a
+# plain `pip install kvm-pilot` (batteries-included rule, CLAUDE.md, #109):
+#   - mcp: the bundled MCP server ships in the wheel.
+#   - websocket-client: GL's video encoder is on-demand and a headless `snapshot`
+#     must register a stream client over kvmd's WS to start it + keep it warm
+#     (#142) — snapshot/classify/watch would otherwise 503 on an idle GL unit.
+# Cap mcp below 2.0: mcp 2.x relocated `mcp.server.fastmcp` (FastMCP/Image), which
+# the server imports; the cap also stops `pip install --pre kvm-pilot` from pulling
+# the mcp 2.x beta into a fresh env (#110).
+dependencies = ["mcp>=1.10,<2", "websocket-client>=1.9.0"]
 
 [project.optional-dependencies]
 totp = ["pyotp>=2.10.0"]
+# `ws` retained for back-compat (`pip install kvm-pilot[ws]`); websocket-client is
+# now a base dependency (see above), so this is a no-op alias.
 ws = ["websocket-client>=1.9.0"]
 dev = [
     "pytest>=9.1.1",
