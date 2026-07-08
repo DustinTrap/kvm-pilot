@@ -4,7 +4,7 @@
 > the end of every session (`.claude/skills/checkpoint/`). Standing project rules
 > live in [CLAUDE.md](CLAUDE.md); this file is only **where we are right now**.
 
-**Last updated:** 2026-07-08 · `main @ 4fc7af3` · **v0.1.0a14** (published to PyPI)
+**Last updated:** 2026-07-08 · `main @ 9f2d5d2` · **v0.1.0a14** (published to PyPI)
 
 ## Current state
 - **Shipped v0.1.0a14 — the "interface-router" release** (`pip install --pre kvm-pilot`).
@@ -26,6 +26,12 @@
   only ~1.1× on GL (the device's ~150ms response dwarfs the ~15ms handshake) → deferred
   (#185; re-measure on a fast BMC). CLI cold-start ~57ms; per-op preflight ~1s (intake,
   skipped on hot-path commands).
+- **First perf baseline (a13→a14)** measured + published: [docs/analysis/2026-07-08-perf-a13-a14.md](docs/analysis/2026-07-08-perf-a13-a14.md),
+  tracked in **#186**. Persistent SSH = **~2.5×** on a 5-command SSH task (.11/.20); the
+  **KVM-API is honestly flat** (transport unchanged → #185 next). Measured via an
+  isolated a13-venv vs a14, fan-out workflow (one agent per KVM, no shared equipment),
+  adversarially verified (no overclaims). Harness `abharness.py` + workflow
+  `ab-perf-a13-a14` in the session scratchpad; standing method = docs/test-plan.md §12.
 - Working tree clean, pushed, CI green on main; `CHANGELOG [Unreleased]` empty.
 
 ## Next steps
