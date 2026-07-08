@@ -63,7 +63,7 @@ class RemotePowerShell:
     ) -> RemotePowerShell:
         return cls(
             SSHChannel.from_config(cfg, confirm=confirm, dry_run=dry_run),
-            shell=shell,
+            shell=shell,  # nosec B604 - 'shell' is a PowerShell interpreter name, not subprocess shell=True
         )
 
     def reachable(self) -> bool:

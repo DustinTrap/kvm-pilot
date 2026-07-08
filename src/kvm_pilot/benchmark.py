@@ -275,7 +275,7 @@ def benchmark_winrm(
     from .remote_ps import RemotePowerShell
 
     try:
-        rp = RemotePowerShell.from_config(cfg, confirm=_allow, shell=shell)  # type: ignore[arg-type]
+        rp = RemotePowerShell.from_config(cfg, confirm=_allow, shell=shell)  # type: ignore[arg-type]  # nosec B604 - 'shell' is a PowerShell interpreter name, not subprocess shell=True
     except CapabilityError:
         return [CommandResult("ps_exec", "winrm", False, None, 0, "ssh_host not configured (winrm-over-ssh)")]
     if not rp.reachable():
