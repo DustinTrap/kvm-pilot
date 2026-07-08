@@ -6,6 +6,20 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.0a14] — 2026-07-08
+
+The **interface-router** release. There are many ways to reach a managed machine —
+in-process driver calls, the MCP server, the browser console, and now in-band
+**SSH** and **WinRM / remote-PowerShell** — and they differ by orders of magnitude
+in latency and cost, *and* in whether they even work right now (a GL snapshot is a
+JPEG or an undecodable H.264 frame depending on resolution/streamer state; SSH works
+only while the OS is up). This release adds an **adaptive interface router** that
+picks the fastest interface that will actually produce the result, per device,
+benchmarked and self-tuning from real use — split across a KVM **control plane**
+(works at any OS state) and an in-band **OS plane** (fast structured text). Grounded
+in a live benchmark across the GL fleet plus real Linux hosts (#179/#181). Per the
+support matrix this line stays **alpha**.
+
 ### Added
 - `kvm-pilot benchmark` — per-command latency + capability profiler that emits a
   per-device scorecard (`--json` or table); `--select COMMAND` prints the
