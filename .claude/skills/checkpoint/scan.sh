@@ -73,6 +73,22 @@ if [ -n "$REL" ] && [ "$REL" = "v${VER}" ]; then
 elif [ -n "$REL" ]; then
   echo "RELEASE_STATE: version ${VER} vs latest release ${REL} — differs (unreleased bump or newer tag)"
 fi
+# Resume pointer is the in-repo RESUME.md (git-tracked, committed). Flag likely-stale
+# when work landed after RESUME.md was last touched — a hint, not a verdict. (v0.3.0)
+if [ ! -f RESUME.md ]; then
+  echo "RESUME.md: MISSING — the in-repo resume pointer does not exist; create it (mandatory handoff)"
+else
+  R_SHA="$(git log -1 --format='%h' -- RESUME.md 2>/dev/null)"
+  if [ -z "$R_SHA" ]; then
+    echo "RESUME_UNCOMMITTED: present but NEVER COMMITTED — commit it so the pointer is durable"
+  else
+    echo "RESUME.md: last committed $(git log -1 --format='%cs' -- RESUME.md 2>/dev/null) ($R_SHA)"
+    NEWER="$(git rev-list --count "${R_SHA}..HEAD" 2>/dev/null || echo 0)"
+    [ "${NEWER:-0}" -gt 0 ] && echo "RESUME_LIKELY_STALE: $NEWER commit(s) landed after RESUME.md's last commit — refresh it (hint)"
+    # --porcelain shows untracked (??) too, so this catches working-tree edits.
+    [ -n "$(git status --porcelain -- RESUME.md 2>/dev/null)" ] && echo "RESUME_UNCOMMITTED: edited since its last commit — commit it"
+  fi
+fi
 echo "RECENT COMMITS (agent: pick out THIS session's):"
 git log -15 --oneline 2>/dev/null | sed 's/^/  /'
 echo "OPEN_PRS (this branch): $(gh pr list --head "$BRANCH" --json number,title -q '[.[]|"#\(.number) \(.title)"]|join("; ")' 2>/dev/null || echo '(gh unavailable)')"

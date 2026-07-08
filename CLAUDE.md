@@ -2,6 +2,11 @@
 
 Guidance for AI agents (and humans) working in this repo.
 
+> **Starting a session? Read [RESUME.md](RESUME.md) first** — the current working
+> state, what's in flight, and next steps. It's refreshed by `/checkpoint`
+> (`.claude/skills/checkpoint/`) at the end of each session. This file is the
+> standing doctrine; `RESUME.md` is where we are right now.
+
 ## What this is
 `kvm-pilot` — a stdlib-only Python client + CLI for IP-KVM devices (PiKVM, the
 GL.iNet GLKVM fork, BliKVM) with a pluggable LLM **vision** subsystem that
