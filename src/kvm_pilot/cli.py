@@ -774,25 +774,31 @@ def _print_scorecard(card) -> None:
         print(f"  {r.command:14} {r.interface:9} {cap:7} {p50:>8}  {r.samples:>2}  {r.note}")
 
 
+def _firmware_of(kvm) -> str | None:
+    """Best-effort firmware version (drivers exposing get_firmware_info); else None."""
+    fw = getattr(kvm, "get_firmware_info", None)
+    if not callable(fw):
+        return None
+    try:
+        return (fw() or {}).get("version")
+    except Exception:  # noqa: BLE001 - firmware is best-effort metadata, never fatal
+        return None
+
+
 def cmd_benchmark(args) -> int:
     """Profile per-command latency + capability for this device (feeds the router #181).
 
     Builds the driver directly (no preflight — the ~1s intake audit would skew the
     p50) and, unless --no-hid, sends one harmless absolute mouse-move as the HID
-    probe. Output is the scorecard the interface router consumes.
+    probe. Output is the scorecard the interface router consumes; ``--save``
+    persists it to the per-device cache the router reuses.
     """
     from . import benchmark as bench
 
     cfg = _resolve_cfg(args)
     kvm = make_driver_from_config(cfg, confirm=allow_all, dry_run=False)
     args._driver = kvm  # main() closes it on the way out
-    firmware = None
-    fw = getattr(kvm, "get_firmware_info", None)
-    if callable(fw):
-        try:
-            firmware = (fw() or {}).get("version")
-        except Exception:  # noqa: BLE001 - firmware is best-effort metadata, never fatal
-            firmware = None
+    firmware = _firmware_of(kvm)
     card = bench.benchmark_all(
         kvm,
         cfg,
@@ -816,7 +822,116 @@ def cmd_benchmark(args) -> int:
             print(f"\nrouter → {args.select!r}: {pick.interface} ({lat})")
         else:
             print(f"\nrouter → {args.select!r}: no capable interface (escalate / fall back)")
+    if getattr(args, "save", False):
+        from .router import save_scorecard
+
+        print(f"scorecard saved: {save_scorecard(card)}", file=sys.stderr)
     return 0
+
+
+def cmd_route(args) -> int:
+    """Show the interface the router picks for a command — the seamless-selection surface.
+
+    Uses the cached per-device scorecard (re-benchmarking KVM-plane rows if the
+    firmware changed); benchmarks fresh when there's no cache, the command is
+    unknown, or ``--fresh``. The engine picks; you see which interface and why.
+    """
+    from . import benchmark as bench
+    from .router import load_for, plane_of, save_scorecard, select_interface
+
+    cfg = _resolve_cfg(args)
+    kvm = make_driver_from_config(cfg, confirm=allow_all, dry_run=False)
+    args._driver = kvm
+    firmware = _firmware_of(kvm)
+    card = None if args.fresh else load_for(cfg.host, firmware=firmware)
+    fresh = card is None or not any(r.command == args.command for r in card.results)
+    if fresh:
+        card = bench.benchmark_all(
+            kvm, cfg, host=cfg.host, driver_kind=_driver_label(kvm), firmware=firmware,
+            samples=args.samples, hid=not args.no_hid, os_plane=not args.no_os_plane,
+        )
+        save_scorecard(card)
+    assert card is not None  # fresh is True whenever the loaded card is None, so it was rebuilt
+    pick = select_interface(card, args.command)
+    if pick is None:
+        print(f"route {args.command!r}: no capable interface (escalate / fall back)", file=sys.stderr)
+        return 1
+    source = "benchmarked" if fresh else "cached"
+    if args.json:
+        print(json.dumps({
+            "command": args.command, "interface": pick.interface,
+            "plane": plane_of(pick.interface).value, "p50_ms": pick.p50_ms, "source": source,
+        }))
+    else:
+        lat = f"{pick.p50_ms:.1f} ms" if pick.p50_ms is not None else "unmeasured"
+        print(f"route {args.command!r} → {pick.interface} "
+              f"({plane_of(pick.interface).value} plane, {lat}, {source})")
+    return 0
+
+
+def cmd_host_exec(args) -> int:
+    """Run a command on the managed host's OS via the fastest capable in-band
+    interface (ssh or winrm), auto-selected by the router and self-tuned from the
+    outcome (online learning). Needs ``ssh_host`` configured for the profile.
+    """
+    import time
+
+    from . import benchmark as bench
+    from .router import Plane, load_for, save_scorecard, select_interface
+
+    cfg = _resolve_cfg(args)
+    kvm = make_driver_from_config(cfg, confirm=allow_all, dry_run=False)
+    args._driver = kvm
+    command_name = "ps_exec" if args.powershell else "exec"
+
+    def _pick(card):
+        return None if card is None else select_interface(card, command_name, allow_planes={Plane.OS})
+
+    firmware = _firmware_of(kvm)
+    card = load_for(cfg.host, firmware=firmware)
+    if card is None or _pick(card) is None:
+        card = bench.benchmark_all(
+            kvm, cfg, host=cfg.host, driver_kind=_driver_label(kvm),
+            firmware=firmware, samples=args.samples, os_plane=True,
+        )
+        save_scorecard(card)
+    pick = _pick(card)
+    if pick is None:
+        print("host-exec: no capable in-band interface (ssh/winrm) — set ssh_host and "
+              "ensure the target is reachable and credentialed", file=sys.stderr)
+        return 1
+
+    start = time.perf_counter()
+    try:
+        if pick.interface == "winrm":
+            from .remote_ps import RemotePowerShell
+
+            rp = RemotePowerShell.from_config(cfg, confirm=allow_all, shell=args.shell)  # nosec B604 - 'shell' is a PowerShell interpreter name, not subprocess shell=True
+            result = rp.run_ps(args.cmd)
+            rp.ssh.close()
+        else:
+            from .ssh import SSHChannel
+
+            channel = SSHChannel.from_config(cfg, confirm=allow_all)
+            channel.persist = True
+            result = channel.ssh_exec(args.cmd)
+            channel.close()
+    except Exception as exc:  # noqa: BLE001 - a failed exec updates the scorecard, not a crash
+        card.record(command_name, pick.interface, None, ok=False)
+        save_scorecard(card)
+        print(f"host-exec via {pick.interface} failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+        return 1
+
+    elapsed_ms = (time.perf_counter() - start) * 1000
+    rc = result.get("returncode") if isinstance(result, dict) else None
+    ok = rc in (0, None)
+    card.record(command_name, pick.interface, elapsed_ms, ok)  # online learning
+    save_scorecard(card)
+    if isinstance(result, dict):
+        sys.stdout.write(result.get("stdout", ""))
+        if result.get("stderr"):
+            sys.stderr.write(result["stderr"])
+    return 0 if ok else (rc or 1)
 
 
 def cmd_events(args) -> int:
@@ -935,9 +1050,38 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Skip the in-band SSH / WinRM (remote-PowerShell) probes; KVM plane only")
     p.add_argument("--select", metavar="COMMAND",
                    help="After benchmarking, print the interface the router would pick for COMMAND")
+    p.add_argument("--save", action="store_true",
+                   help="Persist the scorecard to the per-device cache the router reuses")
     p.add_argument("--json", action="store_true", help="Emit the scorecard as JSON")
     _add_common(p)
     p.set_defaults(func=cmd_benchmark)
+
+    p = sub.add_parser(
+        "route",
+        help="Show the interface the router picks for a command (uses/refreshes the cached scorecard) (#181)",
+    )
+    p.add_argument("command", help="Command to route (e.g. snapshot, exec, get_info)")
+    p.add_argument("--fresh", action="store_true", help="Re-benchmark instead of using the cache")
+    p.add_argument("--samples", type=int, default=6)
+    p.add_argument("--no-hid", dest="no_hid", action="store_true")
+    p.add_argument("--no-os-plane", dest="no_os_plane", action="store_true")
+    p.add_argument("--json", action="store_true")
+    _add_common(p)
+    p.set_defaults(func=cmd_route)
+
+    p = sub.add_parser(
+        "host-exec",
+        help="Run a command on the managed host's OS via the fastest capable in-band "
+             "interface (ssh/winrm), auto-selected by the router (#181)",
+    )
+    p.add_argument("cmd", help="Command to run on the managed host's OS")
+    p.add_argument("--powershell", action="store_true",
+                   help="Route via WinRM / remote-PowerShell instead of ssh")
+    p.add_argument("--shell", default="powershell",
+                   help="Remote PowerShell interpreter for --powershell (powershell | pwsh)")
+    p.add_argument("--samples", type=int, default=6)
+    _add_common(p)
+    p.set_defaults(func=cmd_host_exec)
 
     p = sub.add_parser("healthcheck",
                        help="Audit device readiness/security/firmware (#80)")

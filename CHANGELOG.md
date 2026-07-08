@@ -22,6 +22,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Opt-in **password auth** for the *target* SSH channel via SSH_ASKPASS
   (dependency-free; the appliance channel stays key-only), configured with
   `ssh_password` / `KVM_PILOT_SSH_PASSWORD` (#183).
+- **Router wired into the CLI** — `kvm-pilot route <command>` prints the interface
+  the router picks (from a cached per-device scorecard, re-benchmarking the KVM
+  plane if the firmware changed); `kvm-pilot host-exec <cmd>` runs a command on
+  the managed host's OS via the fastest capable **in-band** interface (ssh/winrm),
+  auto-selected; `benchmark --save` persists the scorecard (#181).
+- **Online learning** — `Scorecard.record()` folds each real call's latency +
+  outcome back into the scorecard (EWMA) so the router self-tunes with use (#181).
 
 ## [0.1.0a13] — 2026-07-08
 

@@ -94,3 +94,74 @@ def test_is_stale_is_the_row_level_predicate():
     ssh_row = CommandResult("exec", "ssh", True, 276.0, 6)
     assert is_stale(ssh_row, Trigger.POWER) is True          # OS plane dies with power
     assert is_stale(ssh_row, Trigger.RESOLUTION) is False     # resolution is a KVM concern
+
+
+# -- online learning: Scorecard.record (#181 increment 4) -------------------
+
+def test_record_nudges_p50_via_ewma_and_counts_the_sample():
+    card = _card(CommandResult("get_info", "library", True, 100.0, 5))
+    card.record("get_info", "library", 200.0, ok=True)
+    r = card.results[0]
+    assert r.samples == 6
+    assert r.capable is True
+    assert r.p50_ms == 130.0  # EWMA(100, 200, alpha=0.3) = 0.7*100 + 0.3*200
+
+
+def test_record_failure_marks_row_incapable():
+    card = _card(CommandResult("exec", "ssh", True, 50.0, 3))
+    card.record("exec", "ssh", None, ok=False)
+    assert card.results[0].capable is False   # router stops picking it until it succeeds again
+    assert "failed" in card.results[0].note
+
+
+def test_record_appends_an_unknown_command_interface_pair():
+    card = _card(CommandResult("exec", "ssh", True, 50.0, 3))
+    card.record("ps_exec", "winrm", 300.0, ok=True)
+    added = next(r for r in card.results if r.command == "ps_exec")
+    assert added.interface == "winrm" and added.capable and added.p50_ms == 300.0
+
+
+# -- persistence + firmware-aware cache load (#181 increment 3) --------------
+
+def test_scorecard_dict_round_trip():
+    card = Scorecard(host="h", driver="glkvm", firmware="V1.9.1", results=[
+        CommandResult("snapshot", "library", True, 150.0, 5, "note"),
+        CommandResult("exec", "ssh", False, None, 0, "down"),
+    ])
+    back = Scorecard.from_dict(card.to_dict())
+    assert back.host == "h" and back.firmware == "V1.9.1"
+    assert [(r.command, r.interface, r.capable, r.p50_ms) for r in back.results] == \
+           [(r.command, r.interface, r.capable, r.p50_ms) for r in card.results]
+
+
+def test_save_load_and_path_sanitizing(tmp_path):
+    from kvm_pilot.router import load_scorecard, save_scorecard, scorecard_path
+
+    assert scorecard_path("10.0.1.39", base="/tmp/x").endswith("10.0.1.39.json")
+    card = _card(CommandResult("get_info", "library", True, 100.0, 5))
+    path = str(tmp_path / "sc.json")
+    save_scorecard(card, path)
+    assert load_scorecard(path).results[0].p50_ms == 100.0
+
+
+def test_load_for_missing_cache_is_none(tmp_path):
+    from kvm_pilot.router import load_for
+    assert load_for("nope", path=str(tmp_path / "missing.json")) is None
+
+
+def test_load_for_firmware_change_drops_kvm_rows_keeps_os(tmp_path):
+    from kvm_pilot.router import load_for, save_scorecard
+
+    path = str(tmp_path / "h.json")
+    save_scorecard(Scorecard(host="h", driver="glkvm", firmware="V1.5.1", results=[
+        CommandResult("snapshot", "library", True, 150.0, 5),  # KVM plane
+        CommandResult("get_info", "library", True, 50.0, 5),    # KVM plane
+        CommandResult("exec", "ssh", True, 60.0, 5),             # OS plane
+    ]), path)
+
+    same = load_for("h", firmware="V1.5.1", path=path)
+    assert len(same.results) == 3                                # unchanged firmware → all kept
+
+    changed = load_for("h", firmware="V1.9.1", path=path)         # a flash invalidates the KVM plane
+    assert {(r.command, r.interface) for r in changed.results} == {("exec", "ssh")}
+    assert changed.firmware == "V1.9.1"

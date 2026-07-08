@@ -41,6 +41,12 @@ if TYPE_CHECKING:  # avoid importing driver internals at module import time
 INTERFACE = "library"
 
 
+def _ewma(old: float | None, new: float, alpha: float = 0.3) -> float:
+    """Exponentially-weighted moving average — a light-touch online p50 update
+    (recent observations weigh more; no sample history retained)."""
+    return new if old is None else (1 - alpha) * old + alpha * new
+
+
 @dataclass(frozen=True)
 class Op:
     """One benchmarkable command: the capability it needs and how to invoke it.
@@ -124,6 +130,43 @@ class Scorecard:
             "firmware": self.firmware,
             "results": [r.to_dict() for r in self.results],
         }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> Scorecard:
+        keys = ("command", "interface", "capable", "p50_ms", "samples", "note")
+        results = [
+            CommandResult(**{k: row.get(k, "" if k == "note" else None) for k in keys})
+            for row in data.get("results", [])
+        ]
+        return cls(
+            host=data["host"], driver=data["driver"],
+            firmware=data.get("firmware"), results=results,
+        )
+
+    def record(self, command: str, interface: str, latency_ms: float | None, ok: bool) -> None:
+        """Fold one real call's outcome into the scorecard — online learning (#181).
+
+        The router's estimates self-tune from actual use: a matching row's p50 is
+        nudged toward the observed latency (EWMA — recent calls weigh more, no
+        history kept), and its capability is set to the last outcome so a freshly
+        broken interface (auth lost, host down) stops being selected until it
+        succeeds again. Unknown (command, interface) pairs are appended.
+        """
+        for r in self.results:
+            if r.command == command and r.interface == interface:
+                r.samples += 1
+                r.capable = ok
+                if ok and latency_ms is not None:
+                    r.p50_ms = round(_ewma(r.p50_ms, latency_ms), 1)
+                r.note = "observed" if ok else "last call failed"
+                return
+        self.results.append(
+            CommandResult(
+                command, interface, ok,
+                round(latency_ms, 1) if (ok and latency_ms is not None) else None,
+                1, "observed" if ok else "last call failed",
+            )
+        )
 
 
 def _time_calls(
