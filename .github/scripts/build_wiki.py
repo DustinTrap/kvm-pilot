@@ -58,6 +58,9 @@ PAGES: list[tuple[str, str, str | None]] = [
     ("docs/analysis/2026-07-03-rm1pe-firmware-and-encoder.md",
      "2026-07-03-rm1pe-firmware-and-encoder.md",
      "Analysis: 2026-07-03 RM1PE firmware + encoder"),
+    ("docs/analysis/2026-07-08-perf-a13-a14.md",
+     "2026-07-08-perf-a13-a14.md",
+     "Analysis: 2026-07-08 a13→a14 performance"),
 ]
 
 # Link/image markdown: capture the ``[label]`` and the ``(target)`` separately.
