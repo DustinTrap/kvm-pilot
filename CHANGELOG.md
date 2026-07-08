@@ -6,6 +6,23 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- `kvm-pilot benchmark` — per-command latency + capability profiler that emits a
+  per-device scorecard (`--json` or table); `--select COMMAND` prints the
+  interface the adaptive router would pick, `--no-os-plane` skips the in-band
+  probes. Foundation for the interface router (#181, benchmarked in #179).
+- **Adaptive interface router** (`router.py`): KVM-control vs OS-in-band
+  **planes**, `select_interface()` (cheapest *capable* interface), and
+  state-change invalidation (`is_stale`/`stale_rows`) (#181).
+- **SSH** and **WinRM / remote-PowerShell** as first-class, benchmarked
+  interfaces. WinRM ships dependency-free as PowerShell-over-SSH
+  (`remote_ps.py`), with a seam for native WS-Man later (#181).
+- **Persistent SSH** via OpenSSH ControlMaster (`SSHChannel(persist=True)`) —
+  ~10× fewer per-call handshakes on a LAN host (#181, #182).
+- Opt-in **password auth** for the *target* SSH channel via SSH_ASKPASS
+  (dependency-free; the appliance channel stays key-only), configured with
+  `ssh_password` / `KVM_PILOT_SSH_PASSWORD` (#183).
+
 ## [0.1.0a13] — 2026-07-08
 
 The headless-vision release. GL's video encoder is on-demand — it runs only while
