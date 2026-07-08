@@ -766,15 +766,12 @@ def cmd_capabilities(args) -> int:
 
 
 def _print_scorecard(card) -> None:
-    print(
-        f"benchmark {card.driver}@{card.host}  firmware={card.firmware or 'n/a'}  "
-        f"(interface=library-direct)"
-    )
-    print(f"  {'command':16} {'capable':7} {'p50_ms':>8}  {'n':>2}  note")
+    print(f"benchmark {card.driver}@{card.host}  firmware={card.firmware or 'n/a'}")
+    print(f"  {'command':14} {'interface':9} {'capable':7} {'p50_ms':>8}  {'n':>2}  note")
     for r in card.results:
         p50 = f"{r.p50_ms:.1f}" if r.p50_ms is not None else "-"
         cap = "yes" if r.capable else "NO"
-        print(f"  {r.command:16} {cap:7} {p50:>8}  {r.samples:>2}  {r.note}")
+        print(f"  {r.command:14} {r.interface:9} {cap:7} {p50:>8}  {r.samples:>2}  {r.note}")
 
 
 def cmd_benchmark(args) -> int:
@@ -796,18 +793,29 @@ def cmd_benchmark(args) -> int:
             firmware = (fw() or {}).get("version")
         except Exception:  # noqa: BLE001 - firmware is best-effort metadata, never fatal
             firmware = None
-    card = bench.benchmark_driver(
+    card = bench.benchmark_all(
         kvm,
+        cfg,
         host=cfg.host,
         driver_kind=_driver_label(kvm),
         firmware=firmware,
         samples=args.samples,
         hid=not args.no_hid,
+        os_plane=not args.no_os_plane,
     )
     if args.json:
         print(json.dumps(card.to_dict(), indent=2))
     else:
         _print_scorecard(card)
+    if getattr(args, "select", None):
+        from .router import select_interface
+
+        pick = select_interface(card, args.select)
+        if pick is not None:
+            lat = f"{pick.p50_ms:.1f} ms" if pick.p50_ms is not None else "unmeasured"
+            print(f"\nrouter → {args.select!r}: {pick.interface} ({lat})")
+        else:
+            print(f"\nrouter → {args.select!r}: no capable interface (escalate / fall back)")
     return 0
 
 
@@ -923,6 +931,10 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Samples per command (the first, cold, sample is dropped from the p50)")
     p.add_argument("--no-hid", dest="no_hid", action="store_true",
                    help="Skip the harmless HID mouse-move probe (it moves the target cursor)")
+    p.add_argument("--no-os-plane", dest="no_os_plane", action="store_true",
+                   help="Skip the in-band SSH / WinRM (remote-PowerShell) probes; KVM plane only")
+    p.add_argument("--select", metavar="COMMAND",
+                   help="After benchmarking, print the interface the router would pick for COMMAND")
     p.add_argument("--json", action="store_true", help="Emit the scorecard as JSON")
     _add_common(p)
     p.set_defaults(func=cmd_benchmark)
