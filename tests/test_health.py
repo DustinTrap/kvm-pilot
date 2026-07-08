@@ -465,6 +465,16 @@ def test_display_asleep_detected_when_no_signal_but_hid_attached():
     assert d.jiggler_active is True
 
 
+def test_video_signal_reports_streamer_offline_as_unconfirmed():
+    # #165: a null streamer makes has_video_signal fail-open True; the check must
+    # report "unconfirmed", not a false-confident "Capture stream is live".
+    d = stub(has_video_signal=lambda: True,
+             video_signal_info=lambda: {"streamer_offline": True, "hdmi_signal": None})
+    res = check_video_signal(d)
+    assert res.severity is Severity.INFO
+    assert "unconfirmed" in res.detail and "idle" in res.detail
+
+
 def test_no_signal_with_hid_offline_stays_plain_no_signal():
     # No signal AND the HID gadget is not attached => can't claim "asleep";
     # fall back to the plain no-signal warning with no keep-awake AutoFix.

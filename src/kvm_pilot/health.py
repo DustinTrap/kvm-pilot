@@ -450,12 +450,27 @@ def check_video_signal(driver: Any) -> CheckResult | None:
     # into a diagnosis (#143) — no-signal vs bad-format vs subsystem-down.
     detail_fn = getattr(driver, "video_signal_info", None)
     sig = ""
+    info: dict = {}
     if detail_fn is not None:
         try:
             info = detail_fn()
             sig = ", ".join(f"{k}={v}" for k, v in info.items() if v is not None)
         except KVMPilotError:
-            sig = ""
+            info = {}
+    # On-demand streamer idle (block is null): has_video_signal's optimistic
+    # fallback would read as "signal live" here, so report it honestly as
+    # unconfirmed instead — a snapshot would start the streamer and reveal the
+    # truth. Prevents a false-confident "live" on a possibly-dark target (#165).
+    if info.get("streamer_offline"):
+        return CheckResult(
+            id="video-signal",
+            pillar=Pillar.READINESS,
+            severity=Severity.INFO,
+            title="Video signal",
+            detail="Capture subsystem idle (on-demand streamer not started) — signal "
+            "unconfirmed; a snapshot will start it.",
+            cacheable=False,
+        )
     if alive:
         return CheckResult(
             id="video-signal",

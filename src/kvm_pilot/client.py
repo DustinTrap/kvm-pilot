@@ -392,6 +392,9 @@ class PiKVMDriver(PowerMixin, CapabilityMixin):
           is no signal: ``resolution`` holds the *last-negotiated* mode and
           ``captured_fps`` spins on no-signal, so both are stale/spurious then and
           must not be read as current (#158). ``format`` — ``None`` if unreported.
+        * ``streamer_offline`` — the ``streamer`` block is ``null`` (the on-demand
+          streamer has no subscriber and isn't running). The other fields are then
+          uninformative; a snapshot would start it and reveal the truth (#165).
         """
         state = self.get_streamer_state()
         source = self._streamer_source(state)
@@ -412,6 +415,7 @@ class PiKVMDriver(PowerMixin, CapabilityMixin):
             "height": None if no_signal else res.get("height"),
             "fps": None if no_signal else fps,
             "format": source.get("format"),
+            "streamer_offline": isinstance(state, dict) and state.get("streamer") is None,
             "streamer_idle": fps in (0, None) and jpeg_sink.get("has_clients") is False,
         }
 
