@@ -489,6 +489,30 @@ fleet-wide fault. Several non-obvious choices came out of measuring it live:
   shared fleet root password across units is itself a blast-radius hazard;
   per-device keys are the recommendation.
 
+## Adaptive interface router (#181) & target SSH password auth (#183)
+
+- **Interfaces split into two planes, and capability is state-dependent.** KVM
+  (out-of-band: library/mcp/chrome — works at any OS state) vs OS (in-band:
+  ssh/winrm — needs the OS up). The router picks the cheapest *capable* interface
+  from a per-device scorecard. Capability is **not** static — a GL snapshot is
+  JPEG or undecodable H.264 depending on resolution/streamer state (proved live:
+  the same host flipped within 25 min), so a scorecard is only valid until state
+  changes; `is_stale`/`stale_rows` re-benchmark exactly the affected rows.
+- **Persistent connections are the OS-plane lever.** SSH per-call cost is
+  dominated by the handshake (measured ~263ms fresh → ~26ms over a reused
+  ControlMaster, ~10×). The engine should hold persistent connections for every
+  interface — HTTP keep-alive, SSH ControlMaster, MCP stdio.
+- **Target SSH gains opt-in password auth; the appliance channel does NOT.** The
+  *target* `SSHChannel` (the managed host) can use `ssh_password` via SSH_ASKPASS
+  — dependency-free (a 0700 helper echoes an env var; no `sshpass`, no library,
+  the secret never hits disk/argv). The **appliance** channel stays deliberately
+  key-only (see above) — the two are different trust domains on purpose. The
+  agent must not plant its own key on a target to gain access (standing
+  persistence); the operator installs the key or supplies a password.
+- **WinRM ships as PowerShell-over-SSH first.** "Remote PowerShell" is served
+  dependency-free by reusing `SSHChannel` (`powershell -EncodedCommand`), leaving
+  native WS-Man (which needs a third-party client) as an optional extra later.
+
 ## Process
 
 Most structural choices came from adversarial review passes (find → verify →
