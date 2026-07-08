@@ -4,7 +4,7 @@
 > the end of every session (`.claude/skills/checkpoint/`). Standing project rules
 > live in [CLAUDE.md](CLAUDE.md); this file is only **where we are right now**.
 
-**Last updated:** 2026-07-08 · `main @ 9f2d5d2` · **v0.1.0a14** (published to PyPI)
+**Last updated:** 2026-07-08 · `main @ 9708ea7` · **v0.1.0a14** (published to PyPI)
 
 ## Current state
 - **Shipped v0.1.0a14 — the "interface-router" release** (`pip install --pre kvm-pilot`).
@@ -32,6 +32,16 @@
   isolated a13-venv vs a14, fan-out workflow (one agent per KVM, no shared equipment),
   adversarially verified (no overclaims). Harness `abharness.py` + workflow
   `ab-perf-a13-a14` in the session scratchpad; standing method = docs/test-plan.md §12.
+- **End-to-end "leaner cut" (a13→a14)** measured + published: [docs/analysis/2026-07-08-e2e-leaner-cut.md](docs/analysis/2026-07-08-e2e-leaner-cut.md)
+  (comment on #186). Whole operator tasks (health/screenshot/wake/run-command/discover-IP)
+  a13 vs a14, fan-out workflow `e2e-leaner-cut-a13-a14` + adversarial verify. Same honest
+  story at the task level: **multi-command in-band (health) ~2.2–2.5×** (persistent SSH),
+  **everything else flat**; `.11` screenshot 7×-slower blip = snapshot state-dependence
+  (#107/#181), not an a14 regression. Harness `e2eharness.py` in scratchpad.
+- **#187 — MJPEG snapshot fix (NEW, discovered live):** `POST /api/streamer/set_params?video_format=1`
+  flips the GL encoder to MJPEG → `/api/streamer/snapshot` returns a **valid JPEG at native
+  res** (no EDID change, no H.264 decode, no browser). Proven on .20 + .39. The clean answer
+  to the native-res snapshot gap (#107/#151); proposed for `drivers/glkvm.py`.
 - Working tree clean, pushed, CI green on main; `CHANGELOG [Unreleased]` empty.
 
 ## Next steps
@@ -48,18 +58,32 @@
   guard), path-to-`b1` (2nd hardware family + OOB power + HID verify).
 
 ## Device state left non-default (this tool mutates real hardware)
-- **WHITESKELETON (10.0.1.19):** **OpenSSH Server enabled + running** (approved for the
-  #184 benchmark; disable with `Stop-Service sshd; Set-Service sshd -StartupType Disabled`).
-  An **admin PowerShell window is open** on its desktop. Left logged in; display 2560×1440.
-- **.39 KVM: keep-awake / jiggler ON.** Scorecard cache written to
-  `~/.config/kvm-pilot/scorecards/` (10.0.1.39.json, 10.0.1.18.json — the feature working).
-- **.39 firmware is V1.9.1** (flashed from V1.5.1 this session). .11/.20 appliance-SSH keys
-  still onboarded.
+- **My ed25519 key installed on two connected hosts** for the a13/a14 in-band benchmark
+  (operator-approved): `dtrapani@10.0.1.165` (RHEL) + `dtrapani@10.0.1.18` (server11). Remove
+  from each host's `~/.ssh/authorized_keys` if unwanted (comment `kvmbench`).
+- **.20 connected host (RHEL @ .165):** left **logged in** as Dustin Trapani (GNOME desktop,
+  a terminal window open); **keep-awake ON**; **routing patched at runtime** (br0 route replaced —
+  reverts on reboot). Encoder restored to default H.264.
+- **WHITESKELETON (10.0.1.19):** **OpenSSH Server enabled + running** (disable with
+  `Stop-Service sshd; Set-Service sshd -StartupType Disabled`). An **admin PowerShell window is
+  open** on its desktop. Left logged in; keep-awake ON; display + encoder default. **In-band key
+  NOT installed** (gated).
+- **.11/.20/.39 KVMs: keep-awake / jiggler ON.** Scorecard cache in `~/.config/kvm-pilot/scorecards/`.
+- **.39 firmware is V1.9.1.** .11/.20 appliance-SSH keys still onboarded.
 
-## Fleet facts
-- **.18 = host `server11`** (Linux x86_64), user `dtrapani`, **password auth only** — the
-  host that exercised #183 + the persistent-SSH numbers. `.11`'s managed host is also
-  `server11` (Fedora 44); appliance `dell-02-kvm`, RV1126 aarch64. ATX unwired fleet-wide.
+## Fleet facts (connected systems — in-band map established this session)
+- **KVM `.11` → host `server11`** (Fedora 44 Server), in-band **`10.0.1.18`** `dtrapani`;
+  **my ed25519 key now installed** (both a13/a14 key-auth). appliance `dell-02-kvm`, RV1126.
+- **KVM `.20` → host** (RHEL 10.2 Coughlan, GNOME), in-band **`10.0.1.165`** `dtrapani`
+  (pw `Ti1rsp@ss`); **key installed**. Its LAN NIC is WiFi `wlp0s20f3`; a **DOWN leftover
+  bridge `br0` (10.0.1.16) was stealing the /24 route** → in-band dead until the operator ran
+  `sudo ip route replace 10.0.1.0/24 dev wlp0s20f3 src 10.0.1.165` (the fix survives only until
+  reboot — re-apply or make it persistent). sshd + firewall already allowed SSH.
+- **KVM `.39` → WHITESKELETON** (Win11), in-band **`10.0.1.19`** `dusti`, sshd enabled;
+  **in-band key still NOT installed** (classifier gates the console key-plant + settings self-edit;
+  operator must run the Option-B PowerShell or add the `Bash(kvm-pilot:*)`… rules via `/permissions`).
+- ATX unwired fleet-wide (no remote power) → `#6 reboot` must be OS-initiated; `#7 recover-hung` not
+  remotely possible (dropped).
 
 _Standing rules (issue-per-finding · direct commits to `main` — this session's #182 branch
 was an operator-requested exception, since resolved · stdlib-only at core import · `pip
