@@ -765,6 +765,52 @@ def cmd_capabilities(args) -> int:
     return 0
 
 
+def _print_scorecard(card) -> None:
+    print(
+        f"benchmark {card.driver}@{card.host}  firmware={card.firmware or 'n/a'}  "
+        f"(interface=library-direct)"
+    )
+    print(f"  {'command':16} {'capable':7} {'p50_ms':>8}  {'n':>2}  note")
+    for r in card.results:
+        p50 = f"{r.p50_ms:.1f}" if r.p50_ms is not None else "-"
+        cap = "yes" if r.capable else "NO"
+        print(f"  {r.command:16} {cap:7} {p50:>8}  {r.samples:>2}  {r.note}")
+
+
+def cmd_benchmark(args) -> int:
+    """Profile per-command latency + capability for this device (feeds the router #181).
+
+    Builds the driver directly (no preflight — the ~1s intake audit would skew the
+    p50) and, unless --no-hid, sends one harmless absolute mouse-move as the HID
+    probe. Output is the scorecard the interface router consumes.
+    """
+    from . import benchmark as bench
+
+    cfg = _resolve_cfg(args)
+    kvm = make_driver_from_config(cfg, confirm=allow_all, dry_run=False)
+    args._driver = kvm  # main() closes it on the way out
+    firmware = None
+    fw = getattr(kvm, "get_firmware_info", None)
+    if callable(fw):
+        try:
+            firmware = (fw() or {}).get("version")
+        except Exception:  # noqa: BLE001 - firmware is best-effort metadata, never fatal
+            firmware = None
+    card = bench.benchmark_driver(
+        kvm,
+        host=cfg.host,
+        driver_kind=_driver_label(kvm),
+        firmware=firmware,
+        samples=args.samples,
+        hid=not args.no_hid,
+    )
+    if args.json:
+        print(json.dumps(card.to_dict(), indent=2))
+    else:
+        _print_scorecard(card)
+    return 0
+
+
 def cmd_events(args) -> int:
     kvm = _rich_client(args, Capability.EVENTS)
     try:
@@ -868,6 +914,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true", help="Emit a JSON array instead of a comma list")
     _add_common(p)
     p.set_defaults(func=cmd_capabilities)
+
+    p = sub.add_parser(
+        "benchmark",
+        help="Profile per-command latency + capability for the interface router (#181)",
+    )
+    p.add_argument("--samples", type=int, default=6,
+                   help="Samples per command (the first, cold, sample is dropped from the p50)")
+    p.add_argument("--no-hid", dest="no_hid", action="store_true",
+                   help="Skip the harmless HID mouse-move probe (it moves the target cursor)")
+    p.add_argument("--json", action="store_true", help="Emit the scorecard as JSON")
+    _add_common(p)
+    p.set_defaults(func=cmd_benchmark)
 
     p = sub.add_parser("healthcheck",
                        help="Audit device readiness/security/firmware (#80)")
