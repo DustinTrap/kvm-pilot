@@ -140,6 +140,18 @@ grep -rniE "\[(ws|totp)\]|(needs|requires) the .?(ws|totp).? extra|the .(ws|totp
   README.md docs/*.md src/kvm_pilot/mcp/README.md src/kvm_pilot/skill/SKILL.md 2>/dev/null \
   | grep -viE "no-op alias|back-compat|bundled|base dep" | sed 's/^/  /' | head -10 || echo "  none"
 echo "  BASE_DEPS: $(grep -E '^dependencies = ' pyproject.toml 2>/dev/null | sed 's/dependencies = //' || echo '?')"
+# A new CLI subcommand missing from cli.md AND SKILL.md under-documents the shipped
+# surface. The "changed-since-tag" filter above misses it when the command landed
+# before the latest tag but after the doc's last edit (v0.5.0: a14 shipped
+# route/host-exec absent from both, caught only by hand). Compares the argparse
+# subcommands against the command names present in either doc.
+echo "CLI_CMDS_UNDOCUMENTED (shipped subcommands absent from BOTH docs/cli.md and SKILL.md):"
+CLI_CMDS=$(python3 -c 'import re,pathlib;print(" ".join(sorted(set(re.findall(r"add_parser\(\s*\"([a-z][a-z0-9-]*)\"", pathlib.Path("src/kvm_pilot/cli.py").read_text())))))' 2>/dev/null)
+UNDOC=""
+for c in $CLI_CMDS; do
+  grep -qwF -- "$c" docs/cli.md 2>/dev/null || grep -qwF -- "$c" src/kvm_pilot/skill/SKILL.md 2>/dev/null || UNDOC="$UNDOC $c"
+done
+[ -n "$UNDOC" ] && echo "  ⚠️$UNDOC" || echo "  none"
 
 # ==================================================== C5 Loose ends ===========
 echo
