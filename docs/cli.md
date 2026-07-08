@@ -36,7 +36,7 @@ support (`kvm-pilot capabilities` lists them, offline).
 | `eject` | ⚡ | virtual_media | Detach virtual media (inverse of `mount`). |
 | `classify` | | video | Classify the current screen into a boot/run phase once (vision backend flags: `--backend`, `--vision-url`, `--vision-model`, `--hint`). |
 | `watch` | | video | Wait until the screen reaches a phase; `--timeout` is the vision deadline (distinct from the global `--timeout`). |
-| `events` | | events | Stream device events (needs the `ws` extra); `--duration`, `--count`, `--no-stream`. |
+| `events` | | events | Stream device events (WebSocket; `websocket-client` is bundled as a base dep); `--duration`, `--count`, `--no-stream`. |
 
 Common selection flags on device commands: `--profile NAME` (config-file
 profile), `--host/--user/--passwd/--port/--scheme`, `--driver`

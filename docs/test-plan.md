@@ -68,7 +68,7 @@ from `src/kvm_pilot/mcp/README.md`.
 | **Logs** | `logs` | `logs` | The text channel that names a fault a screenshot can't (e.g. stuck encoder behind a 503). |
 | **BootProgress** | `boot-progress` | — | BMC BootProgress; part of the vision/sensing hierarchy for phase. |
 | **FirmwareUpdate** | `firmware-check`, `firmware-update` ⚡ | — (CLI only) | **Highest brick risk** — see §7. `firmware-update` plans by default; `--execute` flashes. Validate #94/#95 no-op detection. |
-| **Events** | `events` | — (CLI only) | Needs the `ws` extra. |
+| **Events** | `events` | — (CLI only) | WebSocket stream; `websocket-client` is a base dep (bundled). |
 | **RemoteShell / SSH** | `ssh-check`, `ssh-exec` ⚡, `ssh-discover`, `ssh-bootstrap` ⚡ | `ssh_reachable`, `ssh_exec` ⚡, `ssh_discover` | In-band to the **managed host** (behind the KVM), not the appliance. `ssh-discover` is an active scan — opt-in, your networks only. |
 | **Appliance-SSH** (recovery) | `appliance` (loadavg/reboot ⚡), `paths` | `appliance_status`, `access_paths`, `appliance_reboot` ⚡ | SSH to the **KVM's own OS** (`root@<kvm-ip>`). **loadavg is NOT a health signal on RV1126** (self-inflates to ~10 idle). `appliance_reboot` is never automated. |
 | **Health / intake** | `healthcheck` | `healthcheck` | The intake gate (§4, #80). Run **first, on first contact**, always. |
