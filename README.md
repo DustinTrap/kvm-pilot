@@ -79,9 +79,8 @@ firmware, the bootloader, and an OS install.
 ## Install
 
 ```bash
-pip install --pre kvm-pilot                    # CLI + skill + MCP server, batteries included
+pip install --pre kvm-pilot                    # CLI + skill + MCP server + WebSocket events, batteries included
 pip install --pre "kvm-pilot[totp]"            # + 2FA / TOTP support (pyotp)
-pip install --pre "kvm-pilot[ws]"              # + WebSocket event streaming
 ```
 
 One install gives you the whole product: the **`kvm-pilot` CLI**, the **`kvm-pilot-mcp`
