@@ -104,6 +104,24 @@ GLKVM_QUIRKS: list[Quirk] = [
         firmware="4.82",
         source="observed",
     ),
+    Quirk(
+        id="snapshot-needs-video-client",
+        summary=(
+            "The video encoder is on-demand: it runs only while a video client "
+            "(WebRTC / the web console) is connected. With no client, /api/streamer "
+            "reports streamer=null and /api/streamer/snapshot 503s indefinitely — it "
+            "does NOT start the streamer, /api/streamer/stream is 404, and there is no "
+            "saved frame. So headless snapshot/classify/watch are unavailable on an "
+            "idle unit — the common AI-agent case (observed on V1.5.1 and V1.9.1, #142/#173)."
+        ),
+        workaround=(
+            "Establish a video session first (open the WebRTC stream / web console), "
+            "or use the trigger-then-wait recovery (#142), then snapshot. keep-awake "
+            "does not help — the streamer is off regardless of whether the display is awake."
+        ),
+        firmware="all",
+        source="observed",
+    ),
 ]
 
 

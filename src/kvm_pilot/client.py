@@ -298,11 +298,13 @@ class PiKVMDriver(PowerMixin, CapabilityMixin):
         return data
 
     def _snapshot_unavailable_detail(self, exc: UnavailableError) -> str:
-        """Explain a snapshot 503 using the streamer state (#142/#143/#154).
+        """Explain a snapshot 503 using the streamer state (#142/#143/#154/#173).
 
-        Three very different causes, keyed on the authoritative ``hdmi.signal``
+        Four very different causes, keyed on the authoritative ``hdmi.signal``
         (not ``source.online``, which stays True with no picture on GL firmware):
-        no HDMI signal, an idle on-demand streamer, or a wedged encoder.
+        a streamer that isn't running at all (on-demand, no client — the dominant
+        cause on idle GL units, #173), no HDMI signal, an idle on-demand streamer,
+        or a wedged encoder.
         """
         try:
             sig = self.video_signal_info()
@@ -313,6 +315,21 @@ class PiKVMDriver(PowerMixin, CapabilityMixin):
                 "the KVM appliance."
             )
         state = ", ".join(f"{k}={v}" for k, v in sig.items() if v is not None) or "no detail"
+        # Most specific first (#173): the on-demand streamer is simply not running.
+        # On GL, /api/streamer/snapshot does NOT start it, /api/streamer/stream is
+        # 404, and there is no saved frame — so this is NOT an encoder wedge, and a
+        # bare retry loop spins forever. The other branches below assume a running
+        # streamer, so this must be checked before them (streamer_offline leaves
+        # hdmi_signal/online null, which would otherwise fall through to "wedged").
+        if sig.get("streamer_offline"):
+            return (
+                f"{exc} — the on-demand video streamer is not running ({state}): on GL "
+                "firmware the encoder starts only for an active video client, and "
+                "`/api/streamer/snapshot` does not start it (there is no MJPEG still to "
+                "trigger it and no saved frame). This is NOT an encoder wedge — open the "
+                "WebRTC stream / web console, or use the trigger-then-wait recovery "
+                "(#142), then retry."
+            )
         if sig.get("hdmi_signal") is False or sig.get("online") is False:
             return (
                 f"{exc} — no video signal ({state}): hdmi.signal is false, so the "
@@ -676,8 +693,34 @@ class PiKVMDriver(PowerMixin, CapabilityMixin):
     def get_atx_state(self) -> dict:
         return self._http.get("/api/atx")
 
+    def _atx_wired(self) -> bool | None:
+        """Is the ATX plugin actually wired to the host header? None if unreadable.
+
+        On GL units (and stock PiKVM without an ATX cable) ``/api/atx`` reports
+        ``enabled: false`` and a ``POST /api/atx/power`` then 500s with an opaque
+        "Server got itself in trouble" (#174). We surface a clear message instead —
+        but only on a *positive* False read; an unreadable ATX must not add a new
+        failure mode, so it proceeds (None) and lets the POST speak.
+        """
+        try:
+            atx = self.get_atx_state()
+        except KVMPilotError:
+            return None
+        return bool(atx.get("enabled", True)) if isinstance(atx, dict) else None
+
     def _atx_power(self, action: str, op: str, desc: str, wait: bool) -> None:
+        # Gate FIRST so --dry-run and a denied confirm never touch the network
+        # (the ATX-wired probe is a GET; it must not fire on a skipped op). Only a
+        # call we are really about to send checks that ATX is wired, turning the
+        # opaque kvmd 500 into a clear message (#174).
         if self.safety.guard(op, desc):
+            if self._atx_wired() is False:
+                raise CapabilityError(
+                    f"Power control is unavailable on {self.host}: ATX reports "
+                    "enabled=false — no power cable is wired to the host front-panel "
+                    "header (common on GL units). Wire ATX/GPIO, or use an out-of-band "
+                    "power path — see `kvm-pilot paths`."
+                )
             self._http.post(
                 "/api/atx/power", params={"action": action, "wait": "1" if wait else "0"}
             )

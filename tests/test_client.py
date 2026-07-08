@@ -3,7 +3,12 @@
 import pytest
 
 from kvm_pilot.client import KVMClient
-from kvm_pilot.errors import SafetyError, SnapshotFormatError
+from kvm_pilot.errors import (
+    CapabilityError,
+    SafetyError,
+    SnapshotFormatError,
+    UnavailableError,
+)
 from kvm_pilot.safety import allow_all, deny_all
 
 
@@ -65,6 +70,35 @@ def test_video_signal_info_flags_null_streamer_offline(client, fake_http):
     assert client.video_signal_info()["streamer_offline"] is True
     fake_http.results["/api/streamer"] = _gl_streamer(hdmi_signal=True)
     assert client.video_signal_info()["streamer_offline"] is False
+
+
+def test_snapshot_503_detail_names_offline_streamer_not_wedge(client, fake_http):
+    # #173: a null (on-demand, no-client) streamer must be explained as "not
+    # running", NOT misdiagnosed as an encoder wedge. streamer_offline leaves
+    # hdmi_signal/online null, which pre-#173 fell through to the "wedged" branch.
+    fake_http.results["/api/streamer"] = {"streamer": None, "source": {}}
+    detail = client._snapshot_unavailable_detail(UnavailableError("Service Unavailable", 503))
+    assert "on-demand video streamer is not running" in detail
+    assert "NOT an encoder wedge" in detail
+    assert "present and capturing" not in detail  # the old, wrong branch
+
+
+def test_power_off_hard_clear_error_when_atx_unwired(client, fake_http):
+    # #174: with ATX unwired (enabled=false) a power op must raise a clear
+    # CapabilityError instead of POSTing and relaying kvmd's opaque HTTP 500.
+    fake_http.results["/api/atx"] = {"enabled": False}
+    with pytest.raises(CapabilityError) as ei:
+        client.power_off_hard()
+    assert "enabled=false" in str(ei.value)
+    # and it must NOT have sent the power POST
+    assert not any(c["path"] == "/api/atx/power" for c in fake_http.calls)
+
+
+def test_power_off_hard_sends_when_atx_wired(client, fake_http):
+    # Positive control: a wired ATX (enabled=true) still sends the power POST.
+    fake_http.results["/api/atx"] = {"enabled": True}
+    client.power_off_hard()
+    assert any(c["path"] == "/api/atx/power" for c in fake_http.calls)
 
 
 def test_video_signal_info_honors_real_resolution_no_signal(client, fake_http):
