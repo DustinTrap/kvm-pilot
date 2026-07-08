@@ -64,7 +64,9 @@ echo "VERSION (__about__.py): ${VER:-?}"
 echo "LATEST_RELEASE (gh, authoritative): ${REL:-'(gh unavailable)'}"
 echo "LOCAL_LATEST_TAG: ${LOCAL_TAG:-none}"
 if [ -n "$REL" ] && [ "$LOCAL_TAG" != "$REL" ]; then
-  echo "TAG_LAG: local tags lag the remote — fix: git fetch --tags"
+  # CONTEXT, not an action: `gh release` tags only the remote, so local tags
+  # always trail after a release. Cosmetic — nothing is at risk. (v0.2.0)
+  echo "LOCAL_TAG_LAG: local $LOCAL_TAG trails remote $REL — EXPECTED after gh release; cosmetic, not work-at-risk"
 fi
 if [ -n "$REL" ] && [ "$REL" = "v${VER}" ]; then
   echo "RELEASE_STATE: version ${VER} == latest release ${REL} — nothing unreleased"
@@ -123,5 +125,9 @@ echo "DOCKER_RUNNING: $(docker ps --format '{{.Names}}' 2>/dev/null | paste -sd,
 echo "LOCKS (.claude): $(find "$PWD/.claude" ../.claude -maxdepth 1 -name '*.lock' 2>/dev/null | paste -sd, - || echo none)"
 echo "GREEN_BAR (NOT run — confirm this session's known-good, or run on demand):"
 echo "  $GREEN_BAR"
+# kvm-pilot mutates REAL hardware; device state isn't read-only-scannable, so this
+# is a model-judged handoff note, not a scanned flag. (v0.2.0)
+echo "DEVICE_STATE: (model) — did this session leave the fleet non-default? (keep-awake/jiggler on,"
+echo "  appliance/target rebooted, media mounted, power changed) — if so, note it in the handoff."
 echo
 echo "SCAN COMPLETE (nothing was modified)."
