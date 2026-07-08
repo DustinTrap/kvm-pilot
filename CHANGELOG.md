@@ -17,6 +17,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the correct *gate* to attempt a snapshot, which reveals the truth.)
 
 ### Added
+- **Multi-frame consensus in `wait_for_state`/`watch` — don't act on one transient
+  frame** (#166): the wait loop returned on the *first* qualifying poll, and that
+  frame flowed out as `frame_ref` into a positional `mouse` act — so a single
+  transient frame (the live-seen black/near-black mid-boot screen, or a one-off
+  model misread) could end a wait and drive a click. It now requires the target
+  phase on `consensus` (default 2) consecutive **model-classified** polls; a
+  deterministic device-state cheap gate (`power_off`/`no_signal`, no frame
+  classified) stays authoritative and returns immediately. `consensus=1` opts out.
 - **Consecutive-failure retry damper — fast-fail a wedged device** (#164): a
   no-signal/wedged unit made every HTTP call burn `max_retries+1` attempts ×
   backoff (**3.8s measured live**), and an agent poll loop repeated that with no

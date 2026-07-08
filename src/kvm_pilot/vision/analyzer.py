@@ -217,6 +217,7 @@ class ScreenAnalyzer:
         poll_interval: float | None = None,
         hint: str = "",
         min_confidence: float | None = None,
+        consensus: int = 2,
         on_poll: Callable | None = None,
     ) -> ScreenState:
         interval = poll_interval if poll_interval is not None else self._poll_interval
@@ -224,6 +225,14 @@ class ScreenAnalyzer:
         deadline = time.monotonic() + timeout
         attempts = 0
         error_attempts = 0
+        # #166: a single transient frame (the live-seen black mid-boot screen, or a
+        # one-off model misread) must not end the wait and flow out as a frame_ref
+        # into a positional act. Require the target phase on N consecutive
+        # model-classified polls; a deterministic cheap-gate result (power_off/
+        # no_signal from device state, no frame classified) is authoritative and
+        # needs no debounce. The streak resets whenever a poll stops qualifying.
+        streak = 0
+        streak_phase: str | None = None
 
         while True:
             elapsed = timeout - (deadline - time.monotonic())
@@ -250,7 +259,17 @@ class ScreenAnalyzer:
                     logger.exception("on_poll callback raised")
 
             if state.phase in target_phases and state.confidence >= threshold:
-                return state
+                # Deterministic device-state result (no classified frame) or an
+                # explicit opt-out: authoritative, return immediately.
+                if not state.image_b64 or consensus <= 1:
+                    return state
+                streak = streak + 1 if state.phase == streak_phase else 1
+                streak_phase = state.phase
+                if streak >= consensus:
+                    return state
+            else:
+                streak = 0
+                streak_phase = None
             if time.monotonic() >= deadline:
                 raise TimeoutError(
                     f"Timed out after {timeout:.0f}s waiting for {target_phases!r}. "
