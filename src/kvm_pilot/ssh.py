@@ -88,6 +88,7 @@ class SSHChannel:
         timeout: float = 30.0,
         safety: SafetyPolicy | None = None,
         persist: bool = False,
+        password: str | None = None,
     ):
         # A host beginning with '-' can be misparsed by the ssh binary (and by
         # socket tooling) as an option flag — e.g. '-oProxyCommand=…'. Reject it
@@ -111,6 +112,12 @@ class SSHChannel:
         self.persist = persist
         _tmp = "/tmp" if os.path.isdir("/tmp") else tempfile.gettempdir()  # noqa: S108
         self._control_path = os.path.join(_tmp, "kvm-pilot-cm-%h-%p-%r")
+        # Opt-in password auth for the *target* channel (distinct from the
+        # key-only appliance channel, #183). Dep-free: the password is fed via
+        # SSH_ASKPASS — a fixed helper script (no secret on disk) that echoes an
+        # env var — so no `sshpass` binary and no third-party library are needed.
+        self.password = password
+        self._askpass_path: str | None = None
 
     @classmethod
     def from_config(
@@ -141,6 +148,7 @@ class SSHChannel:
             key=cfg.ssh_key,
             timeout=cfg.timeout,
             safety=safety,
+            password=cfg.ssh_password,
         )
 
     # -- capability seam (RemoteShell) --------------------------------------
@@ -168,6 +176,7 @@ class SSHChannel:
         # command is a single post-destination arg → ssh runs it via the remote
         # shell; args after the destination are never parsed as ssh options.
         argv = self._ssh_argv() + [command]
+        env, extra = self._auth_run_kwargs()
         try:
             # shell=False and argv is built from config (no untrusted shell string);
             # the single command runs via the remote shell over ssh.
@@ -176,6 +185,8 @@ class SSHChannel:
                 capture_output=True,
                 text=True,
                 timeout=timeout or self.timeout,
+                env=env,
+                **extra,
             )
         except subprocess.TimeoutExpired as exc:
             raise TimeoutError(f"ssh exec timed out after {timeout or self.timeout}s") from exc
@@ -193,10 +204,19 @@ class SSHChannel:
     def target(self) -> str:
         return f"{self.user}@{self.host}" if self.user else self.host
 
+    # The askpass helper reads the password from this env var at exec time, so
+    # the secret is never written to the helper file or passed on argv.
+    _ASKPASS_ENV = "KVM_PILOT_SSH_ASKPASS_PW"
+
     def _ssh_argv(self) -> list[str]:
-        argv = [
-            "ssh",
-            "-o", "BatchMode=yes",            # never block on a password/passphrase prompt
+        argv = ["ssh"]
+        if self.password:
+            # Password auth via SSH_ASKPASS: must NOT set BatchMode=yes (it
+            # disables askpass). Force password so a stale key never silently wins.
+            argv += ["-o", "PubkeyAuthentication=no", "-o", "PreferredAuthentications=password"]
+        else:
+            argv += ["-o", "BatchMode=yes"]  # never block on a password/passphrase prompt
+        argv += [
             "-o", "StrictHostKeyChecking=accept-new",
             "-o", f"ConnectTimeout={int(min(self.timeout, _REACHABLE_TIMEOUT))}",
             "-p", str(self.port),
@@ -207,16 +227,53 @@ class SSHChannel:
                 "-o", f"ControlPath={self._control_path}",
                 "-o", "ControlPersist=30",
             ]
-        if self.key:
+        if self.key and not self.password:
             argv += ["-i", self.key]
         argv.append(self.target)
         return argv
 
-    def close(self) -> None:
-        """Tear down a persistent ControlMaster if one was started (best-effort).
+    def _askpass_helper(self) -> str:
+        """Path to a fixed askpass script (created once, mode 0700).
 
-        Safe to call always: a no-op when ``persist`` is off or no master exists.
+        Contains no secret — it echoes ``$KVM_PILOT_SSH_ASKPASS_PW`` from the
+        environment, which is set only for the ssh subprocess.
         """
+        if self._askpass_path and os.path.exists(self._askpass_path):
+            return self._askpass_path
+        fd, path = tempfile.mkstemp(prefix="kvm-pilot-askpass-", suffix=".sh")
+        with os.fdopen(fd, "w") as fh:
+            fh.write("#!/bin/sh\nprintf '%s\\n' \"$" + self._ASKPASS_ENV + "\"\n")
+        os.chmod(path, 0o700)  # nosec B103 - owner-only exec, no secret in the file
+        self._askpass_path = path
+        return path
+
+    def _auth_run_kwargs(self) -> tuple[dict | None, dict]:
+        """``(env, extra subprocess kwargs)`` for the current auth mode.
+
+        Key mode inherits the environment untouched. Password mode wires up
+        SSH_ASKPASS and detaches stdin + session so ssh takes the password from
+        the helper rather than a tty prompt (and so never hangs).
+        """
+        if not self.password:
+            return None, {}
+        env = dict(os.environ)
+        env["SSH_ASKPASS"] = self._askpass_helper()
+        env["SSH_ASKPASS_REQUIRE"] = "force"   # OpenSSH >=8.4: use askpass even with a tty
+        env.setdefault("DISPLAY", ":0")          # some builds still gate askpass on DISPLAY
+        env[self._ASKPASS_ENV] = self.password
+        return env, {"stdin": subprocess.DEVNULL, "start_new_session": True}
+
+    def close(self) -> None:
+        """Tear down a persistent ControlMaster and the askpass helper (best-effort).
+
+        Safe to call always: a no-op when nothing was started.
+        """
+        if self._askpass_path:
+            try:
+                os.unlink(self._askpass_path)
+            except OSError:
+                pass
+            self._askpass_path = None
         if not self.persist or shutil.which("ssh") is None:
             return
         try:
