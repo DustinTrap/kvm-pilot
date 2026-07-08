@@ -6,7 +6,7 @@ import urllib.error
 
 import pytest
 
-from kvm_pilot.errors import AuthError, BusyError, ConnectionError
+from kvm_pilot.errors import AuthError, BusyError, ConnectionError, UnavailableError
 from kvm_pilot.http import HTTP
 
 
@@ -58,6 +58,54 @@ def test_busy_exhausts_retries(monkeypatch):
     monkeypatch.setattr(h._opener, "open", fake_urlopen)
     with pytest.raises(BusyError):
         h.get("/api/thing")
+
+
+def _always_503(req, context=None, timeout=None):
+    raise urllib.error.HTTPError(req.full_url, 503, "unavail", {}, io.BytesIO(b"down"))
+
+
+def test_breaker_opens_after_consecutive_failures_then_fast_fails(monkeypatch):
+    # #164: a wedged device makes each call burn max_retries+1 attempts. After
+    # `breaker_threshold` calls fail in a row, subsequent calls make ONE attempt.
+    h = HTTP("host", "admin", "pw", max_retries=3, backoff_base=0.0, breaker_threshold=2)
+    calls = {"n": 0}
+    monkeypatch.setattr(h._opener, "open",
+                        lambda req, **kw: (calls.__setitem__("n", calls["n"] + 1), _always_503(req))[1])
+    for _ in range(2):  # two full-retry calls (4 attempts each) trip the breaker
+        with pytest.raises(UnavailableError):
+            h.get("/api/x")
+    assert h.breaker_open is True
+    calls["n"] = 0
+    with pytest.raises(UnavailableError):
+        h.get("/api/x")
+    assert calls["n"] == 1  # open -> single attempt, no 3.5s backoff cycle
+
+
+def test_breaker_resets_on_success(monkeypatch):
+    h = HTTP("host", "admin", "pw", max_retries=1, backoff_base=0.0, breaker_threshold=1)
+    state = {"fail": True}
+
+    def flaky(req, context=None, timeout=None):
+        if state["fail"]:
+            _always_503(req)
+        return FakeResp(_ok_body({"ok": True}))
+
+    monkeypatch.setattr(h._opener, "open", flaky)
+    with pytest.raises(UnavailableError):
+        h.get("/api/x")
+    assert h.breaker_open is True
+    state["fail"] = False
+    assert h.get("/api/x") == {"ok": True}
+    assert h.breaker_open is False  # any 2xx closes the damper
+
+
+def test_breaker_disabled_when_threshold_zero(monkeypatch):
+    h = HTTP("host", "admin", "pw", max_retries=1, backoff_base=0.0, breaker_threshold=0)
+    monkeypatch.setattr(h._opener, "open", _always_503)
+    for _ in range(5):
+        with pytest.raises(UnavailableError):
+            h.get("/api/x")
+    assert h.breaker_open is False  # never trips
 
 
 def test_auth_error_not_retried(monkeypatch):

@@ -7,6 +7,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Consecutive-failure retry damper — fast-fail a wedged device** (#164): a
+  no-signal/wedged unit made every HTTP call burn `max_retries+1` attempts ×
+  backoff (**3.8s measured live**), and an agent poll loop repeated that with no
+  inter-call damping. `HTTP` now counts consecutive transport-down failures
+  (503/timeout) and, past `breaker_threshold` (default 3), drops to a single
+  attempt until the device responds — any 2xx (or definitive 4xx) resets it.
+  Verified live: a poll loop on a down unit dropped from 3.8s/call to 0.07s/call
+  once the damper opened. Not a distributed/half-open breaker — a per-host counter.
 - **Access-path map — the lockout-exposure view** (#162): `kvm-pilot paths`
   (and MCP `access_paths`) rolls up which independent recovery paths are live per
   device — REST, appliance-SSH, target-SSH, out-of-band power, console-HID — each
