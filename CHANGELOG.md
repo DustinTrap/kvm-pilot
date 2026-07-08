@@ -6,6 +6,16 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **`video-signal` healthcheck no longer reports a false "live" on an idle
+  streamer** (#165): when the on-demand streamer has no subscriber, `/api/streamer`
+  returns `streamer: null` and `has_video_signal()` fails open to True, so the
+  check reported "Video signal: live" on a possibly-dark target. `video_signal_info()`
+  now exposes `streamer_offline`, and the check reports an honest INFO "capture
+  subsystem idle — signal unconfirmed; a snapshot will start it." Reproduced +
+  verified live on the bench. (`has_video_signal()` keeps its fail-open True — it's
+  the correct *gate* to attempt a snapshot, which reveals the truth.)
+
 ### Added
 - **Consecutive-failure retry damper — fast-fail a wedged device** (#164): a
   no-signal/wedged unit made every HTTP call burn `max_retries+1` attempts ×

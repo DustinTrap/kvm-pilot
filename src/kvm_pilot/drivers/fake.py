@@ -208,7 +208,8 @@ class FakeDriver(PowerMixin, CapabilityMixin):
     def video_signal_info(self) -> dict:
         return {"online": self.video_signal, "hdmi_signal": self.video_signal,
                 "width": 1920, "height": 1080, "fps": 30 if self.video_signal else 0,
-                "format": "JPEG", "streamer_idle": not self.video_signal}
+                "format": "JPEG", "streamer_offline": False,
+                "streamer_idle": not self.video_signal}
 
     # -- VirtualMedia (gated) --------------------------------------------
 

@@ -59,6 +59,14 @@ def test_video_signal_info_reports_geometry_when_signal_present(client, fake_htt
     assert info["width"] == 2560 and info["height"] == 1440 and info["fps"] == 60
 
 
+def test_video_signal_info_flags_null_streamer_offline(client, fake_http):
+    # #165: a null streamer block (on-demand idle, no subscriber) -> streamer_offline.
+    fake_http.results["/api/streamer"] = {"streamer": None, "source": {}}
+    assert client.video_signal_info()["streamer_offline"] is True
+    fake_http.results["/api/streamer"] = _gl_streamer(hdmi_signal=True)
+    assert client.video_signal_info()["streamer_offline"] is False
+
+
 def test_video_signal_info_honors_real_resolution_no_signal(client, fake_http):
     # #158: V1.9.1 exposes source.real_resolution == "no_signal" — authoritative
     # even if hdmi.signal weren't there; the stale resolution dict is suppressed.
