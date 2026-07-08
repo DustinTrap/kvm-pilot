@@ -7,6 +7,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Access-path map — the lockout-exposure view** (#162): `kvm-pilot paths`
+  (and MCP `access_paths`) rolls up which independent recovery paths are live per
+  device — REST, appliance-SSH, target-SSH, out-of-band power, console-HID — each
+  labeled by its failure *domain* so redundancy isn't oversold: several live paths
+  that all ride the same appliance count as **one** independent domain.
+  `out_of_band_live=false` means every path shares the appliance's fate (verified
+  live: a unit showing "2 paths live" is really 1 domain with no OOB power).
 - **Auto keep-awake for sustained vision/wait sessions** (#161): a
   `client.display_awake()` context manager wraps the CLI `watch` and MCP
   `wait_for_state` poll loops so the target display can't DPMS-sleep and blind
