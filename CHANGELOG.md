@@ -6,6 +6,24 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Headless `snapshot` now works on idle GL units — auto-recovers the on-demand
+  streamer** (#142): GL runs the video encoder only while a video client is
+  connected, so a headless `snapshot`/`classify`/`watch` 503'd forever (the
+  flagship AI-agent case). On a `streamer: null` 503, the GLKVM driver now registers
+  a stream client over kvmd's `/api/ws`, waits for the encoder (~1.5s), and retries —
+  returning a real frame. Verified live: `snapshot` recovers a valid JPEG on RM1PE
+  V1.9.1 (.11/.20); on V1.5.1 (.39) the streamer starts but emits H.264, correctly
+  surfaced as the honest #107 error, not a false success.
+- **`GLKVMDriver.streamer_warm()` keep-alive** (#142): a context manager that holds
+  the stream client open in a background thread so the encoder stays warm for the
+  whole block — every `snapshot` inside is instant (measured ~0.1s vs ~5s cold),
+  no vision/LLM needed. `watch` and the MCP `wait_for_state` loop now wrap their
+  polling in it, so vision-driven flows never 503 on a cold streamer mid-poll.
+- **`websocket-client` promoted to a base dependency** (was the opt-in `ws` extra):
+  headless GL snapshot is a core capability that needs it (#142). `kvm-pilot[ws]`
+  stays as a no-op alias for back-compat. The `events` command now works out of the box.
+
 ### Fixed
 - **`snapshot` 503 no longer misdiagnoses an idle on-demand streamer as a wedged
   encoder** (#173): with `streamer: null` (on-demand, no video client) the

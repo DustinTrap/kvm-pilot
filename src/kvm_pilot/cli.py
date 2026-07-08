@@ -525,11 +525,13 @@ def cmd_watch(args) -> int:
     def _progress(state, elapsed):
         print(f"  [{elapsed:6.1f}s] {state.phase} ({state.confidence:.2f}): {state.description[:70]}")
 
-    # Hold the display awake for the whole wait so it can't DPMS-sleep mid-poll
-    # and blind the vision loop (#161); drivers without a jiggler no-op via nullctx.
+    # Hold the display awake AND (on GL) keep the on-demand encoder warm for the
+    # whole wait, so the loop can't DPMS-sleep (#161) or 503 on a cold streamer
+    # (#142) mid-poll; drivers lacking either no-op via nullctx.
     awake = getattr(kvm, "display_awake", nullcontext)
+    warm = getattr(kvm, "streamer_warm", nullcontext)
     try:
-        with awake():
+        with warm(), awake():
             final = analyzer.wait_for_state(
                 args.phase, timeout=args.timeout, hint=args.hint or "", on_poll=_progress
             )

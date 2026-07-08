@@ -926,25 +926,27 @@ class PiKVMDriver(PowerMixin, CapabilityMixin):
 
     # -- WebSocket (optional dep) ---------------------------------------
 
-    def watch_events(
-        self, on_event=None, stream: bool = True, timeout: float | None = None
-    ) -> Generator:
+    def _connect_event_ws(self, *, stream: bool = True):
+        """Open kvmd's ``/api/ws`` event WebSocket and return the connected socket.
+
+        Needs the ``ws`` extra (``websocket-client``), lazily imported so the core
+        stays stdlib-only. Honors the client's TLS choice on this credential-bearing
+        channel (a pinned CA file wins). Shared by :meth:`watch_events` and the GLKVM
+        on-demand-streamer trigger (#142) — connecting in ``stream`` mode registers a
+        video client, which is what starts GL's on-demand encoder. Caller closes it.
+        """
         try:
             import websocket  # type: ignore
         except ImportError as exc:
             raise ImportError(
-                "websocket-client is required for watch_events(). "
-                "Install:  pip install 'kvm-pilot[ws]'"
+                "websocket-client is required. Install:  pip install 'kvm-pilot[ws]'"
             ) from exc
-
         wss = self._http._base.replace("https://", "wss://").replace("http://", "ws://")
         uri = f"{wss}/api/ws" + ("" if stream else "?stream=0")
         headers = {
             "X-KVMD-User": self._http._user,
             "X-KVMD-Passwd": self._http._effective_passwd(),
         }
-        # Honor the client's TLS choice on this credential-bearing channel
-        # instead of always disabling verification; a pinned CA file wins.
         verify_ws = self._http._verify_ssl or bool(self._http._ssl_ca_file)
         sslopt: dict = {"cert_reqs": ssl.CERT_REQUIRED if verify_ws else ssl.CERT_NONE}
         if self._http._ssl_ca_file:
@@ -953,6 +955,16 @@ class PiKVMDriver(PowerMixin, CapabilityMixin):
             sslopt["check_hostname"] = False
         ws = websocket.WebSocket(sslopt=sslopt)
         ws.connect(uri, header=headers)
+        return ws
+
+    def watch_events(
+        self, on_event=None, stream: bool = True, timeout: float | None = None
+    ) -> Generator:
+        # _connect_event_ws raises a helpful ImportError first if the ws extra is
+        # absent; websocket is guaranteed importable past it (for the timeout type).
+        ws = self._connect_event_ws(stream=stream)
+        import websocket  # type: ignore
+
         deadline = time.time() + timeout if timeout else None
         try:
             while True:

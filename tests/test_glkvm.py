@@ -5,6 +5,8 @@ stock PiKVM (#140)."""
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from emulator import EmulatorServer
@@ -12,7 +14,12 @@ from kvm_pilot import GLKVMDriver
 from kvm_pilot.client import PiKVMDriver
 from kvm_pilot.drivers.base import Capability
 from kvm_pilot.drivers.pikvm import BliKVMDriver
-from kvm_pilot.errors import ApiDisabledError, SafetyError
+from kvm_pilot.errors import (
+    ApiDisabledError,
+    SafetyError,
+    SnapshotFormatError,
+    UnavailableError,
+)
 from kvm_pilot.safety import deny_all
 
 
@@ -247,3 +254,110 @@ def test_apply_firmware_update_uploads_local_image_before_flashing(emu, tmp_path
     posts = [p for (m, p) in emu.state.calls if m == "POST"]
     # Upload must precede the flash trigger.
     assert posts.index("/api/upgrade/upload") < posts.index("/api/upgrade/start")
+
+
+# -- on-demand-streamer snapshot recovery + keep-alive (#142) ---------------
+
+class _FakeWS:
+    """Minimal stand-in for a websocket-client WebSocket."""
+    def __init__(self):
+        self.closed = False
+    def settimeout(self, _t):
+        pass
+    def recv(self):
+        time.sleep(0.02)
+        return "{}"          # a drained event frame
+    def close(self):
+        self.closed = True
+
+
+def test_glkvm_snapshot_recovers_offline_streamer(emu, monkeypatch):
+    # #142: a 503 with streamer_offline triggers a stream client, waits for the
+    # encoder, and retries — returning a real frame and closing the client.
+    d = gl(emu)
+    snaps = {"n": 0}
+    def fake_base_snapshot(self):
+        snaps["n"] += 1
+        if snaps["n"] == 1:
+            raise UnavailableError("Service Unavailable", 503)
+        return b"\xff\xd8\xff recovered"
+    vsi = {"n": 0}
+    def fake_vsi(self):
+        vsi["n"] += 1
+        return {"streamer_offline": vsi["n"] <= 1}   # offline first, up afterwards
+    ws = _FakeWS()
+    monkeypatch.setattr(PiKVMDriver, "snapshot", fake_base_snapshot)
+    monkeypatch.setattr(GLKVMDriver, "video_signal_info", fake_vsi)
+    monkeypatch.setattr(GLKVMDriver, "_connect_event_ws", lambda self, **kw: ws)
+    assert d.snapshot().startswith(b"\xff\xd8\xff")
+    assert ws.closed is True                          # trigger client cleaned up
+
+
+def test_glkvm_snapshot_reraises_503_when_streamer_running(emu, monkeypatch):
+    # A 503 while the streamer IS running is a different fault (wedge/reinit) —
+    # do NOT open a trigger, just re-raise the honest error.
+    d = gl(emu)
+    monkeypatch.setattr(PiKVMDriver, "snapshot",
+                        lambda self: (_ for _ in ()).throw(UnavailableError("503", 503)))
+    monkeypatch.setattr(GLKVMDriver, "video_signal_info",
+                        lambda self: {"streamer_offline": False})
+    opened = {"ws": False}
+    monkeypatch.setattr(GLKVMDriver, "_connect_event_ws",
+                        lambda self, **kw: opened.__setitem__("ws", True))
+    with pytest.raises(UnavailableError):
+        d.snapshot()
+    assert opened["ws"] is False                      # never triggered
+
+
+def test_glkvm_snapshot_recovery_bails_on_h264(emu, monkeypatch):
+    # #107/#151: once the streamer is up but emits H.264, waiting can't turn it
+    # into JPEG — surface SnapshotFormatError promptly instead of spinning.
+    d = gl(emu)
+    snaps = {"n": 0}
+    def fake_base_snapshot(self):
+        snaps["n"] += 1
+        if snaps["n"] == 1:
+            raise UnavailableError("503", 503)
+        raise SnapshotFormatError("non-JPEG bytes (H.264 NAL)")
+    monkeypatch.setattr(PiKVMDriver, "snapshot", fake_base_snapshot)
+    # offline on the first check (drives the trigger), up thereafter
+    vsi = {"n": 0}
+    monkeypatch.setattr(GLKVMDriver, "video_signal_info",
+                        lambda self: {"streamer_offline": (vsi.__setitem__("n", vsi["n"] + 1) or vsi["n"] <= 1)})
+    monkeypatch.setattr(GLKVMDriver, "_connect_event_ws", lambda self, **kw: _FakeWS())
+    with pytest.raises(SnapshotFormatError):
+        d.snapshot()
+    assert snaps["n"] <= 3                             # bailed, did not spin the deadline
+
+
+def test_glkvm_snapshot_falls_back_when_ws_missing(emu, monkeypatch):
+    # Without the ws extra the trigger can't open — degrade to the honest 503.
+    d = gl(emu)
+    monkeypatch.setattr(PiKVMDriver, "snapshot",
+                        lambda self: (_ for _ in ()).throw(UnavailableError("503", 503)))
+    monkeypatch.setattr(GLKVMDriver, "video_signal_info",
+                        lambda self: {"streamer_offline": True})
+    def no_ws(self, **kw):
+        raise ImportError("websocket-client is required")
+    monkeypatch.setattr(GLKVMDriver, "_connect_event_ws", no_ws)
+    with pytest.raises(UnavailableError):
+        d.snapshot()
+
+
+def test_streamer_warm_opens_and_closes_client(emu, monkeypatch):
+    # The keep-alive holds a stream client for the block and closes it on exit.
+    d = gl(emu)
+    ws = _FakeWS()
+    monkeypatch.setattr(GLKVMDriver, "_connect_event_ws", lambda self, **kw: ws)
+    with d.streamer_warm(drain_interval=0.05):
+        time.sleep(0.1)
+    assert ws.closed is True
+
+
+def test_streamer_warm_best_effort_when_ws_unavailable(emu, monkeypatch):
+    # If the client can't be opened, warming is a no-op that never raises.
+    d = gl(emu)
+    monkeypatch.setattr(GLKVMDriver, "_connect_event_ws",
+                        lambda self, **kw: (_ for _ in ()).throw(ImportError("no ws")))
+    with d.streamer_warm():                            # must not raise
+        pass
