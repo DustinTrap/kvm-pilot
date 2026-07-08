@@ -14,6 +14,7 @@ support (`kvm-pilot capabilities` lists them, offline).
 |---|---|---|---|
 | `info` | | system_info | Device/system info as JSON. |
 | `capabilities` | | — (offline) | List the capabilities this driver supports; `--json` for an array. |
+| `benchmark` | `--samples`, `--no-hid`, `--no-os-plane`, `--select CMD`, `--json` | — | Profile per-command latency + capability across interfaces (library/ssh/winrm) → the adaptive router scorecard (#181). |
 | `healthcheck` | | — | Preflight audit (readiness/security/firmware, #80). Run on first contact. `--json`, `--fix` (offer safe reversible auto-fixes). |
 | `firmware-check` | | system_info | Firmware currency vs the bundled registry; reports the vendor's latest when the device knows it. |
 | `firmware-update` | ⚡ | firmware_update | Assess and (with `--execute`) perform a gated remote flash. Plans by default; verifies the device actually entered an upgrade state (#94). `--image`, `--i-have-physical-access`. |

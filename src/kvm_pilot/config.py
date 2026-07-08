@@ -73,12 +73,14 @@ class HostConfig:
     # In-band channel to the managed host behind the KVM (a *separate* machine
     # from the appliance). Used by the SSH channel (src/kvm_pilot/ssh.py) for
     # reachability probes and recovery commands on the target OS. Auth is
-    # key-based: ssh_key is a private-key path, or omit it to use the agent's SSH
-    # config / default keys. No password auth (avoids an sshpass dependency).
+    # key-based by default: ssh_key is a private-key path, or omit it to use the
+    # agent's SSH config / default keys. ssh_password enables opt-in password auth
+    # for password-only targets (#183) — fed dep-free via SSH_ASKPASS, no sshpass.
     ssh_host: str | None = None
     ssh_user: str | None = None
     ssh_port: int = 22
     ssh_key: str | None = None
+    ssh_password: str | None = None
 
     # Appliance-SSH channel — SSH to the KVM appliance's OWN OS (root@<kvm-ip>),
     # distinct from ssh_host above. The host is INFERRED from `host` (the
@@ -145,6 +147,7 @@ def resolve_host(
     ssh_user: str | None = None,
     ssh_port: int | None = None,
     ssh_key: str | None = None,
+    ssh_password: str | None = None,
     appliance_ssh: bool | None = None,
     appliance_ssh_user: str | None = None,
     appliance_ssh_port: int | None = None,
@@ -224,6 +227,7 @@ def resolve_host(
         ssh_user=pick("ssh_user", ssh_user, "KVM_PILOT_SSH_USER"),
         ssh_port=int(pick("ssh_port", ssh_port, "KVM_PILOT_SSH_PORT", 22)),
         ssh_key=pick("ssh_key", ssh_key, "KVM_PILOT_SSH_KEY"),
+        ssh_password=pick("ssh_password", ssh_password, "KVM_PILOT_SSH_PASSWORD"),
         appliance_ssh=bool(appliance_val),
         appliance_ssh_user=pick(
             "appliance_ssh_user", appliance_ssh_user, "KVM_PILOT_APPLIANCE_SSH_USER", "root"),
