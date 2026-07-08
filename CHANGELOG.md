@@ -6,6 +6,18 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.0a13] — 2026-07-08
+
+The headless-vision release. GL's video encoder is on-demand — it runs only while
+a video client is connected — so a headless `snapshot`/`classify`/`watch` (the
+flagship AI-agent case) 503'd forever on an idle unit. This release makes it work:
+the driver starts the on-demand encoder itself over kvmd's WebSocket and keeps it
+warm, plus honesty fixes for the snapshot-503 and power-on-unwired-ATX messages —
+all grounded in a full live reliability sweep of the GL-RM1PE fleet (`.11`/`.20`
+V1.9.1, `.39` V1.5.1; findings in #176). Per the support matrix this line stays
+**alpha**: only GL-RM1PE is live-validated (V1.9.1 reaches beta-grade there), while
+the other drivers remain emulator-only.
+
 ### Added
 - **Headless `snapshot` now works on idle GL units — auto-recovers the on-demand
   streamer** (#142): GL runs the video encoder only while a video client is
@@ -23,6 +35,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **`websocket-client` promoted to a base dependency** (was the opt-in `ws` extra):
   headless GL snapshot is a core capability that needs it (#142). `kvm-pilot[ws]`
   stays as a no-op alias for back-compat. The `events` command now works out of the box.
+- **GLKVM quirk `snapshot-needs-video-client`** (observed, #142/#173): documents
+  that the video encoder is on-demand and headless `snapshot`/`classify`/`watch`
+  are unavailable with no active video client — surfaced by `healthcheck`.
+- **Driver-features reference** (`docs/driver-features.md`, #171) and a reusable
+  **hardware reliability test plan** (`docs/test-plan.md`, #172), both published to
+  the wiki (registered in `build_wiki.py` `PAGES`). The 2026-07-07 sweep evidence is
+  recorded in the run ledger (maturity re-derived).
 
 ### Fixed
 - **`snapshot` 503 no longer misdiagnoses an idle on-demand streamer as a wedged
@@ -42,14 +61,6 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   really about to send — dry-run/denied calls still touch nothing) and raises a
   clear `CapabilityError` pointing at `kvm-pilot paths`. Verified live on all three
   units.
-
-### Added
-- **GLKVM quirk `snapshot-needs-video-client`** (observed, #142/#173): documents
-  that the video encoder is on-demand and headless `snapshot`/`classify`/`watch`
-  are unavailable with no active video client — surfaced by `healthcheck`.
-- **Driver-features reference** (`docs/driver-features.md`, #171) and a reusable
-  **hardware reliability test plan** (`docs/test-plan.md`, #172), both published to
-  the wiki (registered in `build_wiki.py` `PAGES`).
 
 ## [0.1.0a12] — 2026-07-07
 
