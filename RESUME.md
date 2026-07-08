@@ -4,7 +4,7 @@
 > the end of every session (`.claude/skills/checkpoint/`). Standing project rules
 > live in [CLAUDE.md](CLAUDE.md); this file is only **where we are right now**.
 
-**Last updated:** 2026-07-08 · `main @ 303ed57` · **v0.1.0a14** (published to PyPI)
+**Last updated:** 2026-07-08 · `main @ 4fc7af3` · **v0.1.0a14** (published to PyPI)
 
 ## Current state
 - **Shipped v0.1.0a14 — the "interface-router" release** (`pip install --pre kvm-pilot`).
