@@ -5,7 +5,9 @@ name: Firmware registry ingest
 # `gh issue list` and stops. This is a courteous use of free public CI: a
 # per-open/edit trigger would run an obnoxious number of jobs. Dedup: issues
 # labelled `ingested` are skipped and the merge is idempotent, so a re-run never
-# churns. Free on public repos.
+# churns. Invalid submissions are parked with `ingest-error` after ONE ❌ comment
+# (remove the label after fixing the body to re-queue) — otherwise a malformed
+# issue would be re-commented hourly forever (#188). Free on public repos.
 
 on:
   schedule:
@@ -33,8 +35,9 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           gh label create ingested --description "firmware report folded into the registry" --color ededed 2>/dev/null || true
+          gh label create ingest-error --description "firmware report failed validation; fix the body, then remove this label to re-queue" --color d93f0b 2>/dev/null || true
           # Write outside the workspace so the later checkout doesn't wipe it.
-          gh issue list --search "label:firmware-report -label:ingested is:open" \
+          gh issue list --search "label:firmware-report -label:ingested -label:ingest-error is:open" \
             --json number,body --limit 200 > "$RUNNER_TEMP/items.json"
           echo "count=$(jq length "$RUNNER_TEMP/items.json")" >> "$GITHUB_OUTPUT"
 
@@ -68,7 +71,7 @@ jobs:
             case "$status" in
               ingested) gh issue comment "$num" --body "✅ Queued in this hour's registry PR: $msg"; gh issue edit "$num" --add-label ingested ;;
               noop)     gh issue comment "$num" --body "ℹ️ Already in the registry — nothing to change."; gh issue edit "$num" --add-label ingested ;;
-              invalid)  gh issue comment "$num" --body "❌ Couldn't ingest: $msg. Fix the issue and it retries next hour." ;;
+              invalid)  gh issue comment "$num" --body "❌ Couldn't ingest: $msg. Fix the issue body, then remove the \`ingest-error\` label to re-queue it for the next hourly run."; gh issue edit "$num" --add-label ingest-error ;;
             esac
           done
 

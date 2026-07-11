@@ -60,3 +60,17 @@ def test_release_verifies_tag_matches_version():
     # a step derives the version from the tag and greps the built artifacts
     assert "GITHUB_REF_NAME" in rel and "kvm_pilot-${V}" in rel, \
         "release.yml must verify the built artifact version matches the release tag"
+
+
+# -- firmware ingest must park invalid submissions (#188) -------------------
+
+def test_firmware_ingest_parks_invalid_submissions():
+    """An invalid firmware-report gets ONE ❌ comment + the ingest-error label and
+    leaves the hourly queue — without this, a malformed issue is re-commented
+    forever (#177/#180 spammed hourly for 3 days)."""
+    wf = (Path(__file__).resolve().parents[1] / ".github" / "workflows"
+          / "firmware-ingest.yml").read_text()
+    assert "-label:ingest-error" in wf, "selection query must exclude parked issues"
+    assert re.search(r"invalid\).*--add-label ingest-error", wf), \
+        "the invalid branch must park the issue with the ingest-error label"
+    assert "gh label create ingest-error" in wf, "the label must be bootstrapped"
