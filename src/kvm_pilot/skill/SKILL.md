@@ -372,7 +372,8 @@ eject | keep-awake | recover-hid | appliance | paths | classify | watch |
 events`. Run
 `healthcheck` on first contact (see above); it also auto-runs ahead of destructive
 subcommands. `firmware-check` reports firmware currency and, where a device knows
-its vendor's latest, the update to contribute to the registry.
+its vendor's latest, **auto-files** the registry contribution as a GitHub issue
+(needs the `gh` CLI; `--no-file-report` to opt out, `--dry-run` to preview).
 `--dry-run` logs destructive
 actions without sending them (it short-circuits before any prompt, so it is
 safe in automation); `--yes` skips the interactive y/N confirmation on a real

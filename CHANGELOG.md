@@ -6,6 +6,26 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- `firmware-check` now **auto-files** the "Latest known release" report as a
+  `firmware-report` issue (via the `gh` CLI) when the registry SSoT is behind
+  the device-reported latest — the emission side of the registry telemetry loop
+  was fully manual and produced almost no reports (#189). On by default;
+  `--no-file-report` opts out, `--dry-run` previews the exact issue body,
+  `--source`/`--date`/`--repo` override the details. Deduplicated against
+  existing reports and validated with the same rules the ingest applies.
+- `firmware_registry.render_issue_form()` — the inverse of `parse_issue_form`,
+  so auto-filed bodies round-trip through the ingest parser (#189).
+- `reconcile()` carries the registry entry's `source` (release channel URL)
+  into the suggested submission, so known devices auto-file with no extra input.
+
+### Changed
+- The hourly firmware-ingest workflow **parks invalid submissions**: one ❌
+  comment + the `ingest-error` label (remove the label after fixing the body to
+  re-queue). Previously a malformed `firmware-report` issue was re-commented
+  every hour forever — #177/#180 accumulated ~59 bot comments each over 3 days
+  (#188).
+
 ## [0.1.0a14] — 2026-07-08
 
 The **interface-router** release. There are many ways to reach a managed machine —

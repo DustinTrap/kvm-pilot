@@ -41,6 +41,7 @@ from .config import resolve_host
 from .drivers import make_driver_from_config
 from .drivers.base import Capability
 from .errors import CapabilityError, KVMPilotError, SafetyError
+from .firmware_registry import UPSTREAM_REPO
 from .safety import allow_all, interactive_confirm
 
 if TYPE_CHECKING:
@@ -569,12 +570,78 @@ def cmd_healthcheck(args) -> int:
     return 0
 
 
+def _file_firmware_report(submission: dict, args) -> dict:
+    """File the ``reconcile()`` suggestion as a ``firmware-report`` issue upstream (#189).
+
+    On by default whenever the registry is behind (``--no-file-report`` opts out);
+    never silent and never fatal — the returned outcome dict says what happened and
+    why, and a filing failure must not break ``firmware-check`` itself.
+    """
+    import datetime
+    import shutil
+    import subprocess
+
+    from .firmware_registry import render_issue_form, validate_submission
+
+    sub = dict(submission)
+    if args.source:
+        sub["source"] = args.source
+    sub["date"] = args.date or datetime.date.today().isoformat()
+    if not sub.get("source"):
+        return {"filed": False, "reason": "no known source URL for this device — pass "
+                                          "--source <release-channel URL> to file the report"}
+    errs = validate_submission(sub)
+    if errs:  # never file a report the ingest pipeline would park (#188)
+        return {"filed": False, "reason": "report failed validation: " + "; ".join(errs)}
+    # One identity string for both the title and the dedup search — if they
+    # drift apart, every run re-files a duplicate (the emission-side twin of #188).
+    ident = f"{sub['vendor']} {sub['product']} latest {sub['latest']}"
+    title = f"[firmware] {ident} (auto-reported)"
+    body = render_issue_form(sub)
+    if args.dry_run:
+        return {"filed": False, "dry_run": True, "title": title, "body": body,
+                "reason": "dry-run: nothing sent"}
+    if shutil.which("gh") is None:
+        return {"filed": False, "reason": "GitHub CLI (gh) not found — install it and "
+                                          "`gh auth login`, or file the issue form by hand"}
+    search = f'label:firmware-report in:title "{ident}"'
+    try:
+        # --state all: an ingested-and-closed report must still suppress re-filing,
+        # because the local bundled registry stays behind until the next release.
+        listed = subprocess.run(  # nosec B603 — fixed argv, no shell (ssh.py precedent)
+            ["gh", "issue", "list", "--repo", args.repo, "--state", "all", "--limit", "20",
+             "--search", search, "--json", "number"],
+            capture_output=True, text=True, check=True)
+        hits = json.loads(listed.stdout or "[]")
+        if hits:
+            return {"filed": False, "reason": f"already reported in #{hits[0]['number']}"}
+        argv = ["gh", "issue", "create", "--repo", args.repo, "--title", title,
+                "--body", body, "--label", "firmware-report"]
+        created = subprocess.run(argv, capture_output=True, text=True)  # nosec B603
+        note = None
+        if created.returncode and "label" in created.stderr.lower():
+            # No triage rights on the repo: file unlabeled; a maintainer adds the label.
+            created = subprocess.run(argv[:-2], capture_output=True, text=True)  # nosec B603
+            note = ("could not apply the firmware-report label — ask a maintainer to add "
+                    "it so the hourly ingest picks the report up")
+        if created.returncode:
+            return {"filed": False, "reason": f"gh issue create failed: {created.stderr.strip()}"}
+        out = {"filed": True, "url": created.stdout.strip(), "title": title}
+        if note:
+            out["note"] = note
+        return out
+    except (OSError, ValueError, subprocess.CalledProcessError) as exc:
+        detail = (getattr(exc, "stderr", "") or "").strip() or str(exc)
+        return {"filed": False, "reason": f"gh failed: {detail}"}
+
+
 def cmd_firmware_check(args) -> int:
     """Detect the device's firmware currency and reconcile it against the registry SSoT.
 
     Prints the installed version, the latest the device knows about (if it self-reports,
     e.g. GL's /api/upgrade/compare), and — when the bundled/loaded registry is behind or
-    missing this device — a ready-to-file "Latest known release" report to contribute.
+    missing this device — auto-files the "Latest known release" report upstream (#189;
+    ``--no-file-report`` to opt out, ``--dry-run`` to preview).
     """
     from .firmware_registry import load_registry, reconcile
 
@@ -601,6 +668,8 @@ def cmd_firmware_check(args) -> int:
         out["registry_behind"] = submission is not None
         if submission:
             out["submission"] = submission
+            if not args.no_file_report:
+                out["report"] = _file_firmware_report(submission, args)
         print(json.dumps(out, indent=2, default=str))
         return 0
 
@@ -612,9 +681,20 @@ def cmd_firmware_check(args) -> int:
     else:
         print("  device does not self-report an available-update check")
     if submission:
-        print("\nRegistry SSoT is behind for this device — contribute this to keep it current:")
+        print("\nRegistry SSoT is behind for this device — contributing this to keep it current:")
         print(f"  Latest known release: vendor={vendor} product={product} latest={submission['latest']}")
-        print("  File it via the 'Firmware report' issue form (the hourly workflow ingests it).")
+        if args.no_file_report:
+            print("  File it via the 'Firmware report' issue form (the hourly workflow ingests it).")
+        else:
+            r = _file_firmware_report(submission, args)
+            if r.get("filed"):
+                print(f"  Auto-filed: {r['url']}" + (f"\n  Note: {r['note']}" if r.get("note") else ""))
+            elif r.get("dry_run"):
+                print(f"  Would file to {args.repo}: {r['title']}\n")
+                print(r["body"])
+            else:
+                print(f"  Not auto-filed: {r['reason']}")
+                print("  File it via the 'Firmware report' issue form (the hourly workflow ingests it).")
     elif upd:
         print("\nRegistry SSoT already reflects this latest — nothing to contribute.")
     return 0
@@ -1092,8 +1172,18 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_healthcheck)
 
     p = sub.add_parser("firmware-check",
-                       help="Detect firmware currency and reconcile it against the registry")
+                       help="Detect firmware currency and reconcile it against the registry "
+                            "(auto-files the report when the registry is behind, #189)")
     p.add_argument("--json", action="store_true", help="Emit the result as JSON")
+    p.add_argument("--no-file-report", dest="no_file_report", action="store_true",
+                   help="Only report; don't auto-file the latest-known report when the "
+                        "registry is behind")
+    p.add_argument("--source", help="Release-channel URL for the auto-filed report "
+                                    "(default: the registry entry's existing source)")
+    p.add_argument("--date", help="Release date (YYYY-MM-DD) for the auto-filed report "
+                                  "(default: today, i.e. 'observed on')")
+    p.add_argument("--repo", default=UPSTREAM_REPO,
+                   help=f"GitHub repo the report is filed to (default {UPSTREAM_REPO})")
     _add_common(p)
     p.set_defaults(func=cmd_firmware_check)
 

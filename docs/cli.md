@@ -18,7 +18,7 @@ support (`kvm-pilot capabilities` lists them, offline).
 | `route` | `<command>`, `--fresh`, `--samples`, `--no-os-plane`, `--json` | — | Print the interface the router picks for a command (uses/refreshes the cached per-device scorecard) (#181). |
 | `host-exec` | `<cmd>`, `--powershell`, `--shell` | — | Run a command on the managed host's OS via the fastest capable **in-band** interface (ssh/winrm), auto-selected + self-tuned (#181). |
 | `healthcheck` | | — | Preflight audit (readiness/security/firmware, #80). Run on first contact. `--json`, `--fix` (offer safe reversible auto-fixes). |
-| `firmware-check` | | system_info | Firmware currency vs the bundled registry; reports the vendor's latest when the device knows it. |
+| `firmware-check` | | system_info | Firmware currency vs the bundled registry; auto-files the latest-known report upstream when the registry is behind (#189). `--no-file-report`, `--source URL`, `--date`, `--repo`, `--dry-run` (preview the issue body). |
 | `firmware-update` | ⚡ | firmware_update | Assess and (with `--execute`) perform a gated remote flash. Plans by default; verifies the device actually entered an upgrade state (#94). `--image`, `--i-have-physical-access`. |
 | `snapshot` | | video | Save a screenshot to a file (validated JPEG, #107). |
 | `sensors` | | sensors | Structured sensors (temps/fans/power/voltages) — BMC drivers. |

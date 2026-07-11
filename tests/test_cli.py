@@ -611,3 +611,134 @@ def test_firmware_update_reports_when_subsystem_disabled(monkeypatch, capsys):
     rc = main(["firmware-update", "--host", "h"])
     assert rc == 1
     assert "not available" in capsys.readouterr().err
+
+
+# -- firmware-check command (auto-filing, #189) ------------------------------
+
+
+class _FakeFwc:
+    """A driver stub exposing just the surface cmd_firmware_check touches."""
+
+    def __init__(self, latest="V1.9.2 release1"):
+        self._latest = latest
+
+    def get_firmware_info(self):
+        return {"vendor": "gl.inet", "product": "RM1PE",
+                "version": "V1.9.1 release1", "kvmd_version": "4.90"}
+
+    def get_available_update(self):
+        return {"current": "V1.9.1 release1", "latest": self._latest,
+                "beta": None, "update_available": self._latest != "V1.9.1 release1"}
+
+    def close(self):
+        pass
+
+
+class _GhRecorder:
+    """Stand-in for subprocess.run: records argv, scripts gh list/create replies."""
+
+    def __init__(self, list_stdout="[]", create_stdout="https://github.com/x/kvm-pilot/issues/1",
+                 create_rc=0, create_stderr=""):
+        self.calls: list[list[str]] = []
+        self._replies = {"list": (0, list_stdout, ""),
+                         "create": (create_rc, create_stdout, create_stderr)}
+
+    def __call__(self, argv, **kwargs):
+        self.calls.append(list(argv))
+        rc, out, err = self._replies[argv[2]]
+        return types.SimpleNamespace(returncode=rc, stdout=out, stderr=err)
+
+
+def _patch_fwc(monkeypatch, tmp_path, *, latest="V1.9.2 release1", registry=None, gh=None):
+    import json as _json
+
+    from kvm_pilot import cli
+
+    monkeypatch.setattr(cli, "_build_client", lambda args: _FakeFwc(latest))
+    db = tmp_path / "reg.json"
+    db.write_text(_json.dumps(registry if registry is not None else {
+        "schema_version": 2, "updated": "2026-07-02", "firmware": [
+            {"vendor": "gl.inet", "product": "RM1PE", "latest": "V1.9.1 release1",
+             "source": "https://dl.gl-inet.com/kvm/rm1/stable", "date": "2026-07-02"}]}))
+    monkeypatch.setenv("KVM_PILOT_FIRMWARE_DB", str(db))
+    rec = gh or _GhRecorder()
+    monkeypatch.setattr("subprocess.run", rec)
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/gh")
+    return rec
+
+
+def test_firmware_check_no_file_report_prints_suggestion_only(monkeypatch, tmp_path, capsys):
+    rec = _patch_fwc(monkeypatch, tmp_path)
+    rc = main(["firmware-check", "--host", "h", "--no-file-report"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Registry SSoT is behind" in out and "issue form" in out
+    assert rec.calls == []  # opt-out: nothing shelled out
+
+
+def test_firmware_check_dry_run_prints_ingestable_body_and_sends_nothing(monkeypatch, tmp_path, capsys):
+    from kvm_pilot.firmware_registry import parse_issue_form, validate_submission
+
+    rec = _patch_fwc(monkeypatch, tmp_path)
+    rc = main(["firmware-check", "--host", "h", "--dry-run"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Would file to DustinTrap/kvm-pilot" in out
+    body = out[out.index("### Vendor"):]
+    sub = parse_issue_form(body)
+    assert sub["latest"] == "V1.9.2 release1"
+    assert validate_submission(sub) == []  # the body our pipeline would ingest cleanly
+    assert rec.calls == []
+
+
+def test_firmware_check_auto_files_by_default(monkeypatch, tmp_path, capsys):
+    rec = _patch_fwc(monkeypatch, tmp_path)
+    rc = main(["firmware-check", "--host", "h"])
+    assert rc == 0
+    assert "Auto-filed: https://github.com/x/kvm-pilot/issues/1" in capsys.readouterr().out
+    create = rec.calls[-1]
+    assert create[:3] == ["gh", "issue", "create"]
+    assert ["--repo", "DustinTrap/kvm-pilot"] == create[3:5]
+    assert "--label" in create and "firmware-report" in create
+    assert create[create.index("--title") + 1].startswith("[firmware] gl.inet RM1PE latest")
+
+
+def test_firmware_check_dedups_against_existing_report(monkeypatch, tmp_path, capsys):
+    rec = _patch_fwc(monkeypatch, tmp_path, gh=_GhRecorder(list_stdout='[{"number": 87}]'))
+    rc = main(["firmware-check", "--host", "h"])
+    assert rc == 0
+    assert "already reported in #87" in capsys.readouterr().out
+    assert [c[2] for c in rec.calls] == ["list"]  # never reached create
+
+
+def test_firmware_check_registry_current_files_nothing(monkeypatch, tmp_path, capsys):
+    rec = _patch_fwc(monkeypatch, tmp_path, latest="V1.9.1 release1")
+    rc = main(["firmware-check", "--host", "h"])
+    assert rc == 0
+    assert "nothing to contribute" in capsys.readouterr().out
+    assert rec.calls == []
+
+
+def test_firmware_check_unknown_device_needs_source(monkeypatch, tmp_path, capsys):
+    empty = {"schema_version": 2, "updated": "2026-01-01", "firmware": []}
+    rec = _patch_fwc(monkeypatch, tmp_path, registry=empty)
+    rc = main(["firmware-check", "--host", "h"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Not auto-filed" in out and "--source" in out
+    assert rec.calls == []
+    # supplying --source unblocks it
+    rc = main(["firmware-check", "--host", "h", "--source", "https://example.com/fw"])
+    assert rc == 0
+    assert "Auto-filed" in capsys.readouterr().out
+
+
+def test_firmware_check_json_includes_report_outcome(monkeypatch, tmp_path, capsys):
+    import json as _json
+
+    _patch_fwc(monkeypatch, tmp_path)
+    rc = main(["firmware-check", "--host", "h", "--json"])
+    assert rc == 0
+    out = _json.loads(capsys.readouterr().out)
+    assert out["registry_behind"] is True
+    assert out["report"]["filed"] is True and out["report"]["url"]

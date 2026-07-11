@@ -4,24 +4,24 @@ from __future__ import annotations
 
 import json
 
+import pytest
+
 from kvm_pilot.firmware_registry import (
-    _FIELD_LABELS,
     ingest_batch,
     load_bundled_registry,
     load_registry,
     main,
     merge_submission,
     parse_issue_form,
+    render_issue_form,
     validate_registry,
     validate_submission,
 )
 
-_LABEL_FOR = {v: k for k, v in _FIELD_LABELS.items()}
-
 
 def body(**fields: str) -> str:
-    """Render an issue body the way a GitHub Issue Form would, from internal keys."""
-    return "\n".join(f"### {_LABEL_FOR[k]}\n\n{v}\n" for k, v in fields.items())
+    """An issue body as a GitHub Issue Form would render it, from internal keys."""
+    return render_issue_form(fields)
 
 
 def _empty_registry() -> dict:
@@ -38,6 +38,25 @@ def test_parse_issue_form_roundtrips_and_drops_no_response():
     sub = parse_issue_form(b)
     assert sub["vendor"] == "gl.inet" and sub["latest"] == "4.90"
     assert "fixed_in" not in sub  # _No response_ is dropped
+
+
+def test_render_issue_form_roundtrips_every_kind():
+    for sub in (
+        {"vendor": "gl.inet", "product": "RM1PE", "kind": "Latest known release",
+         "latest": "V1.9.2 release1", "date": "2026-07-11", "source": "https://x"},
+        {"vendor": "v", "product": "p", "kind": "Known-bad firmware",
+         "affected": "<=4.82", "severity": "critical", "issue": "ATX unwired",
+         "fixed_in": "4.90", "source": "https://x"},
+        {"vendor": "v", "product": "p", "kind": "Capability profile",
+         "mouse": "absolute", "power_state_trusted": "false"},
+    ):
+        assert parse_issue_form(render_issue_form(sub)) == sub
+        assert validate_submission(sub) == []
+
+
+def test_render_issue_form_rejects_unknown_keys():
+    with pytest.raises(ValueError, match="no issue-form field"):
+        render_issue_form({"vendor": "v", "bogus": "x"})
 
 
 # ---- submission validation ------------------------------------------------ #
@@ -196,6 +215,21 @@ def test_reconcile_flags_when_registry_missing_latest():
     sub = reconcile("gl.inet", "RM1PE", "V1.9.1 release1", registry=reg)
     assert sub == {"vendor": "gl.inet", "product": "RM1PE",
                    "kind": "Latest known release", "latest": "V1.9.1 release1"}
+
+
+def test_reconcile_carries_entry_source_and_validates_with_date():
+    # The channel URL persists across versions, so auto-filing (#189) can reuse
+    # the known entry's source; adding a date is all a submission then needs.
+    from kvm_pilot.firmware_registry import reconcile
+
+    reg = {"schema_version": 2, "updated": "2026-01-01",
+           "firmware": [{"vendor": "gl.inet", "product": "RM1PE", "latest": "V1.9.1 release1",
+                         "source": "https://dl.gl-inet.com/kvm/rm1/stable", "date": "2026-07-02"}]}
+    sub = reconcile("gl.inet", "RM1PE", "V1.9.2 release1", registry=reg)
+    assert sub["source"] == "https://dl.gl-inet.com/kvm/rm1/stable"
+    sub["date"] = "2026-07-11"
+    assert validate_submission(sub) == []
+    assert parse_issue_form(render_issue_form(sub)) == sub  # files cleanly end-to-end
 
 
 def test_reconcile_none_when_ssot_current_or_ahead():
