@@ -146,9 +146,18 @@ release — GLKVM exposes both at `/api/upgrade/compare` (`local_version` vs
   for that `(vendor, product)` or its `latest` is older than the device-reported
   one; `None` when the SSoT already reflects it.
 - `kvm-pilot firmware-check --profile <name>` runs detection + reconcile and
-  prints the currency verdict plus the contribution to file (or `--json`). File
-  it through the Issue Form and the ingest workflow folds it in — so a device in
-  the field that sees a newer `server_version` than the SSoT contributes the bump.
+  prints the currency verdict (or `--json`). When the SSoT is behind, it
+  **auto-files** the "Latest known release" report as a `firmware-report` issue
+  via the `gh` CLI (#189) — so a device in the field that sees a newer
+  `server_version` than the SSoT contributes the bump without manual steps.
+  `reconcile` reuses the registry entry's `source` (the release channel persists
+  across versions); a device not yet in the registry needs `--source <URL>`.
+  `--date` defaults to today; `--repo` defaults to the upstream repo;
+  `--dry-run` prints the exact issue body without sending; `--no-file-report`
+  opts out (it then prints the suggestion to file the Issue Form by hand).
+  Filing is deduplicated against existing open **and closed** reports for the
+  same `(vendor, product, latest)`, and a report is only filed if it passes the
+  same validation the ingest workflow applies.
 
 `get_firmware_info()` reports the **product** firmware the operator sees (GLKVM
 uses `/api/upgrade/version` → `V1.9.1 release1 (RM1PE)`), not just the kvmd
@@ -169,14 +178,20 @@ component version, so the report and the registry key match the UI.
 
 ## Ingestion — fully automated on GitHub (free on public repos)
 
-1. **Issue Form** (`.github/ISSUE_TEMPLATE/firmware-report.yml`) — a contributor
-   picks a submission type (latest release / known-bad / capability profile) and
-   fills structured fields.
+1. **Report** — `kvm-pilot firmware-check` auto-files it (see above), or a
+   contributor fills the **Issue Form**
+   (`.github/ISSUE_TEMPLATE/firmware-report.yml`): a submission type (latest
+   release / known-bad / capability profile) plus structured fields. The
+   `firmware-report` label is what queues an issue for ingestion — it means
+   "machine-parseable Issue-Form body"; don't put it on prose issues.
 2. **Action** (`.github/workflows/firmware-ingest.yml`, gated on the
    `firmware-report` label) runs `python -m kvm_pilot.firmware_registry`, which
    parses the issue body **as data** (never eval'd), validates it, merges it, and
-   the workflow **opens a PR automatically** via `GITHUB_TOKEN`. Invalid
-   submissions comment the errors back on the issue; duplicates are a no-op.
+   the workflow **opens a PR automatically** via `GITHUB_TOKEN`. Duplicates are
+   a no-op. An **invalid** submission gets ONE ❌ comment with the errors and is
+   **parked** with the `ingest-error` label (#188) — fix the body, remove the
+   label, and the next hourly run re-ingests it. (Without parking, a malformed
+   issue would be re-commented every hour forever.)
 3. Profiles merge **field by field**, so partial/enriching reports accumulate.
 
 GitHub-hosted runners are free and unlimited for public repos; each run is

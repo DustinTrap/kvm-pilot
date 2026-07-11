@@ -43,6 +43,10 @@ DEFAULT_DB_URL = (
     "https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/"
     "src/kvm_pilot/data/firmware_registry.json"
 )
+# Where auto-filed firmware reports go (the registry SSoT lives upstream; a
+# pip-installed third party has no git remote to derive this from). The
+# `firmware-check` CLI accepts --repo to override, e.g. for a fork.
+UPSTREAM_REPO = "DustinTrap/kvm-pilot"
 
 SEVERITIES = {"warning", "critical"}
 MOUSE_MODES = {"absolute", "relative", "none"}
@@ -308,6 +312,21 @@ def parse_issue_form(body: str) -> dict[str, str]:
     return out
 
 
+def render_issue_form(sub: dict[str, str]) -> str:
+    """The inverse of :func:`parse_issue_form`: a submission rendered as the
+    Issue-Form body (``### Label\\n\\nvalue`` blocks, in form order).
+
+    Rejects keys that have no form label — that drift would produce a body the
+    ingest workflow silently drops fields from.
+    """
+    unknown = set(sub) - set(_FIELD_LABELS.values())
+    if unknown:
+        raise ValueError(f"no issue-form field for: {', '.join(sorted(unknown))}")
+    return "\n".join(
+        f"### {label}\n\n{sub[key]}\n" for label, key in _FIELD_LABELS.items() if key in sub
+    )
+
+
 def _kind(sub: dict[str, str]) -> str:
     k = (sub.get("kind") or "").lower()
     if "known-bad" in k or "known bad" in k:
@@ -420,17 +439,25 @@ def reconcile(vendor: str, product: str, latest: str, *, registry: dict) -> dict
     device-reported one; ``None`` when the SSoT already reflects it. This is the
     fleet-feeds-the-registry step: a device that knows its vendor's newest release
     (e.g. GL's ``server_version``) can contribute it upstream.
+
+    A known entry's ``source`` (the vendor release channel, stable across
+    versions) is carried into the submission so auto-filing (#189) needs no
+    extra input; a device new to the registry has none — the caller must supply
+    one, or the submission fails :func:`validate_submission`.
     """
     entry = _find_entry(registry, vendor, product)
     have = (entry or {}).get("latest")
     if have and _vercmp(latest, have) <= 0:
         return None
-    return {
+    sub = {
         "vendor": vendor,
         "product": product,
         "kind": "Latest known release",
         "latest": latest,
     }
+    if entry and entry.get("source"):
+        sub["source"] = entry["source"]
+    return sub
 
 
 def ingest_batch(registry: dict, items: list[dict], *, today: str) -> tuple[dict, list[dict]]:
