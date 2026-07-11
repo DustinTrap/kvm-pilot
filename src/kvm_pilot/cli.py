@@ -579,7 +579,7 @@ def _file_firmware_report(submission: dict, args) -> dict:
     """
     import datetime
     import shutil
-    import subprocess
+    import subprocess  # nosec B404 - intentional: shells out to the gh CLI (it owns auth)
 
     from .firmware_registry import render_issue_form, validate_submission
 
@@ -608,7 +608,7 @@ def _file_firmware_report(submission: dict, args) -> dict:
     try:
         # --state all: an ingested-and-closed report must still suppress re-filing,
         # because the local bundled registry stays behind until the next release.
-        listed = subprocess.run(  # nosec B603 — fixed argv, no shell (ssh.py precedent)
+        listed = subprocess.run(  # nosec B603 B607 - fixed args, no shell; gh from PATH is intentional
             ["gh", "issue", "list", "--repo", args.repo, "--state", "all", "--limit", "20",
              "--search", search, "--json", "number"],
             capture_output=True, text=True, check=True)
