@@ -6,6 +6,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.0b1] — 2026-07-11
+
+**First beta.** The telemetry loop now closes itself: devices in the field
+contribute registry updates automatically, and the ingest side can no longer
+spam on malformed input. The beta label follows the support matrix — the
+GL-RM1PE on V1.9.1 has its core capabilities at **beta** maturity in the run
+ledger; most other device+capability combos remain unverified, and the matrix
+stays the source of truth.
+
 ### Added
 - `firmware-check` now **auto-files** the "Latest known release" report as a
   `firmware-report` issue (via the `gh` CLI) when the registry SSoT is behind

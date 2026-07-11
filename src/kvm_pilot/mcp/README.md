@@ -6,9 +6,9 @@ A local **stdio MCP server** that exposes a KVM device to MCP-capable agents
 [`mcp`](https://pypi.org/project/mcp/) SDK (`mcp>=1.10`) as a base dependency. The
 client/driver code stays stdlib-only; `mcp` is imported only in this subpackage.
 
-> ⚠️ **Experimental alpha.** The core library is **largely unverified** — mostly
-> unit-tested against mocks and emulators, with only a handful of device+capability
-> combos exercised on real hardware (see the
+> ⚠️ **Beta.** The core read paths are live-verified on real hardware
+> (GL-RM1PE, beta maturity in the support matrix), but many device+capability
+> combos are still tested against mocks and emulators only (see the
 > [Hardware-Compatibility list](https://github.com/DustinTrap/kvm-pilot/wiki/Hardware-Compatibility)
 > for what actually has; issue #7). Treat every result as unverified, and strongly
 > consider running with dry-run enabled (below).
@@ -142,8 +142,8 @@ The `power` gate is layered; no single layer is trusted on its own:
    but annotations are hints, never a security boundary.
 4. **Dry-run.** With `KVM_PILOT_MCP_DRY_RUN=1` every driver is built with
    `dry_run=True`: destructive commands are logged and *skipped*, and every
-   tool result says it ran in dry-run mode. **Recommended default for this
-   largely-unverified alpha.**
+   tool result says it ran in dry-run mode. **Recommended default until your
+   own device+capability combos are verified in the matrix.**
 5. **Untrusted screen content.** `snapshot` and `classify_screen` feed
    *target-controlled* console output into the agent's context. A compromised
    or hostile host can render text designed to steer the agent (prompt
@@ -193,7 +193,8 @@ kvm-pilot-mcp                    # start the stdio server (or: python -m kvm_pil
 ## Claude Desktop
 
 Add to your MCP config (`claude_desktop_config.json`). Dry-run is enabled here
-on purpose — remove it only once you accept the alpha status, and add
+on purpose — remove it only once your hardware is verified in the matrix (or
+you accept the risk), and add
 `KVM_PILOT_MCP_ALLOW_POWER` only if you want the `power` tool live:
 
 ```json

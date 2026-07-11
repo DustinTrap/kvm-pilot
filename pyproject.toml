@@ -17,7 +17,7 @@ keywords = [
     "bare-metal", "automation", "vision", "llm", "mcp",
 ]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Beta",
     "Intended Audience :: System Administrators",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: Apache Software License",

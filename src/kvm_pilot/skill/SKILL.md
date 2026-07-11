@@ -12,16 +12,17 @@ description: >-
   (keyboard/mouse/media), and gated power; the CLI for
   logs/capabilities/firmware/events and scripting; the Python library for MSD
   mode switching; and SSH for appliance maintenance the tool can't do.
-  See the interface matrix in the skill body.** Early alpha — most device/capability
-  combos are still unverified (only a few exercised live, on a GL-RM1PE); treat
-  every operation as unverified and confirm destructive steps with the user.
+  See the interface matrix in the skill body.** Beta — core read paths are
+  live-verified on GL-RM1PE; other device/capability combos remain unverified.
+  Treat anything not in the support matrix as unverified and confirm
+  destructive steps with the user.
 ---
 
 # kvm-pilot skill
 
-> ⚠️ **Alpha — largely unverified.** Most of `kvm-pilot` is unit-tested with
-> mocks only; only a handful of device+capability combos have been exercised on
-> real hardware (see the
+> ⚠️ **Beta — verify against the matrix.** The core read paths are
+> live-verified on GL-RM1PE at beta maturity, but many device+capability combos
+> are still unit-tested with mocks only (see the
 > [Hardware-Compatibility list](https://github.com/DustinTrap/kvm-pilot/wiki/Hardware-Compatibility)
 > for what actually has). Treat every result as unverified, expect bugs, and
 > never point a destructive operation (power, reset, media, keystrokes) at a
@@ -228,7 +229,7 @@ pip install --pre "kvm-pilot[totp]"       # add if the device has 2FA enabled
 ```
 
 It's a pre-release, so `--pre` (or pinning the exact current version) is required — a bare
-`pip install kvm-pilot` deliberately picks up no alpha. A single install brings
+`pip install kvm-pilot` deliberately picks up no pre-release. A single install brings
 the `kvm-pilot` CLI, the `kvm-pilot-mcp` server, and this skill file. For the
 latest unreleased tree, install from git:
 
