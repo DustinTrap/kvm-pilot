@@ -14,18 +14,26 @@ Vision runs on Claude **or** any local OpenAI-compatible VLM (LM Studio, Ollama,
 vLLM, llama.cpp). Point it at a model on your own GPU and the screenshots never
 leave your network and cost nothing per frame.
 
-> **Status:** v0.1.0a12 — **early alpha.** First real-hardware runs have happened —
-> a GL-RM1PE, with the read/`snapshot`/`healthcheck`/`logs` paths exercised live on
-> firmware V1.5.1 release2 and V1.9.1 release1 — but **most device+capability combos
-> remain unverified** (mocked HTTP/vision or emulators only), and the remote
-> firmware-flash is a known no-op on that unit
-> ([#94](https://github.com/DustinTrap/kvm-pilot/issues/94)/[#95](https://github.com/DustinTrap/kvm-pilot/issues/95)).
-> Treat every feature as unverified, expect bugs and breaking API changes before
-> 1.0, and don't point it at a machine you can't afford to have power-cycled
-> unexpectedly. What has actually been exercised lives in the
-> [Hardware-Compatibility list](https://github.com/DustinTrap/kvm-pilot/wiki/Hardware-Compatibility);
-> hardware reports — success *or* failure — are exactly what this release is
-> asking for. See [Compatibility](#compatibility).
+> **Status:** v0.1.0b1 — **first beta, ready for broader testing.** The core
+> paths have graduated from mocked-only to live-verified: a fleet of GL-RM1PE
+> units has exercised `snapshot`/`healthcheck`/`logs`/`power_state`/
+> `virtual_media`/`info` across two firmware lines, and on V1.9.1 those
+> capabilities sit at **beta** maturity in the run ledger that ships in the
+> wheel — derived from real runs, never hand-edited. Reliability work landed
+> where testing hurt the most (headless snapshot, encoder honesty, retry
+> damping, vision consensus), and the firmware registry now feeds itself:
+> `firmware-check` auto-files registry updates and devices report what they see.
+> **Now we need your hardware.** PiKVM, BliKVM, other GLKVM models, and Redfish
+> BMCs (iDRAC/iLO/OpenBMC) are the combos the matrix needs most — success *or*
+> failure, a
+> [hardware report](https://github.com/DustinTrap/kvm-pilot/issues/new?template=hardware-report.yml)
+> takes two minutes and the hourly ingest does the rest. Anything the
+> [Hardware-Compatibility list](https://github.com/DustinTrap/kvm-pilot/wiki/Hardware-Compatibility)
+> doesn't show as exercised is still unverified: expect some API movement before
+> 1.0, note the remote firmware-flash no-op on GL-RM1PE
+> ([#94](https://github.com/DustinTrap/kvm-pilot/issues/94)/[#95](https://github.com/DustinTrap/kvm-pilot/issues/95)),
+> and don't point destructive ops at a machine you can't afford to have
+> power-cycled unexpectedly. See [Compatibility](#compatibility).
 
 ---
 
@@ -88,7 +96,7 @@ MCP server** (for Claude Desktop / Claude Code and other agent hosts), and the
 bundled **Claude skill** — nothing to clone. The current release line is a
 **pre-release** (see the version badge / CHANGELOG for the exact tag), so `--pre`
 (or pinning the exact version) is required — a plain
-`pip install kvm-pilot` deliberately picks up no alpha. The client/driver code
+`pip install kvm-pilot` deliberately picks up no pre-release. The client/driver code
 imports only the standard library; the one runtime dependency is the `mcp` SDK
 (for the bundled server), and `totp`/`ws` are opt-in extras. (`0.1.0a1` is yanked
 and much older than this README — don't use it.) For the latest unreleased tree:
@@ -259,7 +267,7 @@ ATX adapter wired to the target's front-panel header: on the GL Comet family
 while PiKVM v3/v4 kits include the ATX adapter in the box and BliKVM bundles
 vary by model — check yours. Without ATX wiring, ATX calls return errors from
 the device. Reports of success or failure on *any* hardware are exactly what
-this alpha needs — please open a
+this beta needs — please open a
 [hardware report](https://github.com/DustinTrap/kvm-pilot/issues/new?template=hardware-report.yml).
 
 ## Architecture

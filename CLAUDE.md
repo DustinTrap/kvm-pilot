@@ -10,7 +10,7 @@ Guidance for AI agents (and humans) working in this repo.
 ## What this is
 `kvm-pilot` — a stdlib-only Python client + CLI for IP-KVM devices (PiKVM, the
 GL.iNet GLKVM fork, BliKVM) with a pluggable LLM **vision** subsystem that
-classifies a KVM screenshot into a boot/run phase. Early **alpha**. Hardware
+classifies a KVM screenshot into a boot/run phase. **Beta** (0.1.0b1). Hardware
 validation is tracked **per device + firmware + capability** in the support
 matrix (#96) and the community
 [Hardware-Compatibility list](https://github.com/DustinTrap/kvm-pilot/wiki/Hardware-Compatibility) —
@@ -131,5 +131,5 @@ suite mocks the transport; to exercise a destructive path use `dry_run=True` or 
 ## Release
 The version lives in `src/kvm_pilot/__about__.py`. Releases publish to PyPI via
 GitHub Trusted Publishing (`.github/workflows/release.yml`, environment `pypi`)
-on a published GitHub Release. The current line is an opt-in (`--pre`) alpha —
+on a published GitHub Release. The current line is an opt-in (`--pre`) beta —
 see `__about__.py`/CHANGELOG for the exact version; `0.1.0a1` is yanked.

@@ -5,8 +5,11 @@ through its KVM." It targets the **agent + MCP** workflow (Claude Code, Claude
 Desktop, or any MCP host). For the Python library and CLI, see the
 [README](https://github.com/DustinTrap/kvm-pilot/blob/main/README.md#quickstart).
 
-> ⚠️ Early alpha, largely unverified — treat every result as unverified and
-> **confirm destructive steps** (power, media, keystrokes) before running them.
+> ⚠️ Beta. The core read paths are live-verified on GL-RM1PE (the
+> [Hardware-Compatibility list](https://github.com/DustinTrap/kvm-pilot/wiki/Hardware-Compatibility)
+> shows what's actually been exercised); treat anything not on that list as
+> unverified, and **confirm destructive steps** (power, media, keystrokes)
+> before running them.
 
 ## 1. Install
 
