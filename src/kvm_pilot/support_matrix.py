@@ -39,6 +39,9 @@ KNOWN_CAPS: list[str] = [
     "virtual_media", "power", "firmware_update",
 ]
 DESTRUCTIVE_CAPS = frozenset({"virtual_media", "power", "firmware_update"})
+# Capabilities whose outcome depends on operating conditions (#156): evidence
+# recorded without a `conditions` dict gets the condition-blind caveat (#180).
+CONDITION_SENSITIVE_CAPS = frozenset({"snapshot"})
 
 # A capability's last recorded outcome, truncated for report/detail strings.
 _OUTCOME_MAX = 120
@@ -64,6 +67,10 @@ def _condition_summary(cond: Any) -> str | None:
         parts.append("cached" if cond["snapshot_cached"] else "uncached")
     if "jpeg_sink_clients" in cond:
         parts.append("jpeg-clients" if cond["jpeg_sink_clients"] else "no-jpeg-clients")
+    # The schema is open ("MAY additionally carry", docs/test-plan.md §9): an
+    # axis added after today must degrade to visible k=v, never vanish.
+    known = {"resolution", "encoder_format", "snapshot_cached", "jpeg_sink_clients"}
+    parts.extend(f"{k}={cond[k]}" for k in sorted(set(cond) - known))
     return ", ".join(parts) or None
 
 

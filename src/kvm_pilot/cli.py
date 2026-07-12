@@ -593,21 +593,12 @@ def cmd_firmware_check(args) -> int:
     missing this device — auto-files the "Latest known release" report upstream (#189;
     ``--no-file-report`` to opt out, ``--dry-run`` to preview).
     """
-    from .firmware_registry import load_registry, reconcile
+    from .firmware_registry import check_currency
 
     kvm = _build_client(args)
-    info_fn = getattr(kvm, "get_firmware_info", None)
-    fw = info_fn() if info_fn is not None else {}
+    fw, upd, submission = check_currency(kvm)
     vendor = (fw.get("vendor") or "").strip()
     product = fw.get("product") or ""
-    upd = None
-    fn = getattr(kvm, "get_available_update", None)
-    if fn is not None:
-        upd = fn()
-
-    submission = None
-    if upd and upd.get("latest"):
-        submission = reconcile(vendor, product, upd["latest"], registry=load_registry())
 
     if args.json:
         out: dict = {"vendor": vendor, "product": product, "installed": fw.get("version"),

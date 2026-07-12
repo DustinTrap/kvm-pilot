@@ -1073,8 +1073,7 @@ async def file_firmware_report(
     """
     from kvm_pilot.firmware_registry import (
         UPSTREAM_REPO,
-        load_registry,
-        reconcile,
+        check_currency,
     )
     from kvm_pilot.firmware_registry import (
         file_firmware_report as _file_report,
@@ -1082,17 +1081,10 @@ async def file_firmware_report(
 
     repo = repo or UPSTREAM_REPO
     with _driver(profile, confirm=deny_all, capability=Capability.SYSTEM_INFO) as (cfg, kvm):
-        info_fn = getattr(kvm, "get_firmware_info", None)
-        fw = info_fn() if info_fn is not None else {}
-        vendor = (fw.get("vendor") or "").strip()
-        product = fw.get("product") or ""
-        upd_fn = getattr(kvm, "get_available_update", None)
-        upd = upd_fn() if upd_fn is not None else None
-        submission = None
-        if upd and upd.get("latest"):
-            submission = reconcile(vendor, product, upd["latest"], registry=load_registry())
-        base = {**_provenance(cfg), "vendor": vendor, "product": product,
-                "installed": fw.get("version"), "registry_behind": submission is not None}
+        fw, upd, submission = check_currency(kvm)
+        base = {**_provenance(cfg), "vendor": (fw.get("vendor") or "").strip(),
+                "product": fw.get("product") or "", "installed": fw.get("version"),
+                "registry_behind": submission is not None}
         if submission is None:
             reason = ("registry already reflects the device-reported latest"
                       if upd and upd.get("latest")

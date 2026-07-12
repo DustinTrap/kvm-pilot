@@ -180,6 +180,9 @@ class GLKVMDriver(PiKVMDriver):
     # re-init the encoder every call (slow, and it pokes the #107 wedge).
     _mjpeg_hold: bool = False
     _mjpeg_restore: int | None = None
+    # Once the firmware is SEEN to lack params.video_format (V1.5.1) that fact
+    # holds for the connection — skip the per-snapshot probe round-trip.
+    _video_format_absent: bool = False
 
     def snapshot(self) -> bytes:
         """Capture the screen, recovering GL's two known snapshot failures.
@@ -201,9 +204,17 @@ class GLKVMDriver(PiKVMDriver):
           and no decoder (see ``snapshot-h264-at-native-res``).
         """
         try:
-            return super().snapshot()
+            return self._snapshot_with_stream_recovery()
         except SnapshotFormatError as exc:
+            # H.264 at this resolution — whether from a cold call or from the
+            # freshly-warmed encoder (the exact .39 shape: offline -> warm ->
+            # format error), the MJPEG flip is the same recovery.
             return self._snapshot_via_mjpeg_flip(exc)
+
+    def _snapshot_with_stream_recovery(self) -> bytes:
+        """The #142 half of ``snapshot``: recover an offline on-demand streamer."""
+        try:
+            return super().snapshot()
         except UnavailableError as exc:
             try:
                 offline = bool(self.video_signal_info().get("streamer_offline"))
@@ -211,12 +222,7 @@ class GLKVMDriver(PiKVMDriver):
                 offline = False
             if not offline:
                 raise  # a running streamer that still 503s is a different fault
-            try:
-                return self._snapshot_via_stream_trigger(exc)
-            except SnapshotFormatError as fmt_exc:
-                # The freshly-warmed encoder emits H.264 at this resolution —
-                # the exact .39 failure shape: offline -> warm -> format error.
-                return self._snapshot_via_mjpeg_flip(fmt_exc)
+            return self._snapshot_via_stream_trigger(exc)
 
     def _snapshot_via_stream_trigger(
         self, original: UnavailableError, *, wait: float = 10.0, poll: float = 0.5
@@ -253,18 +259,19 @@ class GLKVMDriver(PiKVMDriver):
 
     # -- Video: MJPEG flip for a native-res JPEG (#187) --------------------
 
-    def _streamer_params(self) -> dict:
+    def _streamer_params(self) -> dict | None:
         """The GL ``params`` block of ``/api/streamer`` (``video_format`` etc.),
-        tolerating both envelope shapes like ``_streamer_source``; ``{}`` when
-        the firmware doesn't expose it (V1.5.1)."""
+        tolerating both envelope shapes via the base helpers. ``{}`` = read fine
+        but the firmware doesn't expose it (V1.5.1, a durable fact); ``None`` =
+        the state couldn't be read right now (transient — don't conclude)."""
         try:
             state = self.get_streamer_state()
         except KVMPilotError:
-            return {}
+            return None
         params = state.get("params")
-        if not isinstance(params, dict) and isinstance(state.get("streamer"), dict):
-            params = state["streamer"].get("params")
-        return params if isinstance(params, dict) else {}
+        if not isinstance(params, dict):
+            params = self._streamer_block(state).get("params")
+        return self._as_dict(params)
 
     def _set_video_format(self, fmt: int) -> None:
         """GL-proprietary encoder switch: ``0`` = H.264, ``1`` = MJPEG (#187)."""
@@ -288,10 +295,16 @@ class GLKVMDriver(PiKVMDriver):
         gets the honest ``SnapshotFormatError`` (remediation: web-UI upgrade,
         #177) rather than a blind POST.
         """
-        current = self._streamer_params().get("video_format")
+        if self._video_format_absent:
+            raise original
+        params = self._streamer_params()
+        if params is not None and "video_format" not in params:
+            self._video_format_absent = True  # durable: firmware won't grow it
+        current = (params or {}).get("video_format")
         if not isinstance(current, int) or current == 1:
-            # Not exposed (old firmware), or already MJPEG — the bad bytes have
-            # some other cause; surface the original honest error.
+            # Not exposed (old firmware), unreadable right now, or already
+            # MJPEG — the bad bytes have some other cause; surface the
+            # original honest error.
             raise original
         self._set_video_format(1)
         logger.info(

@@ -287,14 +287,13 @@ def unregistered_docs() -> list[str]:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--out", type=Path, help="output directory for wiki pages")
-    ap.add_argument(
+    mode = ap.add_mutually_exclusive_group(required=True)
+    mode.add_argument("--out", type=Path, help="output directory for wiki pages")
+    mode.add_argument(
         "--check", action="store_true",
         help="fail if a docs page is not registered in PAGES (CI parity guard, #175)",
     )
     args = ap.parse_args()
-    if args.check == (args.out is not None):
-        ap.error("exactly one of --out or --check is required")
     if args.check:
         missing = unregistered_docs()
         for path in missing:

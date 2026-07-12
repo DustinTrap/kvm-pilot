@@ -1043,7 +1043,7 @@ def check_support_evidence(driver: Any) -> CheckResult | None:
     version = fw.get("version") or ""
     if not (vendor and product and version):
         return None
-    from .support_matrix import DESTRUCTIVE_CAPS, rollup
+    from .support_matrix import CONDITION_SENSITIVE_CAPS, DESTRUCTIVE_CAPS, rollup
 
     # exact_product: this check speaks for THIS device+firmware — the tool's
     # substring match would otherwise report a sibling's evidence (e.g. an
@@ -1099,14 +1099,16 @@ def check_support_evidence(driver: Any) -> CheckResult | None:
         parts.append("recorded FAIL: " + ", ".join(map(_fail_summary, failing)))
     if row["never_exercised"]:
         parts.append("never exercised live: " + ", ".join(row["never_exercised"]))
-    # Condition-blind snapshot evidence gave the #180 false confidence: a bare
+    # Condition-blind evidence gave the #180 false confidence: a bare
     # "verified" observed at a JPEG-friendly resolution hid that the same
-    # firmware fails at native res. Say so instead of overclaiming.
-    if "snapshot" in passing and not caps["snapshot"].get("pass_conditions"):
-        parts.append(
-            "snapshot evidence carries no recorded conditions — verified only "
-            "under unknown resolution/encoder; may still fail at native res (#180)"
-        )
+    # firmware fails at native res. Say so instead of overclaiming, for every
+    # capability the schema declares condition-sensitive.
+    for c in sorted(CONDITION_SENSITIVE_CAPS):
+        if c in passing and not caps[c].get("pass_conditions"):
+            parts.append(
+                f"{c} evidence carries no recorded conditions — verified only "
+                "under unknown resolution/encoder; may still fail at native res (#180)"
+            )
     parts.append(
         "these are RECORDED results, not this run's live probes — the "
         "tested-now findings are this report's own checks (video-signal, "
@@ -1303,7 +1305,11 @@ class HealthCache:
     def record_assessed(self, device_key: str, firmware: str) -> None:
         """Remember the firmware a completed assessment saw (#180). Stored under
         ``assessed:{driver}@{host}`` — distinct from the ``driver@host#firmware``
-        report keys, so it survives (and detects) the firmware changing."""
+        report keys, so it survives (and detects) the firmware changing.
+        No-op when unchanged: preflight runs on every connect, and the warm
+        path must stay a zero-write path."""
+        if self.last_assessed(device_key) == firmware:
+            return
         self._data[f"assessed:{device_key}"] = {"firmware": firmware, "at": _now()}
         self._save()
 
@@ -1346,32 +1352,27 @@ def _firmware_delta_result(
     never stored the old run's volatile findings, so including the new run's
     would report every live warning as a false "regression".
     """
-    new_bad = {r.id: r.severity for r in new if r.severity >= Severity.WARNING}
+    regressed: list[str] = []
     if old is None:
         detail = (
             f"firmware changed {prev_fw} → {firmware}; no prior assessment "
             "retained — full re-assessment run"
         )
-        return CheckResult(
-            id="firmware-delta", pillar=Pillar.FIRMWARE, severity=Severity.INFO,
-            title=f"Firmware changed ({prev_fw} → {firmware}) — reassessed",
-            detail=detail, cacheable=False,
-        )
-    old_bad = {r.id: r.severity for r in old if r.severity >= Severity.WARNING}
-    cleared = sorted(set(old_bad) - set(new_bad))
-    regressed = sorted(set(new_bad) - set(old_bad))
-    still_open = sorted(set(old_bad) & set(new_bad))
-    parts = [
-        f"cleared: {', '.join(cleared) or 'none'}",
-        f"new/regressed: {', '.join(regressed) or 'none'}",
-        f"still open: {', '.join(still_open) or 'none'}",
-    ]
+    else:
+        new_bad = {r.id for r in new if r.severity >= Severity.WARNING}
+        old_bad = {r.id for r in old if r.severity >= Severity.WARNING}
+        regressed = sorted(new_bad - old_bad)
+        detail = f"{prev_fw} → {firmware}: " + "; ".join([
+            f"cleared: {', '.join(sorted(old_bad - new_bad)) or 'none'}",
+            f"new/regressed: {', '.join(regressed) or 'none'}",
+            f"still open: {', '.join(sorted(old_bad & new_bad)) or 'none'}",
+        ])
     return CheckResult(
         id="firmware-delta",
         pillar=Pillar.FIRMWARE,
         severity=Severity.WARNING if regressed else Severity.INFO,
         title=f"Firmware changed ({prev_fw} → {firmware}) — reassessed",
-        detail=f"{prev_fw} → {firmware}: " + "; ".join(parts),
+        detail=detail,
         remediation=(
             "Re-verify the capabilities you rely on live — recorded evidence "
             "predates this firmware" if regressed else ""

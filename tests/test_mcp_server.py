@@ -1141,7 +1141,7 @@ def test_file_firmware_report_registry_current_short_circuits(config_file, tmp_p
     _fwc_env(monkeypatch, config_file, tmp_path, registry_latest="V1.9.2 release1")
     monkeypatch.setenv("KVM_PILOT_MCP_DRY_RUN", "1")
     out = _run_tool(server.file_firmware_report(_StubContext(), confirm=False))
-    assert out == {**out, "registry_behind": False, "filed": False}
+    assert out["registry_behind"] is False and out["filed"] is False
     assert "already reflects" in out["reason"]
     assert "approved" not in out
 
