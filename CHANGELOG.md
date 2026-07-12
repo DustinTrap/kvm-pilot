@@ -7,6 +7,20 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **`kvm-pilot test-report`** (#99) — the live-test harness: probes the
+  device's capabilities and appends one evidence row to the run ledger
+  (`--ledger` > `$KVM_PILOT_TEST_LEDGER` > `~/.config/kvm-pilot/test_runs.jsonl`;
+  never the installed package data). Read-only probes (info, snapshot —
+  stamped with the #156 conditions on pass AND fail — healthcheck, logs,
+  power_state) run every invocation; destructive probes run only via
+  `--include virtual_media,power,firmware_update` with a recorded `--attest`
+  operator statement, still routed through the normal safety gates. Pass =
+  assertion + **observed effect** (power must flip the read-back and restore;
+  media must report online and the eject must land; a flash passes only via
+  the driver's #94 verified-state contract) — an unobserved effect records an
+  honest FAIL. Fake-driver runs (and `--synthetic`) record
+  `source="synthetic"`, which never promotes maturity; there is no flag to
+  force `real`.
 - The generated wiki Hardware-Compatibility page now carries a **Maturity
   column** — the #98-derived level per (device, firmware) read from the shipped
   registry (`—` when no live-derived rating exists), completing #103.

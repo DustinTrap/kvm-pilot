@@ -228,6 +228,7 @@ class FakeDriver(PowerMixin, CapabilityMixin):
         connect_ok = self.safety.guard("msd.connect", f"Attach virtual media to {self.host}")
         if write_ok and set_ok and connect_ok:
             self.mounted.append(name)
+            self.msd_attached = True
             self._record("mount_iso", name)
         return name
 
@@ -235,18 +236,23 @@ class FakeDriver(PowerMixin, CapabilityMixin):
         """kvmd-shaped MSD state built from this fake's mount history."""
         images = {n: {"size": 1024, "complete": True} for n in self.mounted}
         current = self.mounted[-1] if self.mounted else None
+        attached = bool(current) and getattr(self, "msd_attached", bool(current))
         return {
-            "online": bool(current),
-            "drive": {"image": current, "connected": bool(current)},
+            "online": attached,
+            "drive": {"image": current, "connected": attached},
             "storage": {"images": images},
         }
 
     def msd_connect(self) -> None:
         if self.safety.guard("msd.connect", f"Attach virtual media to {self.host}"):
+            self.msd_attached = bool(self.mounted)
             self._record("msd_connect")
 
     def msd_disconnect(self) -> None:
+        # A healthy device actually detaches: online flips false (the effect the
+        # #99 harness observes), while the stored images stay on the device.
         if self.safety.guard("msd.disconnect", f"Detach virtual media from {self.host}"):
+            self.msd_attached = False
             self._record("msd_disconnect")
 
     # -- GPIO (gated) ----------------------------------------------------
