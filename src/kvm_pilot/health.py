@@ -1071,22 +1071,47 @@ def check_support_evidence(driver: Any) -> CheckResult | None:
     caps = row["capabilities"]
     passing = [c for c, s in caps.items() if not s["fails"]]
     failing = [c for c, s in caps.items() if s["fails"]]
+
+    def _cap_summary(c: str) -> str:
+        # Conditions (#156) make the evidence self-explaining: "snapshot (n=2)"
+        # verified at 1024x768 says nothing about 2560x1440 (#180).
+        s = caps[c]
+        conds = ", ".join(s.get("pass_conditions", []))
+        return f"{c} (n={s['passes']}{f' @ {conds}' if conds else ''})"
+
     parts: list[str] = []
     if passing:
-        parts.append(
-            "verified live: " + ", ".join(f"{c} (n={caps[c]['passes']})" for c in passing)
-        )
+        parts.append("recorded pass (run ledger): " + ", ".join(map(_cap_summary, passing)))
     if failing:
-        parts.append(
-            "live FAIL: "
-            + ", ".join(
-                f"{c} ({caps[c]['passes']}/{caps[c]['passes'] + caps[c]['fails']} — "
-                f"{caps[c]['last_outcome']})"
-                for c in failing
-            )
-        )
+
+        def _fail_summary(c: str) -> str:
+            # A mixed capability shows BOTH operating points — pass at one
+            # (resolution × encoder) and fail at another is one consistent
+            # story, not a contradiction (#156/#180).
+            s = caps[c]
+            bits = [f"{s['passes']}/{s['passes'] + s['fails']}"]
+            if s.get("pass_conditions"):
+                bits.append(f"pass @ {', '.join(s['pass_conditions'])}")
+            if s.get("fail_conditions"):
+                bits.append(f"FAIL @ {', '.join(s['fail_conditions'])}")
+            return f"{c} ({'; '.join(bits)} — {s['last_outcome']})"
+
+        parts.append("recorded FAIL: " + ", ".join(map(_fail_summary, failing)))
     if row["never_exercised"]:
         parts.append("never exercised live: " + ", ".join(row["never_exercised"]))
+    # Condition-blind snapshot evidence gave the #180 false confidence: a bare
+    # "verified" observed at a JPEG-friendly resolution hid that the same
+    # firmware fails at native res. Say so instead of overclaiming.
+    if "snapshot" in passing and not caps["snapshot"].get("pass_conditions"):
+        parts.append(
+            "snapshot evidence carries no recorded conditions — verified only "
+            "under unknown resolution/encoder; may still fail at native res (#180)"
+        )
+    parts.append(
+        "these are RECORDED results, not this run's live probes — the "
+        "tested-now findings are this report's own checks (video-signal, "
+        "hid-reachable, encoder-wedge)"
+    )
     maturity = row.get("maturity")
     label = f" (maturity {maturity['level']}, derived #98)" if maturity else ""
     unproven = [c for c in failing + row["never_exercised"] if c in DESTRUCTIVE_CAPS]
@@ -1094,8 +1119,8 @@ def check_support_evidence(driver: Any) -> CheckResult | None:
         id="support-evidence",
         pillar=Pillar.READINESS,
         severity=Severity.WARNING if failing else Severity.INFO,
-        title="Live-test evidence",
-        detail=f"Live evidence for {product} {version}{label}: " + "; ".join(parts) + ".",
+        title="Live-test evidence (recorded)",
+        detail=f"Recorded evidence for {product} {version}{label}: " + "; ".join(parts) + ".",
         remediation=(
             f"Do not rely on {', '.join(unproven)} on this firmware without "
             "operator confirmation."
@@ -1239,6 +1264,21 @@ class HealthCache:
         except OSError:  # pragma: no cover - best effort
             pass
 
+    @staticmethod
+    def _results_of(entry: dict[str, Any]) -> list[CheckResult]:
+        return [
+            CheckResult(
+                id=r["id"],
+                pillar=Pillar(r["pillar"]),
+                severity=Severity[r["severity"]],
+                title=r["title"],
+                detail=r["detail"],
+                remediation=r.get("remediation", ""),
+                cacheable=True,
+            )
+            for r in entry.get("results", [])
+        ]
+
     def stable_results(self, key: str, *, now: float | None = None) -> list[CheckResult] | None:
         entry = self._data.get(key)
         if not entry:
@@ -1246,20 +1286,26 @@ class HealthCache:
         clock = now if now is not None else _now()
         if clock - entry.get("ran_at", 0.0) > self.max_age:
             return None
-        out: list[CheckResult] = []
-        for r in entry.get("results", []):
-            out.append(
-                CheckResult(
-                    id=r["id"],
-                    pillar=Pillar(r["pillar"]),
-                    severity=Severity[r["severity"]],
-                    title=r["title"],
-                    detail=r["detail"],
-                    remediation=r.get("remediation", ""),
-                    cacheable=True,
-                )
-            )
-        return out
+        return self._results_of(entry)
+
+    def results_any_age(self, key: str) -> list[CheckResult] | None:
+        """The stored results regardless of ``max_age`` — the firmware-delta
+        diff (#180) wants the old-firmware posture even when it has gone stale."""
+        entry = self._data.get(key)
+        return self._results_of(entry) if entry else None
+
+    def last_assessed(self, device_key: str) -> str | None:
+        """Firmware version this device was last assessed at (#180), or None."""
+        entry = self._data.get(f"assessed:{device_key}") or {}
+        fw = entry.get("firmware")
+        return str(fw) if fw else None
+
+    def record_assessed(self, device_key: str, firmware: str) -> None:
+        """Remember the firmware a completed assessment saw (#180). Stored under
+        ``assessed:{driver}@{host}`` — distinct from the ``driver@host#firmware``
+        report keys, so it survives (and detects) the firmware changing."""
+        self._data[f"assessed:{device_key}"] = {"firmware": firmware, "at": _now()}
+        self._save()
 
     def store_stable(self, report: HealthReport) -> None:
         self._data.setdefault(report.cache_key, {})
@@ -1285,6 +1331,55 @@ class HealthCache:
         self._save()
 
 
+def _firmware_delta_result(
+    prev_fw: str,
+    firmware: str,
+    old: list[CheckResult] | None,
+    new: list[CheckResult],
+) -> CheckResult:
+    """The "device changed → reassessed" diff a firmware delta must emit (#180).
+
+    Compares findings at WARNING+ by check id: present before and absent/below
+    now = cleared; the inverse = new/regressed. Severity is WARNING when
+    anything regressed, else INFO — the delta itself is information, not a fault.
+    Both sides must be the cacheable (stable-posture) results only: the cache
+    never stored the old run's volatile findings, so including the new run's
+    would report every live warning as a false "regression".
+    """
+    new_bad = {r.id: r.severity for r in new if r.severity >= Severity.WARNING}
+    if old is None:
+        detail = (
+            f"firmware changed {prev_fw} → {firmware}; no prior assessment "
+            "retained — full re-assessment run"
+        )
+        return CheckResult(
+            id="firmware-delta", pillar=Pillar.FIRMWARE, severity=Severity.INFO,
+            title=f"Firmware changed ({prev_fw} → {firmware}) — reassessed",
+            detail=detail, cacheable=False,
+        )
+    old_bad = {r.id: r.severity for r in old if r.severity >= Severity.WARNING}
+    cleared = sorted(set(old_bad) - set(new_bad))
+    regressed = sorted(set(new_bad) - set(old_bad))
+    still_open = sorted(set(old_bad) & set(new_bad))
+    parts = [
+        f"cleared: {', '.join(cleared) or 'none'}",
+        f"new/regressed: {', '.join(regressed) or 'none'}",
+        f"still open: {', '.join(still_open) or 'none'}",
+    ]
+    return CheckResult(
+        id="firmware-delta",
+        pillar=Pillar.FIRMWARE,
+        severity=Severity.WARNING if regressed else Severity.INFO,
+        title=f"Firmware changed ({prev_fw} → {firmware}) — reassessed",
+        detail=f"{prev_fw} → {firmware}: " + "; ".join(parts),
+        remediation=(
+            "Re-verify the capabilities you rely on live — recorded evidence "
+            "predates this firmware" if regressed else ""
+        ),
+        cacheable=False,
+    )
+
+
 def preflight(
     driver: Any,
     *,
@@ -1296,8 +1391,12 @@ def preflight(
     """Run the audit (stable-from-cache + volatile-live) and enforce the gate.
 
     Volatile checks always run live; stable checks are served from ``cache`` when
-    fresh, else run and re-cached. Returns the merged report; raises
-    :class:`HealthGateError` when a critical is unacknowledged (unless ``skip``).
+    fresh, else run and re-cached. A firmware version differing from the last
+    assessed one invalidates the assessment: the stable checks re-run live and
+    the report carries a ``firmware-delta`` diff of what cleared/regressed
+    (#180 — an out-of-band web-UI flash must not inherit stale confidence).
+    Returns the merged report; raises :class:`HealthGateError` when a critical
+    is unacknowledged (unless ``skip``).
     """
     if skip:
         report = HealthReport(host=getattr(driver, "host", "?"), driver_kind=_driver_kind(driver), firmware=None)
@@ -1307,9 +1406,15 @@ def preflight(
     stable_checks = [c for c in CHECKS if not _is_volatile(c)]
 
     firmware = _firmware_of(driver)
-    key = f"{_driver_kind(driver)}@{getattr(driver, 'host', '?')}#{firmware or '?'}"
+    device_key = f"{_driver_kind(driver)}@{getattr(driver, 'host', '?')}"
+    key = f"{device_key}#{firmware or '?'}"
 
-    cached_stable = cache.stable_results(key) if cache is not None else None
+    prev_fw = cache.last_assessed(device_key) if cache is not None else None
+    fw_changed = bool(prev_fw and firmware and prev_fw != firmware)
+
+    cached_stable = None
+    if cache is not None and not fw_changed:
+        cached_stable = cache.stable_results(key)
     if cached_stable is None:
         stable = run_healthcheck(driver, checks=stable_checks).results
     else:
@@ -1317,15 +1422,23 @@ def preflight(
 
     volatile = run_healthcheck(driver, checks=volatile_checks).results
 
+    results = stable + volatile
+    if fw_changed and cache is not None and prev_fw is not None:
+        old = cache.results_any_age(f"{device_key}#{prev_fw}")
+        new_stable = [r for r in results if r.cacheable]
+        results = results + [_firmware_delta_result(prev_fw, firmware or "?", old, new_stable)]
+
     report = HealthReport(
         host=getattr(driver, "host", "?"),
         driver_kind=_driver_kind(driver),
         firmware=firmware,
-        results=stable + volatile,
+        results=results,
         ran_at=_now(),
     )
     if cache is not None and cached_stable is None:
         cache.store_stable(report)
+    if cache is not None and firmware:
+        cache.record_assessed(device_key, firmware)
 
     acknowledged = cache.acknowledged(key) if cache is not None else frozenset()
     if enforce:
