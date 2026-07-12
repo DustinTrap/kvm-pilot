@@ -7,6 +7,9 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- The generated wiki Hardware-Compatibility page now carries a **Maturity
+  column** — the #98-derived level per (device, firmware) read from the shipped
+  registry (`—` when no live-derived rating exists), completing #103.
 - New GLKVM quirk **`firmware-flash-webui-only`** (#177): the GL web console is
   the only known-good RM1PE upgrade path (V1.5.1→V1.9.1 live-verified); the
   `/api/upgrade/*` flash was observed to no-op (#94/#95) and no API-driven
