@@ -6,6 +6,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- The README (PyPI long description) used relative links for the
+  getting-started guide, docs pages, LICENSE/NOTICE, and the architecture SVG
+  images — they 404 (and the images don't render) on pypi.org. All README
+  links are now absolute, a guard test keeps them that way, and the PyPI
+  sidebar gains a `Documentation` project URL pointing at the wiki. Takes
+  effect on the PyPI page at the next release (#193).
+
 ## [0.1.0b2] — 2026-07-12
 
 **Beta 2 — the reliability + evidence-harness release.** Two hardening
