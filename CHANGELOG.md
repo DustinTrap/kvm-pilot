@@ -7,6 +7,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Changed (MCP)
+- Act results now carry a typed **`outcome`** field (`approved` / `denied` /
+  `cancelled` / `not_confirmed` / `gate_closed` / `invalidated`) so agents
+  branch on data instead of matching the human-facing `denied_reason` strings —
+  a cancelled elicitation (benign, retryable) is now typed apart from an
+  explicit denial. The `KVM_PILOT_MCP_ELICIT=off` escape-hatch hint moved from
+  every client-side denial to a **one-time hint after ≥2 consecutive**
+  client-side approval kills on the same host — a security trade-off shouldn't
+  be advertised on a one-off mis-click (#149).
 - The `power` tool now returns a structured result instead of a sentence: it
   **bumps the frame generation** (a stale mouse click can no longer anchor to a
   pre-reboot snapshot within the reboot window) and **verifies the effect** via

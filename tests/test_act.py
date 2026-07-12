@@ -225,3 +225,24 @@ def test_gate_external_write_needs_its_own_flag(monkeypatch):
     assert act.gate_enabled(EffectClass.EXTERNAL_WRITE) is False
     monkeypatch.setenv("KVM_PILOT_MCP_ALLOW_EXTERNAL_WRITE", "1")
     assert act.gate_enabled(EffectClass.EXTERNAL_WRITE) is True
+
+
+def test_client_kill_counter_resets_on_approval(monkeypatch):
+    # #149: the ELICIT hint keys off CONSECUTIVE kills — an approval in between
+    # resets the streak, so the next one-off cancel stays hint-free.
+    act._clear_client_kills("h1")
+    assert act._note_client_kill("h1") == 1
+    assert act._note_client_kill("h1") == 2
+    act._clear_client_kills("h1")
+    assert act._note_client_kill("h1") == 1
+    act._clear_client_kills("h1")
+
+
+def test_kill_hint_only_at_threshold():
+    act._clear_client_kills("h2")
+    inv = _inv(host="h2")
+    first = act._with_kill_hint("base remedy.", inv)
+    assert "KVM_PILOT_MCP_ELICIT=off" not in first
+    second = act._with_kill_hint("base remedy.", inv)
+    assert "KVM_PILOT_MCP_ELICIT=off" in second and "#2 in a row" in second
+    act._clear_client_kills("h2")
