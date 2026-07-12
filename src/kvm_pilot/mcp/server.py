@@ -734,12 +734,27 @@ async def _act(
         approval = await act.approve_or_deny(ctx, inv, confirm=confirm)
         if not approval.approved:
             return {**_provenance(cfg), **act.result(inv, approval)}
-        run(kvm)
+        # #72: the approval is a single-use signed receipt, re-verified against
+        # the invocation immediately before dispatch — fail closed on any bound
+        # field changing, expiry, or replay, as a denial-shaped result.
+        receipt = act.issue_receipt(inv, approval)
+        denial = act.verify_and_consume(receipt, inv)
+        if denial is not None:
+            return {**_provenance(cfg), **act.result(
+                inv,
+                act.Approval(False, reason=denial, outcome=act.Outcome.INVALIDATED),
+                receipt=receipt,
+            )}
+        try:
+            run(kvm)
+        except Exception as exc:
+            act.audit_dispatch_error(inv, receipt, exc)
+            raise
         # A media/power effect changes the screen enough to invalidate prior
         # observations — bump the frame generation so a stale mouse ref won't match.
         if not inv.dry_run and act.bumps_generation(inv.effect):
             act.bump_generation(cfg.host)
-        return {**_provenance(cfg), **act.result(inv, approval, detail=detail)}
+        return {**_provenance(cfg), **act.result(inv, approval, detail=detail, receipt=receipt)}
 
 
 @mcp.tool(annotations=_DESTRUCTIVE)
@@ -922,12 +937,25 @@ async def mouse(
         approval = await act.approve_or_deny(ctx, inv, confirm=confirm)
         if not approval.approved:
             return {**_provenance(cfg), **act.result(inv, approval)}
+        receipt = act.issue_receipt(inv, approval)
+        denial = act.verify_and_consume(receipt, inv)
+        if denial is not None:
+            return {**_provenance(cfg), **act.result(
+                inv,
+                act.Approval(False, reason=denial, outcome=act.Outcome.INVALIDATED),
+                receipt=receipt,
+            )}
         if not inv.dry_run:
-            _run_mouse(kvm, x, y, coord_space, button)
+            try:
+                _run_mouse(kvm, x, y, coord_space, button)
+            except Exception as exc:
+                act.audit_dispatch_error(inv, receipt, exc)
+                raise
         detail = f"moved to ({x}, {y}) [{coord_space}]" + (f" + {button} click" if button else "")
         return {
             **_provenance(cfg),
-            **act.result(inv, approval, detail=detail, extra={"coord_space": coord_space}),
+            **act.result(inv, approval, detail=detail, extra={"coord_space": coord_space},
+                         receipt=receipt),
         }
 
 
@@ -1180,10 +1208,22 @@ async def file_firmware_report(
         approval = await act.approve_or_deny(ctx, inv, confirm=confirm)
         if not approval.approved:
             return {**base, **act.result(inv, approval)}
-        outcome = await anyio.to_thread.run_sync(
-            lambda: _file_report(submission, repo=repo, source=source, dry_run=inv.dry_run)
-        )
-        return {**base, **act.result(inv, approval), "report": outcome,
+        receipt = act.issue_receipt(inv, approval)
+        denial = act.verify_and_consume(receipt, inv)
+        if denial is not None:
+            return {**base, **act.result(
+                inv,
+                act.Approval(False, reason=denial, outcome=act.Outcome.INVALIDATED),
+                receipt=receipt,
+            )}
+        try:
+            outcome = await anyio.to_thread.run_sync(
+                lambda: _file_report(submission, repo=repo, source=source, dry_run=inv.dry_run)
+            )
+        except Exception as exc:
+            act.audit_dispatch_error(inv, receipt, exc)
+            raise
+        return {**base, **act.result(inv, approval, receipt=receipt), "report": outcome,
                 "filed": outcome.get("filed", False)}
 
 

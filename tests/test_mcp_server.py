@@ -1312,3 +1312,16 @@ def test_denial_outcomes_are_typed(config_file):
     parsed = result_json(run_session(server_env(config_file, KVM_PILOT_MCP_ALLOW_HID="1"),
                                      interact))
     assert parsed["outcome"] == "approved"
+
+
+def test_act_result_carries_receipt_and_real_expiry(config_file):
+    """#72 end-to-end over stdio: an approved act result carries the single-use
+    receipt (consumed) and a real expiry instead of the old expires: null."""
+    async def interact(session):
+        return await session.call_tool("type_text", {"text": "hi", "confirm": True})
+
+    env = server_env(config_file, KVM_PILOT_MCP_ALLOW_HID="1")
+    parsed = result_json(run_session(env, interact))
+    assert parsed["approved"] is True
+    assert parsed["receipt"]["state"] == "consumed"
+    assert parsed["approval"]["expires"] is not None

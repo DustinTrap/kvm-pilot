@@ -16,9 +16,10 @@ changed mid-approval) return through the SAME tool call path — a result dict w
 hang. The result records both ``transport`` and ``effect`` so an actuator can't
 launder a power effect by choosing a different tool.
 
-The full signed/expiring consent receipt is deferred to #72; the stable
-``invocation_id`` + effect class are already in the result shape here so #72 can
-build on them.
+Approvals are consent RECEIPTS (#72): signed (per-process HMAC key), expiring
+(``KVM_PILOT_MCP_RECEIPT_TTL``), single-use, re-verified against the exact
+invocation immediately before dispatch, with a structured audit record per
+terminal on the ``kvm_pilot.mcp.audit`` logger.
 
 This module lives under ``mcp/`` (not core), so it may import ``mcp`` and
 ``pydantic``; it imports nothing from ``server`` to keep the dependency
@@ -28,12 +29,16 @@ one-directional (server -> act).
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
+import logging
 import os
+import secrets
 import threading
 import time
 import uuid
 from dataclasses import dataclass
+from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
@@ -123,8 +128,8 @@ def enforce_allowlist(profile: str | None) -> str | None:
 class InvocationContext:
     """The invocation an approval binds to (Armorer's binding tuple).
 
-    The signed/expiring receipt is deferred to #72; ``invocation_id`` + ``effect``
-    are stable here so that layer can build on them.
+    The signed/expiring single-use :class:`Receipt` (#72) is the HMAC over
+    exactly these fields plus the approver + timestamps.
     """
 
     invocation_id: str
@@ -229,8 +234,17 @@ async def approve_or_deny(ctx: Context | None, inv: InvocationContext, *, confir
     """Run the two-guarantee approval for ``inv``. Never raises for a denial.
 
     Returns an :class:`Approval`; ``approved=False`` carries a ``reason`` the agent
-    can act on. Only genuinely malformed states raise.
+    can act on. Only genuinely malformed states raise. Every decision emits an
+    audit record (#72).
     """
+    approval = await _decide(ctx, inv, confirm=confirm)
+    _audit_event(
+        "approved" if approval.approved else "denied", inv, outcome=str(approval.outcome)
+    )
+    return approval
+
+
+async def _decide(ctx: Context | None, inv: InvocationContext, *, confirm: bool) -> Approval:
     # Guarantee (a): the effect class must be operator-enabled.
     if not gate_enabled(inv.effect):
         flag = EFFECT_ENABLE_FLAG.get(inv.effect)
@@ -366,6 +380,171 @@ async def _elicit(ctx: Context, inv: InvocationContext) -> Approval:
 
 
 # --------------------------------------------------------------------------- #
+# Approval receipts (#72): signed, expiring, single-use                       #
+# --------------------------------------------------------------------------- #
+#
+# An approval authorizes exactly ONE dispatch of exactly ONE invocation. The
+# receipt binds the full invocation tuple under an HMAC with a per-process
+# ephemeral key (a restart voids receipts — correct for per-invocation scope),
+# and the dispatch site re-verifies it immediately before acting: any bound
+# field changed, expired, or already consumed -> fail closed with a
+# denial-shaped result. The audit trail is structured LOG LINES on the
+# dedicated ``kvm_pilot.mcp.audit`` logger (no file): every destructive
+# invocation terminal — approved, denied, consumed, expired, mismatched,
+# replayed, dispatch-exception — emits one JSON record with the invocation id.
+
+_RECEIPT_KEY = secrets.token_bytes(32)
+_RECEIPT_MAX_TRACKED = 512
+_RECEIPTS: dict[str, str] = {}  # receipt_id -> issued | consumed | expired
+_audit_log = logging.getLogger("kvm_pilot.mcp.audit")
+
+
+def _receipt_ttl() -> float:
+    """Receipt lifetime in seconds (``KVM_PILOT_MCP_RECEIPT_TTL``, default 60).
+
+    Clamped to [1, 3600]; an unparseable value falls back to the default —
+    a misconfigured TTL must not fail open (infinite) or closed (zero).
+    """
+    raw = os.environ.get("KVM_PILOT_MCP_RECEIPT_TTL", "").strip()
+    if not raw:
+        return 60.0
+    try:
+        return min(max(float(raw), 1.0), 3600.0)
+    except ValueError:
+        return 60.0
+
+
+@dataclass(frozen=True)
+class Receipt:
+    receipt_id: str
+    invocation_id: str
+    approver: str
+    issued_at: float
+    expires_at: float
+    mac: str
+
+
+def _receipt_mac(inv: InvocationContext, approver: str, issued_at: float,
+                 expires_at: float) -> str:
+    payload = json.dumps(
+        {
+            "host": inv.host, "profile": inv.profile,
+            "invocation_id": inv.invocation_id, "tool": inv.tool,
+            "effect": str(inv.effect), "op": inv.op, "transport": inv.transport,
+            "args_hash": inv.args_hash, "dry_run": inv.dry_run,
+            "approver": approver, "issued_at": issued_at, "expires_at": expires_at,
+        },
+        sort_keys=True, separators=(",", ":"),
+    ).encode()
+    return hmac.new(_RECEIPT_KEY, payload, hashlib.sha256).hexdigest()
+
+
+def issue_receipt(inv: InvocationContext, approval: Approval) -> Receipt:
+    """Mint the single-use receipt for an approved invocation."""
+    issued_at = time.time()
+    expires_at = issued_at + _receipt_ttl()
+    approver = approval.approver or "operator"
+    receipt = Receipt(
+        receipt_id=uuid.uuid4().hex,
+        invocation_id=inv.invocation_id,
+        approver=approver,
+        issued_at=issued_at,
+        expires_at=expires_at,
+        mac=_receipt_mac(inv, approver, issued_at, expires_at),
+    )
+    with _gen_lock:
+        _RECEIPTS[receipt.receipt_id] = "issued"
+        if len(_RECEIPTS) > _RECEIPT_MAX_TRACKED:  # bound growth: drop the oldest half
+            for k in list(_RECEIPTS)[: len(_RECEIPTS) // 2]:
+                del _RECEIPTS[k]
+    _audit_event("issued", inv, receipt=receipt)
+    return receipt
+
+
+def verify_and_consume(
+    receipt: Receipt, inv: InvocationContext, *, now: float | None = None
+) -> str | None:
+    """Re-verify the receipt against the invocation immediately before dispatch.
+
+    Returns ``None`` when the receipt is valid (and marks it consumed — an
+    approval authorizes exactly one dispatch), else the agent-facing denial
+    reason. Fail-closed, never raises.
+    """
+    clock = time.time() if now is None else now
+    with _gen_lock:
+        state = _RECEIPTS.get(receipt.receipt_id)
+        if state is None or receipt.invocation_id != inv.invocation_id:
+            denial, event = (
+                "receipt mismatched: not issued by this server for this "
+                "invocation — re-approve", "mismatched",
+            )
+        elif state == "consumed":
+            denial, event = (
+                "receipt already consumed: an approval authorizes exactly one "
+                "dispatch — re-approve to act again", "replayed",
+            )
+        elif not hmac.compare_digest(
+            _receipt_mac(inv, receipt.approver, receipt.issued_at, receipt.expires_at),
+            receipt.mac,
+        ):
+            denial, event = (
+                "receipt mismatched: a bound field (host/tool/effect/args/dry-run) "
+                "changed between approval and dispatch — re-approve", "mismatched",
+            )
+        elif clock >= receipt.expires_at:
+            _RECEIPTS[receipt.receipt_id] = "expired"
+            denial, event = (
+                f"receipt expired: the approval outlived its "
+                f"{_receipt_ttl():.0f}s lifetime — re-approve", "expired",
+            )
+        else:
+            _RECEIPTS[receipt.receipt_id] = "consumed"
+            denial, event = None, "consumed"
+    _audit_event(event, inv, receipt=receipt)
+    return denial
+
+
+def receipt_state(receipt_id: str) -> str | None:
+    with _gen_lock:
+        return _RECEIPTS.get(receipt_id)
+
+
+def _audit_event(
+    event: str,
+    inv: InvocationContext,
+    *,
+    receipt: Receipt | None = None,
+    outcome: str | None = None,
+    error: str | None = None,
+) -> None:
+    record: dict[str, Any] = {
+        "event": event,
+        "invocation_id": inv.invocation_id,
+        "host": inv.host,
+        "profile": inv.profile,
+        "tool": inv.tool,
+        "effect": str(inv.effect),
+        "op": inv.op,
+        "args_hash": inv.args_hash[:16],
+        "dry_run": inv.dry_run,
+    }
+    if receipt is not None:
+        record["receipt_id"] = receipt.receipt_id
+        record["approver"] = receipt.approver
+    if outcome is not None:
+        record["outcome"] = outcome
+    if error is not None:
+        record["error"] = error
+    _audit_log.info(json.dumps(record, sort_keys=True))
+
+
+def audit_dispatch_error(inv: InvocationContext, receipt: Receipt, exc: Exception) -> None:
+    """A dispatch that raised AFTER the receipt was consumed: the external
+    effect is unknown — the audit trail must say so rather than staying silent."""
+    _audit_event("dispatch-exception", inv, receipt=receipt, error=str(exc))
+
+
+# --------------------------------------------------------------------------- #
 # Result shape (superset of _provenance; #72's receipt builds on it)          #
 # --------------------------------------------------------------------------- #
 
@@ -376,11 +555,13 @@ def result(
     *,
     detail: str | None = None,
     extra: dict[str, Any] | None = None,
+    receipt: Receipt | None = None,
 ) -> dict[str, Any]:
     """The act-specific result fields (merge with ``_provenance(cfg)`` in the tool).
 
     Records both ``transport`` and ``effect`` — the anti-bypass invariant — plus a
-    stable ``invocation_id`` and the (unsigned) approval binding tuple for #72.
+    stable ``invocation_id`` and, when a receipt was issued (#72), its id/state
+    and the real approval expiry.
     """
     out: dict[str, Any] = {
         "invocation_id": inv.invocation_id,
@@ -398,13 +579,23 @@ def result(
             "args_hash": inv.args_hash,
             "dry_run": inv.dry_run,
             "effect": str(inv.effect),
-            "expires": None,  # signed/expiring receipt deferred to #72
+            # #72: the signed receipt's real expiry (None when no receipt was
+            # issued, i.e. the invocation was denied before one existed).
+            "expires": (
+                datetime.fromtimestamp(receipt.expires_at, UTC).isoformat()
+                if receipt is not None else None
+            ),
         },
         "detail": detail,
         "denied_reason": approval.reason,
         # #149: on a client-side elicitation denial, what happened + the operator fix.
         "remediation": approval.remediation,
     }
+    if receipt is not None:
+        out["receipt"] = {
+            "id": receipt.receipt_id,
+            "state": receipt_state(receipt.receipt_id),
+        }
     if extra:
         out.update(extra)
     return out
@@ -529,7 +720,12 @@ __all__ = [
     "new_invocation",
     "Approval",
     "Outcome",
+    "Receipt",
     "approve_or_deny",
+    "issue_receipt",
+    "verify_and_consume",
+    "receipt_state",
+    "audit_dispatch_error",
     "result",
     "generation",
     "bump_generation",
