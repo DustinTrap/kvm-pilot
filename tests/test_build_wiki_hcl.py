@@ -108,3 +108,18 @@ def test_unattended_install_page_ships_on_both_surfaces(build_wiki, tmp_path):
     assert "network-console" in page
     assert "inst.sshd" in (out / "skill.md").read_text()   # compact rule shipped
     assert "Unattended Linux installs" in (out / "_Sidebar.md").read_text()
+
+
+def test_every_docs_page_is_registered(build_wiki):
+    # The wiki publishes an allowlist (PAGES), not a glob: a docs page missing
+    # from it silently never syncs (#175). This runs the CI guard locally too.
+    assert build_wiki.unregistered_docs() == []
+
+
+def test_unregistered_doc_is_detected(build_wiki, monkeypatch):
+    # Drop one registered page from PAGES; the guard must name its source path.
+    dropped = build_wiki.PAGES[1]
+    monkeypatch.setattr(
+        build_wiki, "PAGES", [p for p in build_wiki.PAGES if p is not dropped]
+    )
+    assert dropped[0] in build_wiki.unregistered_docs()

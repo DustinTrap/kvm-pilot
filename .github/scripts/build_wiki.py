@@ -66,6 +66,10 @@ PAGES: list[tuple[str, str, str | None]] = [
      "Analysis: 2026-07-08 a13→a14 end-to-end tasks"),
 ]
 
+# Docs that intentionally never publish to the wiki (repo-relative). Empty today;
+# add a path here (with a reason) instead of leaving it silently unregistered.
+OPT_OUT: frozenset[str] = frozenset()
+
 # Link/image markdown: capture the ``[label]`` and the ``(target)`` separately.
 _LINK = re.compile(r"(!?\[[^\]]*\])\(([^)]+)\)")
 _IMAGE_EXTS = (".svg", ".png", ".jpg", ".jpeg", ".gif")
@@ -269,10 +273,34 @@ def build(out: Path) -> None:
     print(f"built {len(PAGES)} pages{' + HCL' if hcl_built else ''} + sidebar into {out}")
 
 
+def unregistered_docs() -> list[str]:
+    """Repo docs pages missing from ``PAGES`` (the wiki publishes an allowlist,
+    not a glob, so an unregistered page silently never syncs — #175)."""
+    registered = {src for src, _, _ in PAGES}
+    candidates = sorted(
+        p.relative_to(ROOT).as_posix()
+        for pattern in ("docs/*.md", "docs/analysis/*.md")
+        for p in ROOT.glob(pattern)
+    )
+    return [p for p in candidates if p not in registered and p not in OPT_OUT]
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
-    ap.add_argument("--out", type=Path, required=True, help="output directory for wiki pages")
-    build(ap.parse_args().out)
+    ap.add_argument("--out", type=Path, help="output directory for wiki pages")
+    ap.add_argument(
+        "--check", action="store_true",
+        help="fail if a docs page is not registered in PAGES (CI parity guard, #175)",
+    )
+    args = ap.parse_args()
+    if args.check == (args.out is not None):
+        ap.error("exactly one of --out or --check is required")
+    if args.check:
+        missing = unregistered_docs()
+        for path in missing:
+            print(f"{path}: not registered in PAGES (add it there, or to OPT_OUT with a reason)")
+        raise SystemExit(1 if missing else 0)
+    build(args.out)
 
 
 if __name__ == "__main__":

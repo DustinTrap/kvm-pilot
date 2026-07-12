@@ -40,6 +40,7 @@ client/driver code stays stdlib-only; `mcp` is imported only in this subpackage.
 | `ssh_discover` | `readOnlyHint` | Scan a CIDR for open SSH — **RISKY/opt-in** (active network scan; `confirm=true` required). Only to help find a target the user can't address, on networks they own |
 | `appliance_status` | `readOnlyHint` | Read-only diagnostics from the **KVM appliance's own OS** over appliance-SSH (load, D-state video threads). Note: load is ~10 even when idle on these units, so it is not a health signal — use `healthcheck`'s `encoder-wedge` finding |
 | `appliance_reboot` | `destructiveHint` | Reboot the **KVM appliance** (not the target) to clear a wedged encoder — **disabled unless the operator opts in** (`KVM_PILOT_MCP_ALLOW_APPLIANCE`) + `confirm=true`. Drops KVM control ~60s; target power untouched. Never automate it |
+| `access_paths` | `readOnlyHint` | Which **independent recovery paths** are live for the device — the lockout-exposure view (#162): kvmd-REST / appliance-SSH / target-SSH / out-of-band power / console-HID, each labeled by failure *domain* so redundancy isn't oversold. `summary.out_of_band_live=false` means every path shares the appliance's fate — a fully hung appliance can't be recovered remotely |
 
 Every tool result names the **host and driver it acted on**, and read-only
 tools always run with a deny-all confirm callback, so a bug in a read path can

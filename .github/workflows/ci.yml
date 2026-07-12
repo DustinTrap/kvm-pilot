@@ -50,11 +50,15 @@ jobs:
           path: coverage.xml
           if-no-files-found: ignore
 
-      - name: Wiki build smoke (#56)
+      - name: Wiki build smoke (#56) + docs-parity guard (#175)
         # The wiki-sync workflow only runs on main, so a docs change that breaks
-        # build_wiki.py would otherwise land unnoticed and redden main.
+        # build_wiki.py would otherwise land unnoticed and redden main. The
+        # --check pass fails when a docs page is missing from PAGES (the wiki
+        # publishes an allowlist, so an unregistered page silently never syncs).
         if: matrix.python-version == '3.12'
-        run: python .github/scripts/build_wiki.py --out "$RUNNER_TEMP/wiki-smoke"
+        run: |
+          python .github/scripts/build_wiki.py --check
+          python .github/scripts/build_wiki.py --out "$RUNNER_TEMP/wiki-smoke"
 
   smoke-install:
     # Clean-room `pip install --pre` of the built wheel in a fresh venv — the exact

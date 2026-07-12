@@ -6,6 +6,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- CI docs-parity guard: `build_wiki.py --check` fails when a `docs/*.md` page is
+  not registered in the wiki `PAGES` allowlist, so a new page can no longer
+  silently go unpublished; the MCP README tool table gained the missing
+  `access_paths` row (#175).
+
 ## [0.1.0b1] — 2026-07-11
 
 **First beta.** The telemetry loop now closes itself: devices in the field
