@@ -609,11 +609,17 @@ def _observe_power(kvm: KVMDriver) -> tuple[bool | None, str]:
         except KVMPilotError as exc:
             return None, f"unverifiable: ATX state unreadable ({exc})"
         if not atx.get("enabled"):
-            return None, (
-                "unverifiable: ATX reports enabled=false — no wired power sensing "
-                "(GL units always report this: quirk atx-power-state-always-off); "
+            note = (
+                "unverifiable: ATX reports enabled=false — no wired power sensing; "
                 "verify visually via snapshot or wait_for_state"
             )
+            # Name the driver's own quirk when it declares one — the knowledge
+            # stays in drivers/*, this generic code just relays it.
+            quirks: list = getattr(kvm, "known_quirks", lambda: [])()
+            atx_quirk = next((q.id for q in quirks if "atx" in q.id), None)
+            if atx_quirk:
+                note += f" (device quirk: {atx_quirk})"
+            return None, note
         leds = atx.get("leds") or {}
         return bool(leds.get("power")), "ATX power LED"
     try:
@@ -706,6 +712,23 @@ def power(
 # -- HID act tools (issue #61): see act.py for the two-guarantee model --------
 
 
+def _consume_receipt(
+    inv: act.InvocationContext, approval: act.Approval
+) -> tuple[act.Receipt, dict | None]:
+    """#72 at every dispatch site: mint the single-use receipt and re-verify it
+    against the invocation immediately before acting. Returns (receipt, None)
+    when dispatch may proceed, else (receipt, denial-result-fields)."""
+    receipt = act.issue_receipt(inv, approval)
+    denial = act.verify_and_consume(receipt, inv)
+    if denial is None:
+        return receipt, None
+    return receipt, act.result(
+        inv,
+        act.Approval(False, reason=denial, outcome=act.Outcome.INVALIDATED),
+        receipt=receipt,
+    )
+
+
 async def _act(
     ctx: Context,
     profile: str | None,
@@ -734,17 +757,9 @@ async def _act(
         approval = await act.approve_or_deny(ctx, inv, confirm=confirm)
         if not approval.approved:
             return {**_provenance(cfg), **act.result(inv, approval)}
-        # #72: the approval is a single-use signed receipt, re-verified against
-        # the invocation immediately before dispatch — fail closed on any bound
-        # field changing, expiry, or replay, as a denial-shaped result.
-        receipt = act.issue_receipt(inv, approval)
-        denial = act.verify_and_consume(receipt, inv)
-        if denial is not None:
-            return {**_provenance(cfg), **act.result(
-                inv,
-                act.Approval(False, reason=denial, outcome=act.Outcome.INVALIDATED),
-                receipt=receipt,
-            )}
+        receipt, denied = _consume_receipt(inv, approval)
+        if denied is not None:
+            return {**_provenance(cfg), **denied}
         try:
             run(kvm)
         except Exception as exc:
@@ -937,14 +952,9 @@ async def mouse(
         approval = await act.approve_or_deny(ctx, inv, confirm=confirm)
         if not approval.approved:
             return {**_provenance(cfg), **act.result(inv, approval)}
-        receipt = act.issue_receipt(inv, approval)
-        denial = act.verify_and_consume(receipt, inv)
-        if denial is not None:
-            return {**_provenance(cfg), **act.result(
-                inv,
-                act.Approval(False, reason=denial, outcome=act.Outcome.INVALIDATED),
-                receipt=receipt,
-            )}
+        receipt, denied = _consume_receipt(inv, approval)
+        if denied is not None:
+            return {**_provenance(cfg), **denied}
         if not inv.dry_run:
             try:
                 _run_mouse(kvm, x, y, coord_space, button)
@@ -1208,14 +1218,9 @@ async def file_firmware_report(
         approval = await act.approve_or_deny(ctx, inv, confirm=confirm)
         if not approval.approved:
             return {**base, **act.result(inv, approval)}
-        receipt = act.issue_receipt(inv, approval)
-        denial = act.verify_and_consume(receipt, inv)
-        if denial is not None:
-            return {**base, **act.result(
-                inv,
-                act.Approval(False, reason=denial, outcome=act.Outcome.INVALIDATED),
-                receipt=receipt,
-            )}
+        receipt, denied = _consume_receipt(inv, approval)
+        if denied is not None:
+            return {**base, **denied}
         try:
             outcome = await anyio.to_thread.run_sync(
                 lambda: _file_report(submission, repo=repo, source=source, dry_run=inv.dry_run)

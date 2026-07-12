@@ -55,8 +55,9 @@ def default_ledger_path() -> Path:
     override = os.environ.get("KVM_PILOT_TEST_LEDGER")
     if override:
         return Path(override).expanduser()
-    base = os.environ.get("XDG_CONFIG_HOME") or str(Path.home() / ".config")
-    return Path(base) / "kvm-pilot" / "test_runs.jsonl"
+    from .config import _config_base_dir  # platform-correct (%APPDATA% on Windows)
+
+    return Path(_config_base_dir()) / "kvm-pilot" / "test_runs.jsonl"
 
 
 def append_row(path: Path, row: dict[str, Any]) -> Path:

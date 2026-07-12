@@ -131,6 +131,10 @@ def _hcl_maturity(registry: Path) -> dict[tuple[str, str, str], str]:
     the #98-derived, CI-drift-guarded truth (mirrors
     ``support_matrix._registry_maturity``'s case-insensitive join). ``{}`` when
     the registry is missing/unreadable, so the page still builds.
+
+    DELIBERATELY import-free of ``kvm_pilot`` (like the HCL ledger ingestion
+    above): this script builds the wiki from data files alone, so a package
+    import error can never take the docs pipeline down with it.
     """
     try:
         reg = json.loads(registry.read_text(encoding="utf-8"))
