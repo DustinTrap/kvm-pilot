@@ -17,6 +17,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 # Minimal JPEG: SOI + APP0 header, enough for snapshot()/JPEG-sniffing tests.
 _FAKE_JPEG = bytes.fromhex("ffd8ffe000104a46494600010100000101000000")
 
+# What a real GL-RM1PE serves from /api/streamer/snapshot at native res while
+# the encoder is in H.264 mode: a lone non-IDR NAL, mislabeled image/jpeg (#107).
+_FAKE_H264_NAL = bytes.fromhex("0000000141e00020824f000300")
+
 # The POST routes KVMClient actually drives. A real kvmd 404s anything else, so
 # a typo'd endpoint in the driver would slip through a lenient fake.
 _VALID_POST_PATHS = frozenset({
@@ -50,6 +54,12 @@ class FakeKVMState:
         self.hid_connected = True
         # kvmd jiggler (keep-awake, #159): set_params?jiggler=1/0 toggles it.
         self.jiggler_active = False
+        # GL encoder mode (#187): None = firmware doesn't expose params.video_format
+        # (the V1.5.1 shape — POST /api/streamer/set_params also 404s); 0 = H.264,
+        # 1 = MJPEG. With snapshot_h264_at_native set, the snapshot endpoint serves
+        # H.264 bytes (mislabeled image/jpeg, #107) while the mode is not MJPEG.
+        self.gl_video_format: int | None = None
+        self.snapshot_h264_at_native = False
         self.msd: dict[str, object] = {"online": False, "drive": {"image": None}}
         # A healthy device goes online once media is attached; msd_stays_offline
         # reproduces the #77 GLKVM failure (connect accepted, host sees nothing).
@@ -170,9 +180,18 @@ class _Handler(BaseHTTPRequestHandler):
         elif path == "/api/msd":
             self._json(self._state.msd)
         elif path == "/api/streamer":
-            self._json({"source": {"online": True, "resolution": {"width": 1920, "height": 1080}}})
+            streamer: dict[str, object] = {
+                "source": {"online": True, "resolution": {"width": 1920, "height": 1080}},
+            }
+            if self._state.gl_video_format is not None:
+                streamer["params"] = {"video_format": self._state.gl_video_format}
+                streamer["features"] = {"h264": True, "quality": True, "resolution": False}
+            self._json(streamer)
         elif path == "/api/streamer/snapshot":
-            self._send(_FAKE_JPEG, ctype="image/jpeg")
+            if self._state.snapshot_h264_at_native and self._state.gl_video_format != 1:
+                self._send(_FAKE_H264_NAL, ctype="image/jpeg")  # the #107 mislabel
+            else:
+                self._send(_FAKE_JPEG, ctype="image/jpeg")
         elif path == "/api/log":
             # kvmd streams plain-text journal lines (non-follow returns the buffer).
             self._send(b"[boot] kvmd started\n[atx] power on\n", ctype="text/plain")
@@ -216,6 +235,17 @@ class _Handler(BaseHTTPRequestHandler):
             elif "jiggler=0" in query:
                 self._state.jiggler_active = False
             self._json({})
+        elif path == "/api/streamer/set_params":
+            # GL-proprietary encoder switch (#187); absent on V1.5.1-shaped state.
+            if self._state.gl_video_format is None:
+                self._json({}, ok=False, status=404)
+            else:
+                query = (self.path.split("?", 1) + [""])[1]
+                if "video_format=1" in query:
+                    self._state.gl_video_format = 1
+                elif "video_format=0" in query:
+                    self._state.gl_video_format = 0
+                self._json({})
         elif path in _VALID_POST_PATHS:
             self._json({})  # generic OK for a real hid/msd/gpio route
         else:

@@ -42,7 +42,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..client import PiKVMDriver
-from ..errors import KVMPilotError, UnavailableError
+from ..errors import KVMPilotError, SnapshotFormatError, UnavailableError
 
 logger = logging.getLogger("kvm_pilot.glkvm")
 
@@ -122,7 +122,32 @@ GLKVM_QUIRKS: list[Quirk] = [
             "snapshot-heavy flow, wrap it in `driver.streamer_warm()` (also used by "
             "`watch`) to hold the encoder warm so every frame is instant. Needs the ws "
             "dependency (now a base install). keep-awake does not help — the streamer is "
-            "off regardless of whether the display is awake."
+            "off regardless of whether the display is awake. If the warmed encoder then "
+            "emits H.264 at the current resolution, see snapshot-h264-at-native-res."
+        ),
+        firmware="all",
+        source="observed",
+    ),
+    Quirk(
+        id="snapshot-h264-at-native-res",
+        summary=(
+            "At native/high resolutions the streamer encodes H.264, and "
+            "/api/streamer/snapshot returns a lone H.264 NAL mislabeled "
+            "image/jpeg — undecodable as a still (#107; a single non-IDR "
+            "P-frame, so local decode is impossible even in principle). "
+            "Observed at 2560x1440 on V1.5.1 and V1.9.1."
+        ),
+        workaround=(
+            "kvm-pilot now auto-recovers this on firmware that exposes "
+            "params.video_format (V1.9.1+): `snapshot` flips the encoder to "
+            "MJPEG (POST /api/streamer/set_params?video_format=1), retries, and "
+            "restores the prior format — a JPEG at native res, no EDID change "
+            "(#187; the flip is held for the whole `streamer_warm()` block). "
+            "V1.5.1 does not expose video_format, so units stuck there get the "
+            "honest SnapshotFormatError — upgrade via the web UI (#177; the "
+            "API flash is a no-op). MJPEG at native res raises encoder load: "
+            "if snapshots start 503-ing after the flip, check the healthcheck's "
+            "encoder-wedge finding (#107)."
         ),
         firmware="all",
         source="observed",
@@ -150,21 +175,35 @@ class GLKVMDriver(PiKVMDriver):
 
     # -- Video: on-demand-streamer recovery (#142) ------------------------
 
-    def snapshot(self) -> bytes:
-        """Capture the screen, recovering GL's on-demand streamer if it is asleep (#142).
+    # streamer_warm() holds the MJPEG flip (#187) instead of restoring per
+    # snapshot: one flip, one restore at warm-exit — flipping per frame would
+    # re-init the encoder every call (slow, and it pokes the #107 wedge).
+    _mjpeg_hold: bool = False
+    _mjpeg_restore: int | None = None
 
-        GL runs the video encoder only while a video client is connected, and the
-        JPEG snapshot path cannot start it — so a headless snapshot 503s with
-        ``streamer: null`` (the common AI-agent case; see ``snapshot-needs-video-client``
-        in ``GLKVM_QUIRKS``). On *that specific* failure this registers a stream
-        client (kvmd's ``/api/ws`` in stream mode), waits for the encoder to come up,
-        and retries; the streamer stays up briefly after the client leaves, so the
-        frame lands. Any other 503 — a *running* streamer that still fails (a genuine
-        wedge or a mid-reinit) — is re-raised unchanged, and without the ``ws`` extra
-        it degrades to the base honest error.
+    def snapshot(self) -> bytes:
+        """Capture the screen, recovering GL's two known snapshot failures.
+
+        * **Streamer asleep (#142):** GL runs the video encoder only while a
+          video client is connected, and the JPEG snapshot path cannot start it —
+          so a headless snapshot 503s with ``streamer: null`` (the common
+          AI-agent case; see ``snapshot-needs-video-client`` in ``GLKVM_QUIRKS``).
+          On *that specific* failure this registers a stream client (kvmd's
+          ``/api/ws`` in stream mode), waits for the encoder to come up, and
+          retries; the streamer stays up briefly after the client leaves, so the
+          frame lands. Any other 503 — a *running* streamer that still fails (a
+          genuine wedge or a mid-reinit) — is re-raised unchanged, and without
+          the ``ws`` extra it degrades to the base honest error.
+        * **H.264 at native res (#107/#187):** at native/high resolutions the
+          encoder emits H.264 and the snapshot bytes fail the JPEG guard. When
+          the firmware exposes ``video_format`` (V1.9.1+), flip the encoder to
+          MJPEG, retry, and restore — a JPEG at native res with no EDID change
+          and no decoder (see ``snapshot-h264-at-native-res``).
         """
         try:
             return super().snapshot()
+        except SnapshotFormatError as exc:
+            return self._snapshot_via_mjpeg_flip(exc)
         except UnavailableError as exc:
             try:
                 offline = bool(self.video_signal_info().get("streamer_offline"))
@@ -172,7 +211,12 @@ class GLKVMDriver(PiKVMDriver):
                 offline = False
             if not offline:
                 raise  # a running streamer that still 503s is a different fault
-            return self._snapshot_via_stream_trigger(exc)
+            try:
+                return self._snapshot_via_stream_trigger(exc)
+            except SnapshotFormatError as fmt_exc:
+                # The freshly-warmed encoder emits H.264 at this resolution —
+                # the exact .39 failure shape: offline -> warm -> format error.
+                return self._snapshot_via_mjpeg_flip(fmt_exc)
 
     def _snapshot_via_stream_trigger(
         self, original: UnavailableError, *, wait: float = 10.0, poll: float = 0.5
@@ -207,6 +251,82 @@ class GLKVMDriver(PiKVMDriver):
         # Grace window after close covers a last try; else the base raises honestly.
         return super().snapshot()
 
+    # -- Video: MJPEG flip for a native-res JPEG (#187) --------------------
+
+    def _streamer_params(self) -> dict:
+        """The GL ``params`` block of ``/api/streamer`` (``video_format`` etc.),
+        tolerating both envelope shapes like ``_streamer_source``; ``{}`` when
+        the firmware doesn't expose it (V1.5.1)."""
+        try:
+            state = self.get_streamer_state()
+        except KVMPilotError:
+            return {}
+        params = state.get("params")
+        if not isinstance(params, dict) and isinstance(state.get("streamer"), dict):
+            params = state["streamer"].get("params")
+        return params if isinstance(params, dict) else {}
+
+    def _set_video_format(self, fmt: int) -> None:
+        """GL-proprietary encoder switch: ``0`` = H.264, ``1`` = MJPEG (#187)."""
+        self._http.post("/api/streamer/set_params", params={"video_format": fmt})
+
+    def _snapshot_via_mjpeg_flip(
+        self, original: SnapshotFormatError, *, wait: float = 5.0, poll: float = 0.5
+    ) -> bytes:
+        """Flip the encoder to MJPEG, retry the snapshot, restore (#187).
+
+        At native/high resolutions the GL streamer emits H.264, so
+        ``/api/streamer/snapshot`` returns undecodable bytes (#107). On firmware
+        that exposes ``params.video_format`` (V1.9.1+),
+        ``POST /api/streamer/set_params?video_format=1`` switches the encoder to
+        MJPEG and the very next snapshot is a valid JPEG at full native
+        resolution — no EDID change, no H.264 decode (live-proven on V1.9.1).
+        The prior format is restored afterwards so an interactive H.264 video
+        client doesn't find the stream silently switched — unless a
+        ``streamer_warm()`` hold is active, which restores once at warm-exit.
+        Gated on the device advertising ``video_format``: V1.5.1 doesn't, and it
+        gets the honest ``SnapshotFormatError`` (remediation: web-UI upgrade,
+        #177) rather than a blind POST.
+        """
+        current = self._streamer_params().get("video_format")
+        if not isinstance(current, int) or current == 1:
+            # Not exposed (old firmware), or already MJPEG — the bad bytes have
+            # some other cause; surface the original honest error.
+            raise original
+        self._set_video_format(1)
+        logger.info(
+            "snapshot: flipped the GL encoder to MJPEG for a native-res JPEG "
+            "(#187); will restore video_format=%d", current
+        )
+        try:
+            deadline = time.monotonic() + wait
+            while True:
+                try:
+                    return super().snapshot()
+                except UnavailableError:
+                    # The encoder re-initializes after the switch; a wedge
+                    # (#107) surfaces as this raising past the deadline.
+                    if time.monotonic() >= deadline:
+                        raise
+                    time.sleep(poll)
+        finally:
+            if self._mjpeg_hold:
+                if self._mjpeg_restore is None:
+                    self._mjpeg_restore = current  # restore once, at warm-exit
+            else:
+                self._restore_video_format(current)
+
+    def _restore_video_format(self, fmt: int) -> None:
+        try:
+            self._set_video_format(fmt)
+        except KVMPilotError as exc:
+            # Benign: the stream is left on MJPEG (the web UI can switch back);
+            # the snapshot itself already succeeded or raised its own error.
+            logger.warning(
+                "snapshot: could not restore video_format=%d after the MJPEG "
+                "flip (%s); the live stream stays MJPEG until changed", fmt, exc
+            )
+
     @contextmanager
     def streamer_warm(self, *, drain_interval: float = 1.0):
         """Keep-alive: hold a video client open so GL's on-demand encoder stays
@@ -221,7 +341,25 @@ class GLKVMDriver(PiKVMDriver):
         exit and the encoder lapses after its grace period. Best-effort and never
         raises: if the WS can't be opened it yields un-warmed (each ``snapshot``
         still self-recovers per call), so it is always safe to wrap.
+
+        An MJPEG flip (#187) inside the block is *held* rather than restored per
+        snapshot — one flip serves the whole loop, and the prior ``video_format``
+        is put back once on exit (flipping per frame would re-init the encoder
+        every call).
         """
+        self._mjpeg_hold = True
+        try:
+            with self._streamer_warm_ws(drain_interval=drain_interval):
+                yield
+        finally:
+            self._mjpeg_hold = False
+            if self._mjpeg_restore is not None:
+                self._restore_video_format(self._mjpeg_restore)
+                self._mjpeg_restore = None
+
+    @contextmanager
+    def _streamer_warm_ws(self, *, drain_interval: float):
+        """The #142 keep-alive itself: hold + drain the stream-mode WS client."""
         ws = None
         try:
             ws = self._connect_event_ws(stream=True)
