@@ -44,6 +44,9 @@ class FakeKVMState:
         self.powered_on = False
         self.fail_status: int | None = None
         self.fail_times = 0
+        # Serve a truncated JSON body (still labeled application/json) once —
+        # the #170 wire fault: connection cut at the content boundary.
+        self.garbage_json_once = False
         self.echo_password = False
         self.api_disabled = False  # GL firmware: every /api/* returns 404
         # Healthcheck knobs: ATX wiring, GPIO outputs, MSD state.
@@ -133,6 +136,10 @@ class _Handler(BaseHTTPRequestHandler):
         if st.fail_times > 0 and st.fail_status:
             st.fail_times -= 1
             self._send(b"transient", status=st.fail_status, ctype="text/plain")
+            return True
+        if st.garbage_json_once:
+            st.garbage_json_once = False
+            self._send(b'{"ok": true, "res', ctype="application/json")  # truncated (#170)
             return True
         if st.api_disabled and path.startswith("/api/"):
             # GL.iNet firmware blocks the API at nginx -> 404 (HTML in reality).

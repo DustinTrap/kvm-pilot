@@ -36,6 +36,7 @@ from .errors import (
     BusyError,
     ConnectionError,
     KVMPilotError,
+    ProtocolError,
     TimeoutError,
     UnavailableError,
 )
@@ -225,17 +226,21 @@ class HTTP:
 
     @staticmethod
     def _is_retryable(exc: Exception, method: str) -> bool:
-        # 409/503 ARE retried (bounded, with backoff): they are definitive in the
-        # sense that the device rejected the op WITHOUT applying it, so re-firing
-        # is always safe — busy/unavailable subsystems often recover within the
-        # retry window. A ConnectionError is only safe when the request never
-        # reached the device (connect-phase failure) or the method is read-only:
-        # re-firing a power/HID/MSD POST whose response was lost mid-read could
-        # execute the destructive action twice.
+        # 409/503 are retried (bounded, with backoff) for READS only. A 409/503
+        # after a state-changing POST is NOT proof the op wasn't applied: a BMC
+        # whose management plane is perturbed by the reset it just accepted
+        # answers 503, and a transport-level re-POST would fire the destructive
+        # action twice (#167) — surfacing the typed error lets the caller's own
+        # reconciliation decide (e.g. RedfishDriver._reset re-reads PowerState).
+        # A ConnectionError is only safe when the request never reached the
+        # device (connect-phase failure) or the method is read-only: re-firing a
+        # power/HID/MSD POST whose response was lost mid-read could execute the
+        # destructive action twice.
+        idempotent = method in ("GET", "HEAD")
         if isinstance(exc, (BusyError, UnavailableError)):
-            return True
+            return idempotent
         if isinstance(exc, ConnectionError):
-            return method in ("GET", "HEAD") or not getattr(exc, "request_sent", False)
+            return idempotent or not getattr(exc, "request_sent", False)
         return False
 
     # -- core request with retry ----------------------------------------
@@ -280,10 +285,13 @@ class HTTP:
                     continue
                 # Terminal: a transport-down failure (503/timeout/conn) advances the
                 # damper; any definitive device response (2xx here, or a 4xx/auth
-                # error below) means the box is up, so it resets.
-                self._consecutive_failures = (
-                    self._consecutive_failures + 1 if self._is_retryable(exc, method) else 0
+                # error below) means the box is up, so it resets. 409/503 count as
+                # down regardless of method — #167's retry gate must not change
+                # the #164 breaker semantics (a 503-on-POST still looks wedged).
+                down = self._is_retryable(exc, method) or isinstance(
+                    exc, (BusyError, UnavailableError)
                 )
+                self._consecutive_failures = self._consecutive_failures + 1 if down else 0
                 raise
             self._consecutive_failures = 0
             return result
@@ -354,10 +362,19 @@ class HTTP:
 
         if raw_response:
             return body
+        if not body:
+            return None  # an empty 2xx body (204-style) is not a protocol violation
         try:
             parsed = json.loads(body)
         except json.JSONDecodeError:
-            return body
+            # Truncated/garbage body on a JSON endpoint: previously the raw bytes
+            # leaked to dict-expecting callers and crashed as AttributeError (#170).
+            preview = self._redact(body.decode(errors="replace"))[:200]
+            raise ProtocolError(
+                f"Expected JSON from {path} but got {len(body)} bytes of non-JSON "
+                f"(truncated preview): {preview!r}",
+                200,
+            ) from None
         if isinstance(parsed, dict) and not parsed.get("ok", True):
             raise KVMPilotError(f"API returned ok=false: {self._redact(str(parsed))}", 200)
         return parsed.get("result", parsed) if isinstance(parsed, dict) else parsed

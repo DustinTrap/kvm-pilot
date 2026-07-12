@@ -86,6 +86,12 @@ class RedfishState:
         # TransferProtocolType (sushy bug #2072805).
         self.vm_reject_optional_params = False
         self.vm_require_transfer_protocol = False
+        # Accept InsertMedia (2xx) but never set Inserted — a silent media no-op,
+        # the #169 verify-path failure mode.
+        self.vm_insert_noop = False
+        # Sessions POST returns a token but neither a Location header nor a body
+        # @odata.id — the session URI is unknowable, logout can't DELETE (#169).
+        self.session_no_uri = False
         # When set, the Chassis/Managers collections list a decoy member first;
         # only ComputerSystem.Links.Chassis/ManagedBy point at the real node.
         self.multi_node = False
@@ -327,12 +333,14 @@ class _Handler(BaseHTTPRequestHandler):
             token = f"tok-redfish-{st.token_seq}"
             st.valid_token = token
             resp: dict = {"UserName": "admin", "@odata.id": f"{SESSIONS}/1"}
+            if st.session_no_uri:
+                del resp["@odata.id"]
             if st.password_change_required:
                 resp["@Message.ExtendedInfo"] = [
                     {"MessageId": "Base.1.0.PasswordChangeRequired",
                      "Message": "change your password"}]
             headers = {"X-Auth-Token": token}
-            if st.session_send_location:
+            if st.session_send_location and not st.session_no_uri:
                 headers["Location"] = f"{SESSIONS}/1"
             self._send(resp, status=201, headers=headers)
             return
@@ -369,7 +377,8 @@ class _Handler(BaseHTTPRequestHandler):
                      "Message": "TransferProtocolType is required",
                      "MessageArgs": ["InsertMedia", "TransferProtocolType"]}]}}, status=400)
                 return
-            st.inserted = True
+            if not st.vm_insert_noop:
+                st.inserted = True
             st.last_image = body.get("Image")
             self._send(None, status=204)
             return

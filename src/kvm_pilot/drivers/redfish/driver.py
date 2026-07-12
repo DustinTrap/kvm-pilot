@@ -31,7 +31,7 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from ...errors import CapabilityError, KVMPilotError, TimeoutError
+from ...errors import CapabilityError, KVMPilotError, MediaOfflineError, TimeoutError
 from ...safety import SafetyPolicy
 from ...vision.base import (
     PHASE_BIOS_MENU,
@@ -734,15 +734,41 @@ class RedfishDriver(PowerMixin, CapabilityMixin):
 
     # -- VirtualMedia ----------------------------------------------------
 
-    def mount_iso(self, source: str, image_name: str | None = None, cdrom: bool = True) -> str:
-        insert, _eject, _slot = self._virtual_media(cdrom)
+    def mount_iso(
+        self,
+        source: str,
+        image_name: str | None = None,
+        cdrom: bool = True,
+        verify: bool = True,
+        verify_timeout: float = 10.0,
+    ) -> str:
+        insert, _eject, slot = self._virtual_media(cdrom)
         name = image_name or source.rsplit("/", 1)[-1].split("?")[0]
         if not self.safety.guard(
             "redfish.virtual_media_insert", f"Insert virtual media {source!r} on {self.host}"
         ):
             return name
         self._handle_async(self._insert_media(insert, source))
+        if verify:
+            # An accepted InsertMedia (even with a completed Task) is not proof
+            # the medium landed — re-read Inserted, the same trap #78 caught on
+            # GLKVM (#169). Mirrors the PiKVM client's _verify_msd_online.
+            self._verify_inserted(slot, verify_timeout)
         return name
+
+    def _verify_inserted(self, slot: str, timeout: float) -> None:
+        deadline = time.monotonic() + timeout
+        while True:
+            if self._http.get_json(slot).get("Inserted"):
+                return
+            if time.monotonic() >= deadline:
+                raise MediaOfflineError(
+                    f"BMC accepted InsertMedia but {slot} never reported "
+                    f"Inserted=true within {timeout:.0f}s — the host will not see "
+                    "the device (pass verify_timeout to wait longer, or "
+                    "verify=False to skip this check)"
+                )
+            time.sleep(0.5)
 
     def _insert_media(self, target: str, source: str):
         """POST InsertMedia with the minimal body, adapting to strict BMCs.

@@ -77,6 +77,17 @@ class MediaOfflineError(KVMPilotError):
     """
 
 
+class ProtocolError(KVMPilotError):
+    """The device answered where JSON was expected with a body that isn't JSON.
+
+    The hallmark case is a truncated response (connection cut at the content
+    boundary but the read returned) — previously the raw bytes leaked to
+    dict-expecting callers and surfaced as an opaque ``AttributeError`` (#170).
+    Deliberately not retried: the request completed; re-firing it can't be
+    assumed safe.
+    """
+
+
 __all__ = [
     "KVMPilotError",
     "AuthError",
@@ -90,4 +101,5 @@ __all__ = [
     "ApiDisabledError",
     "SnapshotFormatError",
     "MediaOfflineError",
+    "ProtocolError",
 ]
