@@ -788,3 +788,44 @@ def test_watch_holds_display_awake_and_restores(monkeypatch):
     assert seen["jiggler_during_wait"] is True
     toggles = [a for a in seen["kvm"].actions if a[0] == "set_jiggler"]
     assert toggles == [("set_jiggler", True), ("set_jiggler", False)]
+
+
+def test_firmware_update_plan_steers_to_web_console(monkeypatch, capsys):
+    # #177: on a driver whose quirks say the API flash is unreliable, the plan
+    # output must name the known-good web-console path (and never block).
+    from kvm_pilot import cli as cli_mod
+    from kvm_pilot.drivers.base import Capability
+    from kvm_pilot.drivers.glkvm import GLKVM_QUIRKS
+
+    quirk = next(q for q in GLKVM_QUIRKS if q.id == "firmware-flash-webui-only")
+
+    class _GlIsh:
+        safety = types.SimpleNamespace(confirm=None)
+        host = "h"
+
+        def supports(self, cap):
+            return cap == Capability.FIRMWARE_UPDATE
+
+        def get_upgrade_status(self):
+            return {"enabled": True, "current": "V1.9.1 release1"}
+
+        def get_firmware_info(self):
+            return {"vendor": "gl.inet", "product": "RM1PE", "version": "V1.9.1 release1"}
+
+        def known_quirks(self, firmware=None):
+            return [quirk]
+
+        def apply_firmware_update(self, image=None, dry_run=True, **kw):
+            return {"sent": False, "dry_run": True,
+                    "plan": [{"method": "POST", "path": "/api/upgrade/start",
+                              "note": "start the flash"}],
+                    "current": "V1.9.1 release1"}
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(cli_mod, "_build_client", lambda args: _GlIsh())
+    monkeypatch.setattr(cli_mod, "run_healthcheck", None, raising=False)
+    assert cli_mod.main(["firmware-update", "--host", "h"]) == 0
+    out = capsys.readouterr().out
+    assert "web console" in out

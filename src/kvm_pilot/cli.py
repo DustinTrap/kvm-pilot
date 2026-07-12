@@ -728,6 +728,14 @@ def cmd_firmware_update(args) -> int:
         line += f", staged image {status['image_size'] // (1024 * 1024)} MB"
     print(line)
 
+    # Steer to the known-good path when the device's quirks say the API flash
+    # is unreliable (#177) — printed on both the plan and --execute paths, but
+    # never blocking: the driver reports a no-op honestly (#94).
+    for q in getattr(kvm, "known_quirks", lambda: [])():
+        if q.id == "firmware-flash-webui-only":
+            print(f"\nNOTE: {q.summary}\n  -> {q.workaround}")
+            break
+
     # Recovery posture drives both the printed assessment and the execute gate.
     report = run_healthcheck(kvm)
     no_recovery = any(
