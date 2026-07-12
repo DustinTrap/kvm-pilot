@@ -6,6 +6,25 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed (reliability)
+- The transports no longer auto-retry a **409/503 that answers a state-changing
+  request** — re-firing a POST whose 409/503 arrived after the device began
+  acting (e.g. a BMC perturbed by the `ComputerSystem.Reset` it just accepted)
+  could double-fire a destructive action. Reads (GET/HEAD) keep the bounded
+  retry; the #164 breaker semantics are unchanged; the Redfish driver's own
+  at-target reconciliation now sees the surfaced error instead of being
+  pre-empted by a transport re-POST (#167).
+- A JSON endpoint answering with a **non-JSON body** (e.g. truncated at the
+  content boundary) now raises a typed `ProtocolError` with a redacted preview
+  instead of leaking raw bytes into dict-expecting callers as an opaque
+  `AttributeError`; an empty 2xx body returns `None` (#170).
+- Redfish `mount_iso` now **verifies the medium actually landed** (polls the
+  VirtualMedia slot for `Inserted=true`, raising `MediaOfflineError` on a
+  silent no-op — the #78 trap, Redfish edition; `verify=False` opts out), and
+  a mid-flight 401 re-auth **DELETEs the old session before re-login** so a
+  spurious 401 can't strand a live session slot on session-capped BMCs; a
+  login that yields no session URI now logs the future leak (#169).
+
 ### Added
 - **GLKVM headless JPEG snapshot at native resolution** (#187): when the
   snapshot bytes fail the JPEG guard (H.264 at native/high res, #107) and the

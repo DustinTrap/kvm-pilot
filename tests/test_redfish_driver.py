@@ -18,6 +18,7 @@ from kvm_pilot.errors import (
     ConnectionError,
     KVMPilotError,
     SafetyError,
+    UnavailableError,
 )
 from kvm_pilot.safety import deny_all
 from redfish_emulator import CHAS, RESET, SESSIONS, SYS, VM_EJECT, VM_INSERT
@@ -629,3 +630,75 @@ def test_redfish_redirect_is_refused_and_token_never_forwarded():
     finally:
         sink.shutdown()
         redir.shutdown()
+
+
+def test_transport_post_not_retried_on_503(emu):
+    # #167: a 503 answering a state-changing POST surfaces after ONE attempt —
+    # a transport-level re-POST could double-fire a ComputerSystem.Reset.
+    d = make(emu)
+    d.get_info()  # prime auth so the POST itself is the only injected failure
+    emu.state.fail_status = 503
+    emu.state.fail_times = 1
+    with pytest.raises(UnavailableError):
+        d._http.request("POST", RESET, json_body={"ResetType": "On"})
+    posts = [c for c in emu.state.calls if c == ("POST", RESET)]
+    assert len(posts) == 1
+
+
+# -- #169: InsertMedia verification + session-slot hygiene ------------------- #
+
+
+def test_mount_iso_verifies_inserted(emu):
+    # An accepted InsertMedia is not proof the medium landed — mount_iso must
+    # re-read the slot and see Inserted=true (#169; the #78 trap, Redfish edition).
+    from redfish_emulator import VM_CD
+
+    make(emu).mount_iso("http://srv/x.iso")
+    insert_idx = emu.state.calls.index(("POST", VM_INSERT))
+    assert ("GET", VM_CD) in emu.state.calls[insert_idx + 1:]
+
+
+def test_mount_iso_raises_when_insert_is_a_noop(emu):
+    # The BMC 2xxes InsertMedia but the slot never reports Inserted — a silent
+    # media no-op must surface as the typed MediaOfflineError, not success.
+    from kvm_pilot.errors import MediaOfflineError
+
+    emu.state.vm_insert_noop = True
+    with pytest.raises(MediaOfflineError) as ei:
+        make(emu).mount_iso("http://srv/x.iso", verify_timeout=0.6)
+    assert "never reported Inserted" in str(ei.value)
+
+
+def test_mount_iso_verify_false_skips_poll(emu):
+    from redfish_emulator import VM_CD
+
+    emu.state.vm_insert_noop = True     # would fail verification...
+    make(emu).mount_iso("http://srv/x.iso", verify=False)  # ...but we opted out
+    insert_idx = emu.state.calls.index(("POST", VM_INSERT))
+    assert ("GET", VM_CD) not in emu.state.calls[insert_idx + 1:]
+
+
+def test_reauth_deletes_stale_session_slot(emu):
+    # #169: a 401 mid-flight must not abandon the (possibly still-live) old
+    # session — session-capped BMCs run out of slots. The re-auth path attempts
+    # a best-effort DELETE of the old session URI before creating the new one.
+    d = make(emu)
+    d.get_info()
+    emu.state.expire_token_once = True
+    d.get_info()                                    # transparent re-auth
+    assert _session_posts(emu) == 2
+    calls = emu.state.calls
+    delete_idx = calls.index(("DELETE", f"{SESSIONS}/1"))
+    second_login_idx = len(calls) - 1 - calls[::-1].index(("POST", SESSIONS))
+    assert delete_idx < second_login_idx            # DELETE attempted before re-login
+
+
+def test_login_warns_when_bmc_returns_no_session_uri(emu, caplog):
+    import logging
+
+    emu.state.session_no_uri = True
+    with caplog.at_level(logging.WARNING, logger="kvm_pilot.redfish"):
+        d = make(emu)
+        d.get_info()
+    assert any("no session URI" in r.message for r in caplog.records)
+    d.close()                                       # logout must stay no-op-safe

@@ -221,15 +221,19 @@ class RedfishHTTP:
 
     @staticmethod
     def _is_retryable(exc: Exception, method: str) -> bool:
-        # 409/503 are definitive BMC responses (the action was rejected, not
-        # applied) — always safe to retry. A ConnectionError is only safe when
-        # the request never reached the BMC or the method is read-only:
-        # re-firing a ComputerSystem.Reset whose response was lost mid-read
-        # could reset the host twice.
+        # 409/503 are retried for READS only (#167): a 409/503 after a
+        # state-changing POST is not proof the action wasn't applied — a BMC
+        # whose management plane is perturbed by the ComputerSystem.Reset it
+        # just accepted answers 503, and a transport-level re-POST would reset
+        # the host twice. Surfacing the typed error lets the driver's own
+        # reconciliation decide (RedfishDriver._reset re-reads PowerState).
+        # A ConnectionError is only safe when the request never reached the
+        # BMC or the method is read-only.
+        idempotent = method in ("GET", "HEAD")
         if isinstance(exc, (BusyError, UnavailableError)):
-            return True
+            return idempotent
         if isinstance(exc, ConnectionError):
-            return method in ("GET", "HEAD") or not getattr(exc, "request_sent", False)
+            return idempotent or not getattr(exc, "request_sent", False)
         return False
 
     # -- core request with retry ----------------------------------------
@@ -269,8 +273,12 @@ class RedfishHTTP:
                 and not self._is_session_path(path)
             ):
                 logger.info("Redfish session rejected (401); re-authenticating once")
-                self._token = None
-                self._session_uri = None
+                # Best-effort DELETE of the old session before re-login (#169): a
+                # SPURIOUS 401 abandons a still-live server-side session, and
+                # session-capped BMCs run out of slots -> operator lockout.
+                # logout() never raises and nulls token+uri; the DELETE itself
+                # 401-ing is fine (the session really was dead).
+                self.logout()
                 self.login()
                 return self._request_with_retries(method, path, json_body=json_body,
                                                   authed=authed, retry=retry)
@@ -393,6 +401,12 @@ class RedfishHTTP:
         # resource's self-link in the body for non-compliant firmware that omits
         # Location — otherwise logout() can't DELETE and the session leaks.
         self._session_uri = resp.header("location") or (resp.body or {}).get("@odata.id")
+        if not self._session_uri:
+            logger.warning(
+                "Redfish session created but the BMC returned no session URI (no "
+                "Location header or body @odata.id) — the session cannot be DELETEd "
+                "on logout and will occupy a slot until the BMC expires it (#169)"
+            )
 
     def logout(self) -> None:
         """Delete the session token (best-effort; never raises)."""

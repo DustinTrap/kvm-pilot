@@ -363,3 +363,82 @@ def test_redirect_is_refused_and_credentials_never_forwarded():
     finally:
         sink.shutdown()
         redir.shutdown()
+
+
+# -- #167: 409/503 retry is method-gated ------------------------------------ #
+
+
+def test_post_not_retried_on_busy(monkeypatch):
+    # A 409 after a state-changing POST is not proof the op wasn't applied —
+    # the transport must surface it after ONE attempt, never re-fire (#167).
+    h = HTTP("host", "admin", "pw", max_retries=3, backoff_base=0.0)
+    calls = {"n": 0}
+
+    def fake_urlopen(req, context=None, timeout=None):
+        calls["n"] += 1
+        raise urllib.error.HTTPError(req.full_url, 409, "busy", {}, io.BytesIO(b"busy"))
+
+    monkeypatch.setattr(h._opener, "open", fake_urlopen)
+    with pytest.raises(BusyError):
+        h.post("/api/atx/power", params={"action": "on"})
+    assert calls["n"] == 1
+
+
+def test_post_not_retried_on_503(monkeypatch):
+    h = HTTP("host", "admin", "pw", max_retries=3, backoff_base=0.0)
+    calls = {"n": 0}
+
+    def fake_urlopen(req, context=None, timeout=None):
+        calls["n"] += 1
+        raise urllib.error.HTTPError(req.full_url, 503, "unavail", {}, io.BytesIO(b"down"))
+
+    monkeypatch.setattr(h._opener, "open", fake_urlopen)
+    with pytest.raises(UnavailableError):
+        h.post("/api/hid/events/send_key", params={"key": "Enter"})
+    assert calls["n"] == 1
+
+
+def test_breaker_still_advances_on_terminal_503_post(monkeypatch):
+    # #167 must not change the #164 damper semantics: a 503-on-POST is terminal
+    # (no retry) but still looks transport-down, so it advances the breaker.
+    h = HTTP("host", "admin", "pw", max_retries=3, backoff_base=0.0, breaker_threshold=2)
+    monkeypatch.setattr(h._opener, "open", _always_503)
+    for _ in range(2):
+        with pytest.raises(UnavailableError):
+            h.post("/api/atx/power")
+    assert h.breaker_open is True
+
+
+# -- #170: typed ProtocolError instead of a raw-bytes leak ------------------- #
+
+
+def test_garbage_json_raises_typed_protocol_error(monkeypatch):
+    from kvm_pilot.errors import ProtocolError
+
+    h = HTTP("host", "admin", "s3cr3t-pw", max_retries=2, backoff_base=0.0)
+    calls = {"n": 0}
+
+    def fake_urlopen(req, context=None, timeout=None):
+        calls["n"] += 1
+        # Truncated body that even echoes the password — the preview must redact.
+        return FakeResp(b'{"ok": true, "res s3cr3t-pw')
+
+    monkeypatch.setattr(h._opener, "open", fake_urlopen)
+    with pytest.raises(ProtocolError) as ei:
+        h.get("/api/info")
+    assert "non-JSON" in str(ei.value)
+    assert "s3cr3t-pw" not in str(ei.value)   # redacted preview
+    assert calls["n"] == 1                     # not retried: the request completed
+
+
+def test_empty_body_is_none(monkeypatch):
+    h = HTTP("host", "admin", "pw")
+    monkeypatch.setattr(h._opener, "open", lambda req, context=None, timeout=None: FakeResp(b""))
+    assert h.get("/api/thing") is None
+
+
+def test_raw_response_still_returns_bytes_verbatim(monkeypatch):
+    h = HTTP("host", "admin", "pw")
+    monkeypatch.setattr(h._opener, "open",
+                        lambda req, context=None, timeout=None: FakeResp(b"\x00\x01not-json"))
+    assert h.get("/api/streamer/snapshot", raw_response=True) == b"\x00\x01not-json"

@@ -181,3 +181,17 @@ def test_network_guard_blocks_non_loopback():
             s.connect(("198.51.100.7", 80))  # TEST-NET-2, never dialed
     finally:
         s.close()
+
+
+def test_truncated_json_surfaces_typed_protocol_error(emu):
+    # #170 over the real transport: a JSON endpoint answering with a truncated
+    # body (still labeled application/json) must raise the typed error, not
+    # leak raw bytes into a dict-expecting caller as an AttributeError.
+    from kvm_pilot.errors import ProtocolError
+
+    emu.state.garbage_json_once = True
+    c = _client(emu)
+    with pytest.raises(ProtocolError) as ei:
+        c.get_info()
+    assert "non-JSON" in str(ei.value)
+    c.close()
