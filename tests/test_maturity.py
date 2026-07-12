@@ -217,3 +217,19 @@ def test_validate_rejects_unknown_maturity_level() -> None:
     errors = validate_registry(registry)
     assert any("versions[0]" in e and "maturity.level" in e for e in errors)
     assert any("maturity.capabilities['info']" in e for e in errors)
+
+
+def test_conditions_field_never_moves_a_derived_level() -> None:
+    # #156 adds optional per-capability ``conditions`` axes to ledger rows.
+    # Derivation must ignore them entirely — otherwise recording honest
+    # conditions would churn the committed registry through the CI drift gate.
+    bare = [_run("2026-07-01", [("snapshot", True)]),
+            _run("2026-07-02", [("snapshot", True)], run_id="r2"),
+            _run("2026-07-03", [("snapshot", True)], run_id="r3")]
+    conditioned = json.loads(json.dumps(bare))
+    for rec in conditioned:
+        rec["capabilities"][0]["conditions"] = {
+            "resolution": "2560x1440", "encoder_format": "h264",
+            "snapshot_cached": False, "jpeg_sink_clients": False,
+        }
+    assert compute_maturity(bare) == compute_maturity(conditioned)

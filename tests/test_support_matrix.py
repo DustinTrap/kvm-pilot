@@ -136,3 +136,57 @@ def test_bundled_ledger_ships_with_rm1pe_seed(monkeypatch):
     # ... and the #98-derived maturity from the shipped registry rides along.
     assert old["maturity"]["capabilities"]["firmware_update"] == "alpha"
     assert by_fw["V1.9.1 release1"]["maturity"]["level"] == "beta"
+
+
+# --- #156: snapshot-conditioning axes ----------------------------------------
+
+
+def _conditioned_run(run_id: str, passed: bool, conditions: dict | None, **kw) -> dict:
+    rec = _run(run_id, [("snapshot", passed)], **kw)
+    if conditions is not None:
+        rec["capabilities"][0]["conditions"] = conditions
+    return rec
+
+
+def test_rollup_surfaces_conditions_per_outcome():
+    # The #180 incident, as data: the same firmware passes at 1920x1200 (mjpeg)
+    # and fails at 2560x1440 (h264). With #156 conditions both facts coexist
+    # on the row instead of reading as a contradiction.
+    records = [
+        _conditioned_run("r1", True, {
+            "resolution": "1920x1200", "encoder_format": "mjpeg",
+            "snapshot_cached": True, "jpeg_sink_clients": True,
+        }),
+        _conditioned_run("r2", False, {
+            "resolution": "2560x1440", "encoder_format": "h264",
+            "snapshot_cached": False, "jpeg_sink_clients": False,
+        }, utc="2026-07-04T09:00:00Z"),
+    ]
+    cap = rollup(records)[0]["capabilities"]["snapshot"]
+    assert cap["status"] == "mixed"
+    assert cap["pass_conditions"] == ["1920x1200 mjpeg, cached, jpeg-clients"]
+    assert cap["fail_conditions"] == ["2560x1440 h264, uncached, no-jpeg-clients"]
+
+
+def test_rollup_dedupes_repeated_conditions():
+    cond = {"resolution": "1024x768", "encoder_format": "mjpeg"}
+    records = [
+        _conditioned_run("r1", True, dict(cond)),
+        _conditioned_run("r2", True, dict(cond), utc="2026-07-04T09:00:00Z"),
+    ]
+    cap = rollup(records)[0]["capabilities"]["snapshot"]
+    assert cap["passes"] == 2
+    assert cap["pass_conditions"] == ["1024x768 mjpeg"]
+
+
+def test_rollup_without_conditions_is_unchanged():
+    # Pre-#156 rows (and empty/garbage conditions) produce rows byte-identical
+    # to before: the keys simply do not appear.
+    records = [
+        _conditioned_run("r1", True, None),
+        _conditioned_run("r2", True, {}, utc="2026-07-04T09:00:00Z"),
+        _conditioned_run("r3", False, "not-a-dict", utc="2026-07-05T09:00:00Z"),  # type: ignore[arg-type]
+    ]
+    cap = rollup(records)[0]["capabilities"]["snapshot"]
+    assert "pass_conditions" not in cap
+    assert "fail_conditions" not in cap

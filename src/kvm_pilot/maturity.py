@@ -93,6 +93,11 @@ def load_ledger(path: Path) -> list[dict[str, Any]]:
     First occurrence of a ``run_id`` wins — the same contract as the wiki
     builder's ``INSERT OR IGNORE`` ingestion, so both consumers see one run
     exactly once even if an append is accidentally repeated.
+
+    Derivation reads only ``source``/``utc_date`` and each capability's
+    ``capability``/``passed`` — extra per-capability fields such as the #156
+    ``conditions`` axes are deliberately ignored, so recording them can never
+    move a derived maturity level (the CI drift gate depends on this).
     """
     records: list[dict[str, Any]] = []
     seen: set[str] = set()
