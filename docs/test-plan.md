@@ -50,7 +50,7 @@ that varies across identical repeats is also a finding (§6).
 ## 1. Scope & inventory — organize by capability
 
 Test the whole product surface: **the CLI (29 subcommands)** and **the MCP server
-(~24 tools)**. Organize the plan by **capability**, not by command name, so the
+(~25 tools)**. Organize the plan by **capability**, not by command name, so the
 same plan maps onto any driver — a Redfish BMC has no `Video`, a GL unit has no
 `Sensors`, and the capability grouping tells you which rows to skip vs. must-test
 for the device in front of you. Capabilities are the `Capability` protocols in
@@ -67,7 +67,7 @@ from `src/kvm_pilot/mcp/README.md`.
 | **Sensors** | `sensors` | — | BMC drivers only; skip on GL/PiKVM. |
 | **Logs** | `logs` | `logs` | The text channel that names a fault a screenshot can't (e.g. stuck encoder behind a 503). |
 | **BootProgress** | `boot-progress` | — | BMC BootProgress; part of the vision/sensing hierarchy for phase. |
-| **FirmwareUpdate** | `firmware-check`, `firmware-update` ⚡ | — (CLI only) | **Highest brick risk** — see §7. `firmware-update` plans by default; `--execute` flashes. Validate #94/#95 no-op detection. |
+| **FirmwareUpdate** | `firmware-check`, `firmware-update` ⚡ | `file_firmware_report` ⚡ (external write, #190) | **Highest brick risk** — see §7. `firmware-update` plans by default; `--execute` flashes; the flash itself stays CLI-only. Validate #94/#95 no-op detection. |
 | **Events** | `events` | — (CLI only) | WebSocket stream; `websocket-client` is a base dep (bundled). |
 | **RemoteShell / SSH** | `ssh-check`, `ssh-exec` ⚡, `ssh-discover`, `ssh-bootstrap` ⚡ | `ssh_reachable`, `ssh_exec` ⚡, `ssh_discover` | In-band to the **managed host** (behind the KVM), not the appliance. `ssh-discover` is an active scan — opt-in, your networks only. |
 | **Appliance-SSH** (recovery) | `appliance` (loadavg/reboot ⚡), `paths` | `appliance_status`, `access_paths`, `appliance_reboot` ⚡ | SSH to the **KVM's own OS** (`root@<kvm-ip>`). **loadavg is NOT a health signal on RV1126** (self-inflates to ~10 idle). `appliance_reboot` is never automated. |

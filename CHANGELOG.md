@@ -35,6 +35,20 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   silently go unpublished; the MCP README tool table gained the missing
   `access_paths` row (#175).
 
+### Added (MCP)
+- New `file_firmware_report` tool — the MCP twin of CLI `firmware-check`'s
+  auto-filing (#189), completing the registry telemetry loop for agent
+  sessions. Filing a GitHub issue is a new **external-write effect class**
+  with its own operator gate (`KVM_PILOT_MCP_ALLOW_EXTERNAL_WRITE`, off by
+  default) plus the usual per-invocation approval; the shared helper moved to
+  `firmware_registry.file_firmware_report` (#190).
+
+### Fixed
+- The MCP effect gate now **fails closed** for an effect class with no
+  registered enable-flag instead of silently borrowing the CONFIG gate;
+  `APPLIANCE_RESET` is now explicitly mapped to
+  `KVM_PILOT_MCP_ALLOW_APPLIANCE` (#190).
+
 ### Changed
 - The healthcheck's support-evidence finding now labels ledger history as
   **recorded** (vs this run's own tested-now probes), renders the #156

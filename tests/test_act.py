@@ -199,3 +199,29 @@ def test_bumps_generation_only_for_media_and_power():
 )
 def test_pct_to_kvmd_maps_and_clamps(p, expected):
     assert act.pct_to_kvmd(p) == expected
+
+
+# -- external-write gate + fail-closed contract (#190) ----------------------- #
+
+
+def test_every_effect_class_has_a_registered_gate():
+    # The fail-closed contract: gate_enabled() refuses any effect missing from
+    # EFFECT_ENABLE_FLAG, so every member must be deliberately registered —
+    # a new effect class must get its own flag, never borrow another gate.
+    missing = set(EffectClass) - set(act.EFFECT_ENABLE_FLAG)
+    assert not missing, f"EffectClass members without a gate mapping: {sorted(missing)}"
+
+
+def test_gate_fails_closed_for_unmapped_effect(monkeypatch):
+    monkeypatch.setenv("KVM_PILOT_MCP_ALLOW_CONFIG", "1")  # must NOT be borrowed
+    monkeypatch.delitem(act.EFFECT_ENABLE_FLAG, EffectClass.EXTERNAL_WRITE)
+    assert act.gate_enabled(EffectClass.EXTERNAL_WRITE) is False
+
+
+def test_gate_external_write_needs_its_own_flag(monkeypatch):
+    for flag in ("KVM_PILOT_MCP_ALLOW_CONFIG", "KVM_PILOT_MCP_ALLOW_SSH",
+                 "KVM_PILOT_MCP_ALLOW_POWER"):
+        monkeypatch.setenv(flag, "1")  # other gates must not open this one
+    assert act.gate_enabled(EffectClass.EXTERNAL_WRITE) is False
+    monkeypatch.setenv("KVM_PILOT_MCP_ALLOW_EXTERNAL_WRITE", "1")
+    assert act.gate_enabled(EffectClass.EXTERNAL_WRITE) is True

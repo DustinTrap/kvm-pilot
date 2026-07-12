@@ -103,6 +103,10 @@ class EffectClass(StrEnum):
     # touch guest power) so an actuator can't misreport an appliance reboot as a
     # guest power action, nor launder it as a config mutation.
     APPLIANCE_RESET = "appliance_reset"
+    # Writes to a system OUTSIDE the managed target (e.g. filing a GitHub issue,
+    # #190). Not destructive to the device, but a publication/spam surface, so
+    # it gets its own operator gate rather than borrowing a device gate.
+    EXTERNAL_WRITE = "external_write"
 
 
 # Effect class for each guarded op id. Every id in DESTRUCTIVE_OPS must appear
@@ -149,6 +153,9 @@ OP_EFFECT: dict[str, EffectClass] = {
     # Arbitrary in-band command: can do anything, keeps its own ALLOW_SSH gate.
     "ssh.exec": EffectClass.HID_CONTROL,
     "appliance.reboot": EffectClass.APPLIANCE_RESET,
+    # Files the firmware-registry report as a GitHub issue (#189/#190). Not in
+    # DESTRUCTIVE_OPS (it never touches the device); listed for the MCP gate.
+    "report.file_firmware": EffectClass.EXTERNAL_WRITE,
 }
 
 
