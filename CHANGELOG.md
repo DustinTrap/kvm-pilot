@@ -6,6 +6,18 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.0b2] — 2026-07-12
+
+**Beta 2 — the reliability + evidence-harness release.** Two hardening
+batches in one: the transports can no longer double-fire a destructive action,
+MCP approvals became signed single-use receipts with an audit trail, GLKVM
+snapshots work headless at native resolution, evidence learned to carry the
+conditions it was observed under — and `kvm-pilot test-report` turns the whole
+per-device intake into one command. Everything in this release is
+unit/emulator-verified; the first live fleet run of the new paths is the next
+milestone (the harness exists precisely to record it honestly). 18 issues
+closed.
+
 ### Added
 - **`kvm-pilot test-report`** (#99) — the live-test harness: probes the
   device's capabilities and appends one evidence row to the run ledger
@@ -32,55 +44,6 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   already reports a no-op flash honestly), and
   firmware-update/driver-features/firmware-registry docs carry the guidance.
 
-### Added (MCP)
-- **Signed, expiring, single-use approval receipts + audit trail** for the
-  destructive act tools (#72): every approval mints an HMAC-signed receipt
-  bound to the exact invocation (host, tool, effect, args-hash, dry-run,
-  approver), re-verified immediately before dispatch and consumed on use —
-  a bound field changing after approval, an expired receipt
-  (`KVM_PILOT_MCP_RECEIPT_TTL`, default 60 s), or a replay fails closed as a
-  denial-shaped result. Approved results carry `receipt: {id, state}` and a
-  real `approval.expires`. Every destructive-invocation terminal (approved,
-  denied, consumed, expired, mismatched, replayed, dispatch-exception) emits
-  one JSON audit record on the `kvm_pilot.mcp.audit` logger.
-
-### Changed (MCP)
-- Act results now carry a typed **`outcome`** field (`approved` / `denied` /
-  `cancelled` / `not_confirmed` / `gate_closed` / `invalidated`) so agents
-  branch on data instead of matching the human-facing `denied_reason` strings —
-  a cancelled elicitation (benign, retryable) is now typed apart from an
-  explicit denial. The `KVM_PILOT_MCP_ELICIT=off` escape-hatch hint moved from
-  every client-side denial to a **one-time hint after ≥2 consecutive**
-  client-side approval kills on the same host — a security trade-off shouldn't
-  be advertised on a one-off mis-click (#149).
-- The `power` tool now returns a structured result instead of a sentence: it
-  **bumps the frame generation** (a stale mouse click can no longer anchor to a
-  pre-reboot snapshot within the reboot window) and **verifies the effect** via
-  the driver's trustworthy signal — Redfish PowerState or a wired ATX LED —
-  reporting `verified: true/false` with the observed state, or an honest
-  `verified: null` + the reason and remedy when no trustworthy signal exists
-  (GL units: ATX sensing lies; verify visually) (#168).
-
-### Fixed (reliability)
-- The transports no longer auto-retry a **409/503 that answers a state-changing
-  request** — re-firing a POST whose 409/503 arrived after the device began
-  acting (e.g. a BMC perturbed by the `ComputerSystem.Reset` it just accepted)
-  could double-fire a destructive action. Reads (GET/HEAD) keep the bounded
-  retry; the #164 breaker semantics are unchanged; the Redfish driver's own
-  at-target reconciliation now sees the surfaced error instead of being
-  pre-empted by a transport re-POST (#167).
-- A JSON endpoint answering with a **non-JSON body** (e.g. truncated at the
-  content boundary) now raises a typed `ProtocolError` with a redacted preview
-  instead of leaking raw bytes into dict-expecting callers as an opaque
-  `AttributeError`; an empty 2xx body returns `None` (#170).
-- Redfish `mount_iso` now **verifies the medium actually landed** (polls the
-  VirtualMedia slot for `Inserted=true`, raising `MediaOfflineError` on a
-  silent no-op — the #78 trap, Redfish edition; `verify=False` opts out), and
-  a mid-flight 401 re-auth **DELETEs the old session before re-login** so a
-  spurious 401 can't strand a live session slot on session-capped BMCs; a
-  login that yields no session URI now logs the future leak (#169).
-
-### Added
 - **GLKVM headless JPEG snapshot at native resolution** (#187): when the
   snapshot bytes fail the JPEG guard (H.264 at native/high res, #107) and the
   firmware exposes `params.video_format` (V1.9.1+), the driver flips the
@@ -110,18 +73,23 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `access_paths` row (#175).
 
 ### Added (MCP)
+- **Signed, expiring, single-use approval receipts + audit trail** for the
+  destructive act tools (#72): every approval mints an HMAC-signed receipt
+  bound to the exact invocation (host, tool, effect, args-hash, dry-run,
+  approver), re-verified immediately before dispatch and consumed on use —
+  a bound field changing after approval, an expired receipt
+  (`KVM_PILOT_MCP_RECEIPT_TTL`, default 60 s), or a replay fails closed as a
+  denial-shaped result. Approved results carry `receipt: {id, state}` and a
+  real `approval.expires`. Every destructive-invocation terminal (approved,
+  denied, consumed, expired, mismatched, replayed, dispatch-exception) emits
+  one JSON audit record on the `kvm_pilot.mcp.audit` logger.
+
 - New `file_firmware_report` tool — the MCP twin of CLI `firmware-check`'s
   auto-filing (#189), completing the registry telemetry loop for agent
   sessions. Filing a GitHub issue is a new **external-write effect class**
   with its own operator gate (`KVM_PILOT_MCP_ALLOW_EXTERNAL_WRITE`, off by
   default) plus the usual per-invocation approval; the shared helper moved to
   `firmware_registry.file_firmware_report` (#190).
-
-### Fixed
-- The MCP effect gate now **fails closed** for an effect class with no
-  registered enable-flag instead of silently borrowing the CONFIG gate;
-  `APPLIANCE_RESET` is now explicitly mapped to
-  `KVM_PILOT_MCP_ALLOW_APPLIANCE` (#190).
 
 ### Changed
 - The healthcheck's support-evidence finding now labels ledger history as
@@ -130,6 +98,47 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   snapshot passes ("verified only under unknown resolution/encoder") instead
   of overclaiming a bare `verified (n=N)` — the honesty regression that gave
   #180 its false confidence (#180).
+
+### Changed (MCP)
+- Act results now carry a typed **`outcome`** field (`approved` / `denied` /
+  `cancelled` / `not_confirmed` / `gate_closed` / `invalidated`) so agents
+  branch on data instead of matching the human-facing `denied_reason` strings —
+  a cancelled elicitation (benign, retryable) is now typed apart from an
+  explicit denial. The `KVM_PILOT_MCP_ELICIT=off` escape-hatch hint moved from
+  every client-side denial to a **one-time hint after ≥2 consecutive**
+  client-side approval kills on the same host — a security trade-off shouldn't
+  be advertised on a one-off mis-click (#149).
+- The `power` tool now returns a structured result instead of a sentence: it
+  **bumps the frame generation** (a stale mouse click can no longer anchor to a
+  pre-reboot snapshot within the reboot window) and **verifies the effect** via
+  the driver's trustworthy signal — Redfish PowerState or a wired ATX LED —
+  reporting `verified: true/false` with the observed state, or an honest
+  `verified: null` + the reason and remedy when no trustworthy signal exists
+  (GL units: ATX sensing lies; verify visually) (#168).
+
+### Fixed
+- The transports no longer auto-retry a **409/503 that answers a state-changing
+  request** — re-firing a POST whose 409/503 arrived after the device began
+  acting (e.g. a BMC perturbed by the `ComputerSystem.Reset` it just accepted)
+  could double-fire a destructive action. Reads (GET/HEAD) keep the bounded
+  retry; the #164 breaker semantics are unchanged; the Redfish driver's own
+  at-target reconciliation now sees the surfaced error instead of being
+  pre-empted by a transport re-POST (#167).
+- A JSON endpoint answering with a **non-JSON body** (e.g. truncated at the
+  content boundary) now raises a typed `ProtocolError` with a redacted preview
+  instead of leaking raw bytes into dict-expecting callers as an opaque
+  `AttributeError`; an empty 2xx body returns `None` (#170).
+- Redfish `mount_iso` now **verifies the medium actually landed** (polls the
+  VirtualMedia slot for `Inserted=true`, raising `MediaOfflineError` on a
+  silent no-op — the #78 trap, Redfish edition; `verify=False` opts out), and
+  a mid-flight 401 re-auth **DELETEs the old session before re-login** so a
+  spurious 401 can't strand a live session slot on session-capped BMCs; a
+  login that yields no session URI now logs the future leak (#169).
+
+- The MCP effect gate now **fails closed** for an effect class with no
+  registered enable-flag instead of silently borrowing the CONFIG gate;
+  `APPLIANCE_RESET` is now explicitly mapped to
+  `KVM_PILOT_MCP_ALLOW_APPLIANCE` (#190).
 
 ## [0.1.0b1] — 2026-07-11
 
