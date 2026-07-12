@@ -34,6 +34,7 @@ import threading
 import time
 import uuid
 from dataclasses import dataclass
+from enum import StrEnum
 from typing import Any
 
 from mcp.server.fastmcp import Context
@@ -167,12 +168,29 @@ def _args_hash(args: dict[str, Any]) -> str:
     return hashlib.sha256(canonical.encode()).hexdigest()
 
 
+class Outcome(StrEnum):
+    """Typed approval outcome (#149) — agents branch on this, not on the
+    human-facing ``denied_reason`` strings.
+
+    ``CANCELLED`` (a chat client killed the pending prompt — benign, retryable)
+    is deliberately distinct from ``DENIED`` (the approver said no).
+    """
+
+    APPROVED = "approved"
+    DENIED = "denied"
+    CANCELLED = "cancelled"
+    NOT_CONFIRMED = "not_confirmed"
+    GATE_CLOSED = "gate_closed"
+    INVALIDATED = "invalidated"
+
+
 @dataclass(frozen=True)
 class Approval:
     approved: bool
     approver: str | None = None
     reason: str | None = None
     remediation: str | None = None  # operator-facing fix for a client-side denial (#149)
+    outcome: Outcome = Outcome.DENIED
 
 
 class _ApprovalForm(BaseModel):
@@ -223,6 +241,7 @@ async def approve_or_deny(ctx: Context | None, inv: InvocationContext, *, confir
                 f"enable it, by setting {flag} in the server's own environment before "
                 "starting it — it cannot be enabled from within an agent session."
             ),
+            outcome=Outcome.GATE_CLOSED,
         )
 
     before = _bound_state(inv.effect)
@@ -243,15 +262,19 @@ async def approve_or_deny(ctx: Context | None, inv: InvocationContext, *, confir
                     "an explicit confirm=true is required under the operator's standing "
                     "policy (the effect gate is the standing authorization)"
                 ),
+                outcome=Outcome.NOT_CONFIRMED,
             )
         approver = "policy"
 
     # Invalidate if the bound env state changed while the human was deciding.
     if _bound_state(inv.effect) != before:
         return Approval(
-            False, reason="approval invalidated: dry-run or the effect gate changed mid-approval"
+            False,
+            reason="approval invalidated: dry-run or the effect gate changed mid-approval",
+            outcome=Outcome.INVALIDATED,
         )
-    return Approval(True, approver=approver)
+    _clear_client_kills(inv.host)
+    return Approval(True, approver=approver, outcome=Outcome.APPROVED)
 
 
 # Issue #149: a chat client can kill an elicitation entirely client-side — a new
@@ -273,14 +296,41 @@ _REMEDY_CANCELLED = (
     "The approval prompt was cancelled client-side before it was answered (in chat "
     "clients, sending a new message cancels a pending approval). The action never "
     "reached the device; read-only tools are unaffected. This is benign and "
-    "retryable once the operator is ready to answer the prompt. " + _ELICIT_TRADEOFF
+    "retryable once the operator is ready to answer the prompt."
 )
 _REMEDY_DENIED = (
     "The approver declined this invocation client-side (a mis-click on the approval "
     "prompt does this too). The action never reached the device; read-only tools "
-    "are unaffected. Retry only if the operator says it was accidental. "
-    + _ELICIT_TRADEOFF
+    "are unaffected. Retry only if the operator says it was accidental."
 )
+
+# Consecutive client-side approval kills per host (#149): the ELICIT=off
+# trade-off is a real security decision, so it is surfaced only once a PATTERN
+# emerges (>=2 in a row), not on every one-off mis-click. Module-level like
+# _GENERATIONS — drivers are built per call, so instance state wouldn't survive.
+_KILL_HINT_THRESHOLD = 2
+_CLIENT_KILLS: dict[str, int] = {}
+
+
+def _note_client_kill(host: str) -> int:
+    with _gen_lock:
+        _CLIENT_KILLS[host] = _CLIENT_KILLS.get(host, 0) + 1
+        return _CLIENT_KILLS[host]
+
+
+def _clear_client_kills(host: str) -> None:
+    with _gen_lock:
+        _CLIENT_KILLS.pop(host, None)
+
+
+def _with_kill_hint(remedy: str, inv: InvocationContext) -> str:
+    kills = _note_client_kill(inv.host)
+    if kills < _KILL_HINT_THRESHOLD:
+        return remedy
+    return (
+        f"{remedy} This is client-side approval failure #{kills} in a row on this "
+        f"host. {_ELICIT_TRADEOFF}"
+    )
 
 
 async def _elicit(ctx: Context, inv: InvocationContext) -> Approval:
@@ -294,15 +344,25 @@ async def _elicit(ctx: Context, inv: InvocationContext) -> Approval:
     try:
         result = await ctx.elicit(message=message, schema=_ApprovalForm)
     except Exception as exc:  # noqa: BLE001 - a failed prompt is a recoverable denial
-        return Approval(False, reason=f"approval prompt failed: {exc}")
+        return Approval(
+            False, reason=f"approval prompt failed: {exc}", outcome=Outcome.CANCELLED
+        )
     if result.action == "accept":
         data = result.data
         if data is not None and data.approve:
-            return Approval(True, approver=data.approver or "operator")
-        return Approval(False, reason="denied by approver", remediation=_REMEDY_DENIED)
-    # decline / cancel
-    remedy = _REMEDY_CANCELLED if result.action == "cancel" else _REMEDY_DENIED
-    return Approval(False, reason=f"approval {result.action}", remediation=remedy)
+            return Approval(True, approver=data.approver or "operator",
+                            outcome=Outcome.APPROVED)
+        return Approval(False, reason="denied by approver",
+                        remediation=_with_kill_hint(_REMEDY_DENIED, inv),
+                        outcome=Outcome.DENIED)
+    # decline / cancel — both are client-side kills; cancelled is the benign one.
+    if result.action == "cancel":
+        return Approval(False, reason="approval cancel",
+                        remediation=_with_kill_hint(_REMEDY_CANCELLED, inv),
+                        outcome=Outcome.CANCELLED)
+    return Approval(False, reason=f"approval {result.action}",
+                    remediation=_with_kill_hint(_REMEDY_DENIED, inv),
+                    outcome=Outcome.DENIED)
 
 
 # --------------------------------------------------------------------------- #
@@ -328,6 +388,10 @@ def result(
         "transport": inv.transport,
         "op": inv.op,
         "approved": approval.approved,
+        # #149: the typed outcome agents branch on; denied_reason stays the
+        # human-facing text (cancelled = client-side kill, benign/retryable;
+        # denied = the approver said no).
+        "outcome": str(approval.outcome),
         "approval": {
             "approver": approval.approver,
             "profile": inv.profile,
@@ -464,6 +528,7 @@ __all__ = [
     "InvocationContext",
     "new_invocation",
     "Approval",
+    "Outcome",
     "approve_or_deny",
     "result",
     "generation",

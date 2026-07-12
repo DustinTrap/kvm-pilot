@@ -285,13 +285,12 @@ def test_act_interactive_elicit_accept(config_file):
 
 def _assert_elicit_remediation(parsed):
     """#149: a client-side elicitation denial must explain itself — the action never
-    reached the device — and name the operator's ELICIT=off escape hatch with its
-    security trade-off, so the failure isn't mistaken for the host ignoring input."""
+    reached the device — so the failure isn't mistaken for the host ignoring input.
+    The ELICIT=off escape hatch is a security trade-off and is deliberately NOT
+    named on a first, one-off failure (it appears after >=2 consecutive kills)."""
     assert parsed["approved"] is False
     assert "never reached the device" in parsed["remediation"]
-    assert "KVM_PILOT_MCP_ELICIT=off" in parsed["remediation"]
-    assert "confirm=true" in parsed["remediation"]
-    assert "disables per-call human approval" in parsed["remediation"]
+    assert "KVM_PILOT_MCP_ELICIT=off" not in parsed["remediation"]
 
 
 def test_act_interactive_elicit_decline_returns_same_path(config_file):
@@ -302,6 +301,7 @@ def test_act_interactive_elicit_decline_returns_same_path(config_file):
     parsed = result_json(run_session_elicit(env, interact, action="decline"))
     assert parsed["approved"] is False
     assert "decline" in parsed["denied_reason"]
+    assert parsed["outcome"] == "denied"        # typed (#149): an explicit no
     _assert_elicit_remediation(parsed)
 
 
@@ -314,6 +314,7 @@ def test_act_interactive_elicit_cancel_carries_remediation(config_file):
     env = server_env(config_file, KVM_PILOT_MCP_ALLOW_HID="1")
     parsed = result_json(run_session_elicit(env, interact, action="cancel"))
     assert parsed["denied_reason"] == "approval cancel"
+    assert parsed["outcome"] == "cancelled"     # typed (#149): benign interruption
     assert "retryable" in parsed["remediation"]
     _assert_elicit_remediation(parsed)
 
@@ -1270,3 +1271,44 @@ def test_verify_power_reset_reports_observed_only():
     verified, observed, note = _verify_power(_Wired(), "reset", timeout=0.1)
     assert verified is None and observed is True
     assert "no stable target" in note
+
+
+# -- #149 remainder: typed outcomes + one-time consecutive-failure hint ------ #
+
+
+def test_second_consecutive_cancel_surfaces_elicit_hint(config_file):
+    """One cancel is a mis-click; two in a row on the same host is the #149
+    pattern — only then does the remediation name the ELICIT=off trade-off."""
+    async def interact(session):
+        first = await session.call_tool("type_text", {"text": "hi"})
+        second = await session.call_tool("type_text", {"text": "hi"})
+        return first, second
+
+    env = server_env(config_file, KVM_PILOT_MCP_ALLOW_HID="1")
+    first, second = run_session_elicit(env, interact, action="cancel")
+    r1, r2 = result_json(first), result_json(second)
+    assert "KVM_PILOT_MCP_ELICIT=off" not in r1["remediation"]
+    assert "KVM_PILOT_MCP_ELICIT=off" in r2["remediation"]
+    assert "disables per-call human approval" in r2["remediation"]
+    assert "#2 in a row" in r2["remediation"]
+
+
+def test_denial_outcomes_are_typed(config_file):
+    """Agents branch on `outcome`, not on human-facing strings (#149)."""
+    async def interact(session):
+        return await session.call_tool("type_text", {"text": "hi", "confirm": True})
+
+    # Gate closed.
+    parsed = result_json(run_session(server_env(config_file), interact))
+    assert parsed["outcome"] == "gate_closed"
+    # Pre-authorized posture without confirm.
+    async def no_confirm(session):
+        return await session.call_tool("type_text", {"text": "hi"})
+
+    parsed = result_json(run_session(server_env(config_file, KVM_PILOT_MCP_ALLOW_HID="1"),
+                                     no_confirm))
+    assert parsed["outcome"] == "not_confirmed"
+    # Approved.
+    parsed = result_json(run_session(server_env(config_file, KVM_PILOT_MCP_ALLOW_HID="1"),
+                                     interact))
+    assert parsed["outcome"] == "approved"
