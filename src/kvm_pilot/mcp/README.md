@@ -66,9 +66,22 @@ require **two** things, not one:
    what an unattended install loop uses, since no human is present to answer).
 
 Denials (gate closed, declined/cancelled, not confirmed, invalidated mid-approval)
-come back as a normal result with `approved: false` and a reason — the agent can
-re-plan, never left hanging. Each result carries a stable `invocation_id` and both
-`transport` and `effect` (the signed/expiring audit receipt is a later step, #72).
+come back as a normal result with `approved: false`, a typed `outcome`
+(`cancelled` is a benign client-side interruption; `denied` is an explicit no —
+branch on `outcome`, not on the human-facing strings, #149) and a reason — the
+agent can re-plan, never left hanging.
+
+**Approval receipts (#72):** an approval is a **signed, expiring, single-use
+receipt** bound to the exact invocation (host, tool, effect, args-hash, dry-run,
+approver). It is re-verified immediately before dispatch and consumed on use:
+any bound field changing after approval, an expired receipt
+(`KVM_PILOT_MCP_RECEIPT_TTL`, default 60 s), or a replay of a consumed receipt
+fails closed as a denial-shaped result. Approved results carry
+`receipt: {id, state}` and a real `approval.expires`. Every destructive
+invocation terminal — approved, denied, consumed, expired, mismatched,
+replayed, dispatch-exception — emits one JSON audit record on the
+`kvm_pilot.mcp.audit` logger (capture the server's stderr/logging to retain the
+trail; receipts are per-process, a server restart voids them).
 
 #### Troubleshooting: act tools denied with `approval cancel` / `denied by approver` (#149)
 
@@ -85,8 +98,10 @@ and retryable. If per-call approvals keep failing in that client, the operator
 can set `KVM_PILOT_MCP_ELICIT=off` in the server env and reconnect: the `ALLOW_*`
 effect gate plus per-call `confirm=true` then become the standing authorization.
 **Trade-off:** that disables per-call human approval — an operator decision, not
-a default. (A duration-scoped standing approval that would remove the
-per-keystroke re-prompt without giving up human sign-off is tracked in #72.)
+a default. The remedy names this escape hatch only after **≥2 consecutive**
+client-side kills on the same host (a one-off mis-click shouldn't advertise a
+security trade-off). (A duration-scoped standing approval that would remove the
+per-keystroke re-prompt without giving up human sign-off is a follow-up to #72.)
 
 ### Which tools work with which driver
 
@@ -190,6 +205,7 @@ kvm-pilot-mcp                    # start the stdio server (or: python -m kvm_pil
 | `KVM_PILOT_MCP_ELICIT` | Set to `off` to force the pre-authorized posture (the `ALLOW_*` env gate + per-call `confirm=true` become the standing authorization) even for elicitation-capable clients; otherwise a per-invocation human approval is requested when the client supports it. The escape hatch when a chat client keeps cancelling pending approvals (`denied_reason: "approval cancel"`, see troubleshooting above) — trade-off: `off` disables per-call human approval, an operator decision |
 | `KVM_PILOT_SSH_HOST` / `KVM_PILOT_SSH_USER` / `KVM_PILOT_SSH_PORT` / `KVM_PILOT_SSH_KEY` | The **managed host's** SSH target (a different machine from the KVM) for `ssh_reachable` / `ssh_exec`; also settable per-profile as `ssh_host` etc. |
 | `KVM_PILOT_MCP_DRY_RUN` | Build every driver with `dry_run=True`; destructive calls are logged, never sent |
+| `KVM_PILOT_MCP_RECEIPT_TTL` | Lifetime (seconds) of a per-invocation approval receipt (#72); default 60, clamped to [1, 3600]. A dispatch presented with an expired receipt fails closed and must be re-approved |
 | `KVM_PILOT_VISION_BACKEND` | Vision backend for `classify_screen` / `wait_for_state`: `anthropic` (default) or `local` (any OpenAI-compatible VLM: LM Studio, Ollama, vLLM) |
 | `KVM_PILOT_VISION_URL` | Base URL of the local VLM (required for `local`) |
 | `KVM_PILOT_VISION_MODEL` | Vision model id — required for `local`; optional pin for `anthropic` (otherwise the newest model is auto-resolved once per process) |

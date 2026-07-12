@@ -6,6 +6,18 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added (MCP)
+- **Signed, expiring, single-use approval receipts + audit trail** for the
+  destructive act tools (#72): every approval mints an HMAC-signed receipt
+  bound to the exact invocation (host, tool, effect, args-hash, dry-run,
+  approver), re-verified immediately before dispatch and consumed on use —
+  a bound field changing after approval, an expired receipt
+  (`KVM_PILOT_MCP_RECEIPT_TTL`, default 60 s), or a replay fails closed as a
+  denial-shaped result. Approved results carry `receipt: {id, state}` and a
+  real `approval.expires`. Every destructive-invocation terminal (approved,
+  denied, consumed, expired, mismatched, replayed, dispatch-exception) emits
+  one JSON audit record on the `kvm_pilot.mcp.audit` logger.
+
 ### Changed (MCP)
 - Act results now carry a typed **`outcome`** field (`approved` / `denied` /
   `cancelled` / `not_confirmed` / `gate_closed` / `invalidated`) so agents
