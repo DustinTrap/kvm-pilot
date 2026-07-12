@@ -64,6 +64,7 @@ kvm-pilot-mcp = "kvm_pilot.mcp.server:main"
 
 [project.urls]
 Homepage = "https://github.com/DustinTrap/kvm-pilot"
+Documentation = "https://github.com/DustinTrap/kvm-pilot/wiki"
 Issues = "https://github.com/DustinTrap/kvm-pilot/issues"
 Changelog = "https://github.com/DustinTrap/kvm-pilot/blob/main/CHANGELOG.md"
 

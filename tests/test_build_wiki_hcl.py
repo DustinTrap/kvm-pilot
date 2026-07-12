@@ -168,3 +168,17 @@ def test_hcl_maturity_column_in_header(build_wiki, tmp_path):
     page = build_wiki.render_hcl(ledger, _registry(tmp_path, []))
     header = next(line for line in page.splitlines() if line.startswith("| Device"))
     assert "| Maturity |" in header
+
+
+def test_readme_has_no_relative_links():
+    # The README is the PyPI long description: a relative link/image resolves
+    # against pypi.org and 404s there (#193) — every target must be absolute.
+    import re
+
+    readme = (_ROOT / "README.md").read_text(encoding="utf-8")
+    bad = [
+        target
+        for target in re.findall(r"\]\(([^)]+)\)", readme)
+        if not target.startswith(("http://", "https://", "#", "mailto:"))
+    ]
+    assert bad == [], f"relative links break on the PyPI page: {bad}"

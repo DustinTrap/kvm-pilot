@@ -84,7 +84,7 @@ it pulls a screenshot from the KVM, a vision model classifies the boot phase, an
 pixel level, there is **no agent on the target** — the same loop drives POST,
 firmware, the bootloader, and an OS install.
 
-![kvm-pilot reads a screenshot from the KVM, a vision backend (Claude or a local VLM) classifies the boot phase, and kvm-pilot drives keyboard and power back through the KVM — a closed loop with no agent on the target machine.](docs/how-it-works.svg)
+![kvm-pilot reads a screenshot from the KVM, a vision backend (Claude or a local VLM) classifies the boot phase, and kvm-pilot drives keyboard and power back through the KVM — a closed loop with no agent on the target machine.](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/how-it-works.svg)
 
 ## Install
 
@@ -108,7 +108,7 @@ pip install "kvm-pilot[totp,ws] @ git+https://github.com/DustinTrap/kvm-pilot"
 ```
 
 **Driving a KVM from an AI agent (MCP)?** Start with the
-[Getting started guide](docs/getting-started.md) — it covers enabling the
+[Getting started guide](https://github.com/DustinTrap/kvm-pilot/blob/main/docs/getting-started.md) — it covers enabling the
 `kvm-pilot-mcp` server in your agent, credentials, and sample prompts. The
 Python/CLI quickstart below is for scripting.
 
@@ -155,9 +155,9 @@ goes *before* the subcommand; `watch` keeps its own `--timeout` for the vision
 wait deadline.
 
 Profiles like `homelab` live in `~/.config/kvm-pilot/config.toml`. See
-[docs/cli.md](docs/cli.md) for the full command table (every subcommand, the
+[docs/cli.md](https://github.com/DustinTrap/kvm-pilot/blob/main/docs/cli.md) for the full command table (every subcommand, the
 capability it needs, and its gating), and
-[docs/configuration.md](docs/configuration.md) for the config-file format,
+[docs/configuration.md](https://github.com/DustinTrap/kvm-pilot/blob/main/docs/configuration.md) for the config-file format,
 every `KVM_PILOT_*` environment variable, and the precedence between flags,
 env, and profiles.
 
@@ -169,7 +169,7 @@ The vision classifier maps each screenshot to a **phase** — `bios_menu`,
 appears (or a timeout fires), so an unattended install becomes a few waits with
 actions wired between them:
 
-![Timeline of boot phases — POST, bios_menu, grub_menu, installer_progress, installer_complete, login_prompt — with the unattended-install example wiring mount_iso and hard_cycle at the start, wait_for_state on grub_menu then Enter, and wait_for_state on installer_complete; any phase can branch to crash_screen.](docs/boot-phases.svg)
+![Timeline of boot phases — POST, bios_menu, grub_menu, installer_progress, installer_complete, login_prompt — with the unattended-install example wiring mount_iso and hard_cycle at the start, wait_for_state on grub_menu then Enter, and wait_for_state on installer_complete; any phase can branch to crash_screen.](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/boot-phases.svg)
 
 ## Sensing model
 
@@ -180,11 +180,11 @@ available as a **field, an event, or a line of text**. The direction of
 signal the device exposes, and fall through to OCR and finally a vision model
 only when nothing cheaper can.
 
-![Sensing hierarchy: structured signals (events, power and LED state, video signal and resolution, Redfish BootProgress, sensors, logs) and serial-console text are preferred; local frame-diff, OCR, and a vision model are the escalating last resort. Colour encodes cost — vision is the only expensive tier.](docs/sensing-hierarchy.svg)
+![Sensing hierarchy: structured signals (events, power and LED state, video signal and resolution, Redfish BootProgress, sensors, logs) and serial-console text are preferred; local frame-diff, OCR, and a vision model are the escalating last resort. Colour encodes cost — vision is the only expensive tier.](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/sensing-hierarchy.svg)
 
 The PiKVM/GLKVM client already exposes the cheap end — ATX and HID LEDs,
 video-signal and resolution, on-device OCR (`?ocr=true`), logs, Prometheus
-metrics, and a WebSocket event stream. The [capability protocols](docs/architecture.md)
+metrics, and a WebSocket event stream. The [capability protocols](https://github.com/DustinTrap/kvm-pilot/blob/main/docs/architecture.md)
 add `Logs`, `BootProgress`, `Sensors`, `SerialConsole`, and `Watchdog` as the
 seam for BMC drivers (Redfish/IPMI), where the boot phase is a structured enum
 (`BootProgress.LastState`) and the console is a serial text stream rather than
@@ -205,7 +205,7 @@ layer:
   really be sent. The library default allows everything (so plain scripts
   work); the CLI installs an interactive `y/N` prompt unless you pass `--yes`.
 
-![Decision flow for a destructive call: if the op is not in DESTRUCTIVE_OPS it executes directly; if it is, dry-run logs and skips it, otherwise a confirm callback can veto it, and only an allowed call is sent to the device.](docs/safety.svg)
+![Decision flow for a destructive call: if the op is not in DESTRUCTIVE_OPS it executes directly; if it is, dry-run logs and skips it, otherwise a confirm callback can veto it, and only an allowed call is sent to the device.](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/safety.svg)
 
 The destructive set is defined explicitly in `kvm_pilot.safety.DESTRUCTIVE_OPS`
 so it is auditable rather than guessed. A vision classification can never
@@ -213,7 +213,7 @@ trigger a destructive action on its own — you wire that yourself, and the
 safety layer still applies.
 
 This software controls real hardware and can power-cycle or interrupt a running
-machine. Read [SECURITY.md](docs/SECURITY.md) before exposing a KVM to the internet.
+machine. Read [SECURITY.md](https://github.com/DustinTrap/kvm-pilot/blob/main/docs/SECURITY.md) before exposing a KVM to the internet.
 
 ## No hard-coded model version
 
@@ -281,7 +281,7 @@ safety layer, and vision subsystem stay device-agnostic. A `make_driver(kind)`
 registry (mirroring `make_backend`) builds drivers by name, and a hardware-free
 `FakeDriver` lets you exercise the whole loop — capabilities, safety gating, the
 analyzer — with no device (`kvm-pilot capabilities --driver fake`). See
-[docs/architecture.md](docs/architecture.md) for the design and diagram.
+[docs/architecture.md](https://github.com/DustinTrap/kvm-pilot/blob/main/docs/architecture.md) for the design and diagram.
 
 A **`RedfishDriver`** (`make_driver("redfish")`) speaks the DMTF Redfish API to
 server BMCs — Dell iDRAC, HPE iLO, Supermicro, Lenovo XCC, OpenBMC — in one
@@ -306,13 +306,13 @@ without a SessionService (emulators, or a BMC with session auth disabled).
 
 ## Documentation
 
-Full user and developer docs live in [`docs/`](docs/) (architecture, design
+Full user and developer docs live in [`docs/`](https://github.com/DustinTrap/kvm-pilot/tree/main/docs/) (architecture, design
 decisions, the Redfish reference, contributing, and the security policy). The
 [project wiki](https://github.com/DustinTrap/kvm-pilot/wiki) is an
 auto-generated, nicely formatted mirror of that folder.
 
 ## License
 
-Apache License 2.0 — see [LICENSE](LICENSE) and [NOTICE](NOTICE). `kvm-pilot` is
+Apache License 2.0 — see [LICENSE](https://github.com/DustinTrap/kvm-pilot/blob/main/LICENSE) and [NOTICE](https://github.com/DustinTrap/kvm-pilot/blob/main/NOTICE). `kvm-pilot` is
 independent and not affiliated with or endorsed by the PiKVM project, GL.iNet,
 or Anthropic; those names are used only for compatibility description.
