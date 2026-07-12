@@ -6,6 +6,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed (MCP)
+- The `power` tool now returns a structured result instead of a sentence: it
+  **bumps the frame generation** (a stale mouse click can no longer anchor to a
+  pre-reboot snapshot within the reboot window) and **verifies the effect** via
+  the driver's trustworthy signal — Redfish PowerState or a wired ATX LED —
+  reporting `verified: true/false` with the observed state, or an honest
+  `verified: null` + the reason and remedy when no trustworthy signal exists
+  (GL units: ATX sensing lies; verify visually) (#168).
+
 ### Fixed (reliability)
 - The transports no longer auto-retry a **409/503 that answers a state-changing
   request** — re-firing a POST whose 409/503 arrived after the device began
