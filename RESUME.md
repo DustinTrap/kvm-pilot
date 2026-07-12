@@ -4,7 +4,7 @@
 > the end of every session (`.claude/skills/checkpoint/`). Standing project rules
 > live in [CLAUDE.md](CLAUDE.md); this file is only **where we are right now**.
 
-**Last updated:** 2026-07-12 · `main @ ab61733` · **v0.1.0b1** on PyPI (a large `[Unreleased]` has accumulated — two full batches since b1; consider cutting **b2** next session)
+**Last updated:** 2026-07-12 · `main @ e835ebb` · **v0.1.0b2 released to PyPI** (both of today's batches shipped in it; `[Unreleased]` is empty)
 
 ## Current state
 Two no-hardware batches shipped today, **18 issues closed**, CI green throughout.
@@ -50,7 +50,6 @@ Two no-hardware batches shipped today, **18 issues closed**, CI green throughout
     `snapshot pass @ 2560x1440 mjpeg`,
   - exercises the **#180 firmware-delta** path if any unit gets flashed,
   - then regenerate maturity (`kvm_pilot.maturity --write`) and PR the rows.
-- **Consider release v0.1.0b2** — `[Unreleased]` now carries 2 batches (18 issues).
 - **Router epic #181 remaining**: read_screen/send_input intents, warm/EDID
   strategies (the #187 flip should become a router strategy), MCP routed-exec tool.
 - **#184** (blocked on WHITESKELETON auth), **#185** (needs fast BMC), **#192**
