@@ -391,6 +391,12 @@ def test_snapshot_flip_gated_when_video_format_not_advertised(emu):
     with pytest.raises(SnapshotFormatError):
         d.snapshot()
     assert not _posts(emu, "/api/streamer/set_params")
+    # The "no video_format" fact is durable for the connection: a second
+    # failing snapshot must not re-probe /api/streamer (memoized).
+    probes = len([c for c in emu.state.calls if c == ("GET", "/api/streamer")])
+    with pytest.raises(SnapshotFormatError):
+        d.snapshot()
+    assert len([c for c in emu.state.calls if c == ("GET", "/api/streamer")]) == probes
 
 
 def test_snapshot_flip_reraises_when_already_mjpeg(emu, monkeypatch):

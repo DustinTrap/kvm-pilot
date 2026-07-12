@@ -375,6 +375,29 @@ def validate_submission(sub: dict[str, str]) -> list[str]:
     return errs
 
 
+def check_currency(kvm: Any) -> tuple[dict, dict | None, dict | None]:
+    """Read a device's firmware identity + self-reported latest and reconcile
+    it against the registry SSoT — the shared detection half of CLI
+    ``firmware-check`` and the MCP ``file_firmware_report`` tool (#189/#190),
+    so the two surfaces cannot drift.
+
+    Returns ``(fw, upd, submission)``: the identity dict (``{}`` when the
+    driver has no firmware surface), the available-update dict (``None`` when
+    the device doesn't self-report one), and the reconcile suggestion
+    (``None`` when the registry already reflects the reported latest).
+    """
+    info_fn = getattr(kvm, "get_firmware_info", None)
+    fw = info_fn() if info_fn is not None else {}
+    upd_fn = getattr(kvm, "get_available_update", None)
+    upd = upd_fn() if upd_fn is not None else None
+    submission = None
+    if upd and upd.get("latest"):
+        vendor = (fw.get("vendor") or "").strip()
+        product = fw.get("product") or ""
+        submission = reconcile(vendor, product, upd["latest"], registry=load_registry())
+    return fw, upd, submission
+
+
 def file_firmware_report(
     submission: dict[str, str],
     *,
