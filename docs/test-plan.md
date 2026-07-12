@@ -49,7 +49,7 @@ that varies across identical repeats is also a finding (§6).
 
 ## 1. Scope & inventory — organize by capability
 
-Test the whole product surface: **the CLI (29 subcommands)** and **the MCP server
+Test the whole product surface: **the CLI (30 subcommands)** and **the MCP server
 (~25 tools)**. Organize the plan by **capability**, not by command name, so the
 same plan maps onto any driver — a Redfish BMC has no `Video`, a GL unit has no
 `Sensors`, and the capability grouping tells you which rows to skip vs. must-test
@@ -324,6 +324,10 @@ issue.
 ---
 
 ## 9. Per-device intake → support-matrix ledger
+
+> `kvm-pilot test-report` automates this intake (#99): read-only probes always
+> run, destructive ones via `--include` + `--attest`, and the command appends
+> the ledger row below — snapshot rows stamped with the #156 conditions.
 
 A device that passes intake gets recorded per **device + firmware + capability**
 into the run ledger (`src/kvm_pilot/data/test_runs.jsonl`), which is the same

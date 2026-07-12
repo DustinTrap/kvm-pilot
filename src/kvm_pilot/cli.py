@@ -685,6 +685,77 @@ def _eject_before_flash(kvm) -> None:
         kvm.msd_disconnect()
 
 
+def cmd_test_report(args) -> int:
+    """Probe the device's capabilities and append the evidence to the run ledger (#99).
+
+    Read-only probes always run; destructive ones only via ``--include`` + an
+    operator ``--attest`` string, still routed through the normal safety gates.
+    Failures are data — the exit code is 0 whenever a row was recorded.
+    """
+    from . import test_report as tr
+
+    include = frozenset(
+        s.strip() for s in (args.include or "").split(",") if s.strip()
+    )
+    unknown = include - tr.DESTRUCTIVE_CAPS
+    if unknown:
+        print(
+            f"error: --include accepts only destructive capabilities "
+            f"({', '.join(sorted(tr.DESTRUCTIVE_CAPS))}); got: {', '.join(sorted(unknown))}",
+            file=sys.stderr,
+        )
+        return 2
+    if include and not args.attest:
+        print(
+            "error: destructive probes need --attest \"<operator statement>\" — it is "
+            "recorded on the ledger row (e.g. 'jdoe: lab unit, physical access, ok "
+            "to power-cycle')",
+            file=sys.stderr,
+        )
+        return 2
+    if "virtual_media" in include and not args.iso:
+        print("error: --include virtual_media needs --iso <path-or-url>", file=sys.stderr)
+        return 2
+
+    plan = tr.READ_ONLY_CAPS + sorted(include)
+    if getattr(args, "dry_run", False):
+        print("DRY RUN — nothing probed, nothing recorded. Would probe: "
+              + ", ".join(plan))
+        return 0
+
+    kvm = _build_client(args)
+    if include:
+        # Destructive probes go through the same intake gate as every other
+        # destructive subcommand (#80); the healthcheck probe itself re-audits.
+        confirm = allow_all if getattr(args, "yes", False) else interactive_confirm
+        _preflight_gate(kvm, confirm, skip=_skip_healthcheck(args))
+
+    source = "synthetic" if (_driver_label(kvm) == "fake" or args.synthetic) else "real"
+    caps, skipped = tr.run_probes(kvm, include=include, iso=args.iso, image=args.image)
+    row = tr.build_row(kvm, caps, source=source,
+                       operator=args.attest if include else None)
+    ledger = Path(args.ledger).expanduser() if args.ledger else tr.default_ledger_path()
+    tr.append_row(ledger, row)
+
+    hint = (
+        f"recorded run {row['run_id']} -> {ledger}\n"
+        "To contribute: append the row to src/kvm_pilot/data/test_runs.jsonl in a "
+        "PR, then regenerate the derived maturity (see kvm_pilot.maturity)."
+    )
+    if args.json:
+        print(json.dumps({"row": row, "ledger": str(ledger), "skipped": skipped},
+                         indent=2, default=str))
+        print(hint, file=sys.stderr)
+        return 0
+    for cap in caps:
+        mark = "PASS" if cap["passed"] else "FAIL"
+        print(f"  {mark}  {cap['capability']:16s} {cap['outcome']}")
+    for name in skipped:
+        print(f"  skip  {name}")
+    print(hint)
+    return 0
+
+
 def cmd_firmware_update(args) -> int:
     """Offer / perform a gated remote firmware flash of the KVM itself.
 
@@ -1135,6 +1206,32 @@ def build_parser() -> argparse.ArgumentParser:
                    help=f"GitHub repo the report is filed to (default {UPSTREAM_REPO})")
     _add_common(p)
     p.set_defaults(func=cmd_firmware_check)
+
+    p = sub.add_parser("test-report",
+                       help="Probe the device's capabilities and append the evidence "
+                            "row to the run ledger (#99; read-only probes always run, "
+                            "destructive only via --include + --attest)")
+    p.add_argument("--include",
+                   help="Comma-separated DESTRUCTIVE capabilities to also exercise "
+                        "(virtual_media,power,firmware_update); requires --attest and "
+                        "routes through the normal safety gates")
+    p.add_argument("--attest",
+                   help="Operator attestation recorded on the ledger row (e.g. "
+                        "'jdoe: lab unit, physical access, ok to power-cycle')")
+    p.add_argument("--iso", help="Image path/URL for the virtual_media probe")
+    p.add_argument("--image",
+                   help="Local firmware image for the firmware_update probe (omit to "
+                        "flash the device's staged image)")
+    p.add_argument("--ledger",
+                   help="Ledger JSONL to append to (default $KVM_PILOT_TEST_LEDGER, "
+                        "else ~/.config/kvm-pilot/test_runs.jsonl)")
+    p.add_argument("--synthetic", action="store_true",
+                   help="Force source=synthetic (emulator/bench target — synthetic "
+                        "runs never promote maturity); the fake driver is always "
+                        "synthetic. There is no flag to force source=real")
+    p.add_argument("--json", action="store_true", help="Emit the row as JSON")
+    _add_common(p)
+    p.set_defaults(func=cmd_test_report)
 
     p = sub.add_parser("firmware-update",
                        help="Assess (and optionally perform) a gated remote firmware flash")

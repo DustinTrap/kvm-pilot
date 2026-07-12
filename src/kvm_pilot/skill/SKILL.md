@@ -374,11 +374,13 @@ host-exec | healthcheck | firmware-check | firmware-update | snapshot | sensors 
 logs | ssh-check | ssh-exec | ssh-discover | ssh-bootstrap | boot-progress |
 power | power-cycle | type | key | mouse-move | click | media-list | mount |
 eject | keep-awake | recover-hid | appliance | paths | classify | watch |
-events`. Run
+events | test-report`. Run
 `healthcheck` on first contact (see above); it also auto-runs ahead of destructive
 subcommands. `firmware-check` reports firmware currency and, where a device knows
 its vendor's latest, **auto-files** the registry contribution as a GitHub issue
 (needs the `gh` CLI; `--no-file-report` to opt out, `--dry-run` to preview).
+`test-report` probes the device and appends an evidence row to the run ledger
+(#99) — read-only probes always; destructive only via `--include` + `--attest`.
 `--dry-run` logs destructive
 actions without sending them (it short-circuits before any prompt, so it is
 safe in automation); `--yes` skips the interactive y/N confirmation on a real
