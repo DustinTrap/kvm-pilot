@@ -79,6 +79,7 @@ _IMAGE_EXTS = (".svg", ".png", ".jpg", ".jpeg", ".gif")
 # the git-friendly source of truth; we load it into an ephemeral in-memory SQLite
 # purely to aggregate, then render. See issue #96 / #105.
 HCL_LEDGER = ROOT / "src" / "kvm_pilot" / "data" / "test_runs.jsonl"
+HCL_REGISTRY = ROOT / "src" / "kvm_pilot" / "data" / "firmware_registry.json"
 HCL_PAGE = "Hardware-Compatibility.md"
 HCL_MIN_SAMPLES = 3  # a cell below this shows "insufficient data", not a verdict
 # capability -> is it destructive (safety-relevant verdict)? Column order preserved.
@@ -123,6 +124,29 @@ def _hcl_load(ledger: Path) -> sqlite3.Connection:
     return db
 
 
+def _hcl_maturity(registry: Path) -> dict[tuple[str, str, str], str]:
+    """(vendor, product, firmware) lowered -> derived maturity level (#103).
+
+    Read straight from the shipped registry's ``versions[].maturity`` rows —
+    the #98-derived, CI-drift-guarded truth (mirrors
+    ``support_matrix._registry_maturity``'s case-insensitive join). ``{}`` when
+    the registry is missing/unreadable, so the page still builds.
+    """
+    try:
+        reg = json.loads(registry.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    out: dict[tuple[str, str, str], str] = {}
+    for entry in reg.get("firmware", []):
+        vendor = str(entry.get("vendor", "")).strip().lower()
+        product = str(entry.get("product", "")).strip().lower()
+        for row in entry.get("versions", []) or []:
+            level = (row.get("maturity") or {}).get("level")
+            if level:
+                out[(vendor, product, str(row.get("version", "")).strip().lower())] = level
+    return out
+
+
 def _hcl_cell(agg: dict[str, tuple[int, int]], cap: str, destructive: bool) -> str:
     """Render one matrix cell: pass-rate + sample count, gated by min samples."""
     if cap not in agg:
@@ -136,9 +160,10 @@ def _hcl_cell(agg: dict[str, tuple[int, int]], cap: str, destructive: bool) -> s
     return f"{mark}&nbsp;{rate}%{flag}<br><sub>n={n}</sub>"
 
 
-def render_hcl(ledger: Path = HCL_LEDGER) -> str:
+def render_hcl(ledger: Path = HCL_LEDGER, registry: Path = HCL_REGISTRY) -> str:
     """Render the community compatibility matrix as a wiki markdown page."""
     db = _hcl_load(ledger)
+    maturity = _hcl_maturity(registry)
     total, real, synthetic = db.execute(
         "SELECT COUNT(*), "
         "SUM(source='real'), SUM(source='synthetic') FROM runs"
@@ -182,18 +207,23 @@ def render_hcl(ledger: Path = HCL_LEDGER) -> str:
         "relying on a remote flash.",
         "",
     ]
-    header = "| Device | Firmware | " + " | ".join(
+    header = "| Device | Firmware | Maturity | " + " | ".join(
         f"{c}{'†' if c in destructive else ''}" for c in cap_order
     ) + " |"
-    out += [header, "|" + "---|" * (len(cap_order) + 2)]
+    out += [header, "|" + "---|" * (len(cap_order) + 3)]
     for vendor, product, fw in sorted(combos):
         agg = combos[(vendor, product, fw)]
+        level = maturity.get((vendor.lower(), product.lower(), fw.lower()), "—")
         cells = " | ".join(_hcl_cell(agg, c, c in destructive) for c in cap_order)
-        out.append(f"| **{vendor} {product}** | {fw} | {cells} |")
+        out.append(f"| **{vendor} {product}** | {fw} | {level} | {cells} |")
     out += [
         "",
         f"Legend: ✅ all-pass · ⚠️ mixed · ❌ all-fail · … insufficient (n<{HCL_MIN_SAMPLES}) "
         "· · not tested",
+        "",
+        "Maturity (alpha→beta→rc→ga) is **derived from live runs only** by the "
+        "promotion ladder (#98/#103) and committed in the firmware registry; "
+        "`—` = no live-derived rating (e.g. synthetic-only rows).",
         "",
     ]
     return "\n".join(out)

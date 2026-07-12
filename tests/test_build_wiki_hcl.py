@@ -123,3 +123,48 @@ def test_unregistered_doc_is_detected(build_wiki, monkeypatch):
         build_wiki, "PAGES", [p for p in build_wiki.PAGES if p is not dropped]
     )
     assert dropped[0] in build_wiki.unregistered_docs()
+
+
+# --- #103: derived-maturity column on the generated page ---------------------
+
+
+def _registry(tmp_path, entries):
+    path = tmp_path / "reg.json"
+    path.write_text(json.dumps({"schema_version": 2, "firmware": entries}))
+    return path
+
+
+def test_hcl_renders_derived_maturity_level(build_wiki, tmp_path):
+    ledger = _write_ledger(tmp_path / "l.jsonl", [
+        _run("r1", "gl.inet", "RM1PE", "V1.5.1 release2",
+             [("snapshot", True)], source="real"),
+    ])
+    reg = _registry(tmp_path, [{
+        "vendor": "GL.iNet", "product": "rm1pe",     # case-insensitive join
+        "versions": [{"version": "v1.5.1 RELEASE2",
+                      "maturity": {"level": "beta"}}],
+    }])
+    page = build_wiki.render_hcl(ledger, reg)
+    row = next(line for line in page.splitlines() if "RM1PE" in line)
+    assert "| beta |" in row
+
+
+def test_hcl_maturity_dash_when_no_derived_row(build_wiki, tmp_path):
+    # Synthetic-only combos (and anything the registry has no derived row for)
+    # honestly show a dash, never an invented level.
+    ledger = _write_ledger(tmp_path / "l.jsonl", [
+        _run("r1", "acme", "KVM1", "V1.0", [("info", True)]),
+    ])
+    page = build_wiki.render_hcl(ledger, _registry(tmp_path, []))
+    row = next(line for line in page.splitlines() if "KVM1" in line)
+    assert "| — |" in row
+    assert "derived from live runs only" in page
+
+
+def test_hcl_maturity_column_in_header(build_wiki, tmp_path):
+    ledger = _write_ledger(tmp_path / "l.jsonl", [
+        _run("r1", "acme", "KVM1", "V1.0", [("info", True)]),
+    ])
+    page = build_wiki.render_hcl(ledger, _registry(tmp_path, []))
+    header = next(line for line in page.splitlines() if line.startswith("| Device"))
+    assert "| Maturity |" in header

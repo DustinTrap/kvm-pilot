@@ -95,7 +95,10 @@ firmware_version)` combo is. The levels are **derived — never hand-set** — b
 `kvm_pilot.maturity` from **live** runs only (`source: "real"` in
 `src/kvm_pilot/data/test_runs.jsonl` — shipped in the wheel since #102, so
 installed consumers can read the evidence offline); synthetic/mock runs never
-promote anything.
+promote anything. The derived level per `(device, firmware)` also renders as
+the **Maturity column** on the generated wiki
+[Hardware-Compatibility](https://github.com/DustinTrap/kvm-pilot/wiki/Hardware-Compatibility)
+page (#103).
 
 | level | rule (per capability, from its live pass history) |
 |---|---|
