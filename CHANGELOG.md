@@ -7,6 +7,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- Run-ledger capability rows can now record the **conditions a result was
+  observed under** (`conditions: {resolution, encoder_format, snapshot_cached,
+  jpeg_sink_clients}`) — the axes that actually decide a GL snapshot outcome —
+  and the support-matrix rollup surfaces them as `pass_conditions` /
+  `fail_conditions`, so field reports at different operating points reconcile
+  from data instead of reading as contradictions. Optional; pre-existing rows
+  and derived maturity are unaffected (#156).
 - CI docs-parity guard: `build_wiki.py --check` fails when a `docs/*.md` page is
   not registered in the wiki `PAGES` allowlist, so a new page can no longer
   silently go unpublished; the MCP README tool table gained the missing

@@ -44,6 +44,29 @@ DESTRUCTIVE_CAPS = frozenset({"virtual_media", "power", "firmware_update"})
 _OUTCOME_MAX = 120
 
 
+def _condition_summary(cond: Any) -> str | None:
+    """Render a capability row's ``conditions`` dict (#156) as one short string.
+
+    The axes that decide a snapshot outcome on GL hardware (resolution ×
+    encoder mode × cache/sink state) are recorded per result so two field
+    reports at different operating points reconcile from data instead of
+    reading as contradictions. E.g. ``"2560x1440 h264, cached, no-jpeg-clients"``.
+    """
+    if not isinstance(cond, dict) or not cond:
+        return None
+    parts: list[str] = []
+    head = " ".join(
+        str(cond[k]) for k in ("resolution", "encoder_format") if cond.get(k)
+    )
+    if head:
+        parts.append(head)
+    if "snapshot_cached" in cond:
+        parts.append("cached" if cond["snapshot_cached"] else "uncached")
+    if "jpeg_sink_clients" in cond:
+        parts.append("jpeg-clients" if cond["jpeg_sink_clients"] else "no-jpeg-clients")
+    return ", ".join(parts) or None
+
+
 def load_ledger() -> list[dict[str, Any]]:
     """Parse the run ledger: ``KVM_PILOT_TEST_LEDGER`` override > bundled copy.
 
@@ -115,9 +138,12 @@ def rollup(
     that produced live runs, run counts (``runs``/``real_runs``/
     ``synthetic_runs`` — ``runs`` is the real count; ``synthetic_runs`` is
     context only), ``last_run_utc``, per-capability ``{passes, fails, status,
-    destructive, last_utc, last_outcome}``, ``never_exercised`` (``KNOWN_CAPS``
-    order), and ``maturity`` — the #98-derived levels from the shipped registry
-    (``None`` when the registry has no derived row for the combo).
+    destructive, last_utc, last_outcome}`` — plus ``pass_conditions``/
+    ``fail_conditions`` (deduped #156 condition summaries, keys present only
+    when some record carried ``conditions``) — ``never_exercised``
+    (``KNOWN_CAPS`` order), and ``maturity`` — the #98-derived levels from the
+    shipped registry (``None`` when the registry has no derived row for the
+    combo).
     """
     if records is None:
         records = load_ledger()
@@ -173,6 +199,11 @@ def rollup(
                 if when >= cap["last_utc"]:
                     cap["last_utc"] = when
                     cap["last_outcome"] = str(c.get("outcome", ""))[:_OUTCOME_MAX]
+                summary = _condition_summary(c.get("conditions"))
+                if summary:  # optional #156 axes; absent on pre-#156 rows
+                    bucket = "pass_conditions" if c.get("passed") else "fail_conditions"
+                    if summary not in cap.setdefault(bucket, []):
+                        cap[bucket].append(summary)
         for cap in caps.values():
             cap["status"] = (
                 "pass" if not cap["fails"] else "fail" if not cap["passes"] else "mixed"

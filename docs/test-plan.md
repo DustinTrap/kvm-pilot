@@ -342,6 +342,17 @@ and the shipped support matrix
   outcome}]` list. Record the observed reliability per capability from your table
   (§8), including the **false reports** (a false-pos on `power` is a `passed:
   false` on `power` with the outcome noted).
+- A capability entry MAY additionally carry the **conditions it was observed
+  under** ([#156](https://github.com/DustinTrap/kvm-pilot/issues/156)):
+  `"conditions": {"resolution": "2560x1440", "encoder_format": "h264",
+  "snapshot_cached": false, "jpeg_sink_clients": false}` — sourced from
+  `video_signal_info()` + streamer state at test time. **Always record these on
+  `snapshot` rows** (pass AND fail): the snapshot outcome on GL hardware is a
+  function of resolution × encoder mode × cache/sink state, so a bare boolean
+  makes two honest reports at different operating points read as a
+  contradiction (the [#180](https://github.com/DustinTrap/kvm-pilot/issues/180)
+  false-confidence incident). The field is optional and pre-#156 rows stay
+  valid; maturity derivation ignores it.
 - **Maturity is derived, never hand-set** (`maturity.py`): `alpha` (no live
   passes) → `beta` (≥1) → `rc` (≥3 across ≥2 dates) → `ga` (≥5 over ≥14 days, all
   after the last failure). A new failure resets the `ga` window. CI re-derives
