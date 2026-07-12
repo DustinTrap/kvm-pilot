@@ -56,7 +56,8 @@ remote before physical**, below).
 | Move / click the mouse (installers, BIOS, desktops) | **MCP** `mouse` | Absolute positioning; `percent` coords by default. A click must carry `observed_frame_ref` from a recent `snapshot` (refused if the host rebooted since). Needs `KVM_PILOT_MCP_ALLOW_HID`. |
 | See what media is already on the KVM | **MCP** `list_virtual_media` or CLI `media-list` | Read-only MSD inventory. **Check this before asking the user to download or upload an ISO** — the image may already be in storage from an earlier install; mount it instead of round-tripping gigabytes. The reply's `host_visible_as` (when present) is the device name the target's boot menu shows for truly presented media — match it to confirm readiness and to pick the correct boot entry instead of guessing. |
 | Mount / eject install media | **MCP** `mount_iso` / `eject`, or CLI `mount` / `eject` | Virtual media (ISO path or URL). MCP needs `KVM_PILOT_MCP_ALLOW_MEDIA` + approval. |
-| firmware-check/update, events | **CLI only** | The MCP server does not expose these. |
+| firmware-update, events | **CLI only** | The MCP server does not expose these. |
+| Contribute firmware currency to the registry (file the report) | **MCP `file_firmware_report`** or CLI `firmware-check` (auto-files) | Files a GitHub issue via the `gh` CLI when the registry is behind — an external write: MCP needs `KVM_PILOT_MCP_ALLOW_EXTERNAL_WRITE` + approval; `dry_run=true` previews (#190). |
 | MSD mode switching | **Python library only** | Not in MCP or CLI. |
 | Change **host** power (on/off/cycle/reset) | **MCP `power`** (gated) or CLI `power` / `power-cycle` | Destructive — confirm each step. MCP `power` is operator-enabled + per-call approval. |
 | Reboot the **KVM appliance** / restart `kvmd` / inspect `/etc/kvmd` | **SSH to the appliance** | No kvm-pilot interface does this — out-of-band only. |
@@ -126,6 +127,9 @@ Prefer remote recovery, in this order, and present the options in this order:
   - `ctrl_alt_delete` — a reboot, so it needs `ALLOW_POWER` (not the HID gate)
   - `mount_iso` / `eject` — virtual media (`KVM_PILOT_MCP_ALLOW_MEDIA`)
   - `ssh_exec` — run a command over SSH (`KVM_PILOT_MCP_ALLOW_SSH`)
+  - `file_firmware_report` — file the firmware-registry report as a GitHub
+    issue (`KVM_PILOT_MCP_ALLOW_EXTERNAL_WRITE`; an external write, not a
+    device op)
 
 **Approval posture in chat clients:** an elicitation-capable chat client raises
 a human approval prompt per act call, and sending a new chat message **cancels
