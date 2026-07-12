@@ -1172,3 +1172,101 @@ def test_file_firmware_report_gh_missing_is_graceful(config_file, tmp_path, monk
     out = _run_tool(server.file_firmware_report(_StubContext(), confirm=True))
     assert out["approved"] is True and out["filed"] is False
     assert "gh" in out["report"]["reason"]
+
+
+# -- power tool: effect verification + generation bump (#168) ---------------- #
+
+
+def test_power_result_reports_verified_effect(config_file):
+    """The fake driver's power state genuinely flips, so the tool must report
+    verified=true with the observed state — never just 'requested' (#168)."""
+    async def interact(session):
+        return await session.call_tool("power", {"action": "off", "confirm": True})
+
+    env = server_env(config_file, KVM_PILOT_MCP_ALLOW_POWER="1")
+    parsed = result_json(run_session(env, interact))
+    assert parsed["requested"] == "off"
+    assert parsed["verified"] is True
+    assert parsed["observed"] is False
+
+
+def test_power_bumps_generation_invalidating_mouse_ref(config_file):
+    """#168: a power action must invalidate pre-action frame refs, exactly like
+    the ctrl_alt_delete path — a stale click must not land on the new screen."""
+    async def interact(session):
+        snap = await session.call_tool("snapshot", {})
+        ref = json.loads(snap.content[0].text)["frame_ref"]
+        await session.call_tool("power", {"action": "off", "confirm": True})
+        return await session.call_tool(
+            "mouse",
+            {"x": 0.5, "y": 0.5, "button": "left", "observed_frame_ref": ref, "confirm": True},
+        )
+
+    env = server_env(config_file, KVM_PILOT_MCP_ALLOW_HID="1", KVM_PILOT_MCP_ALLOW_POWER="1")
+    parsed = result_json(run_session(env, interact))
+    assert parsed["approved"] is False
+    assert "stale screen" in parsed["denied_reason"]
+
+
+def test_power_dry_run_skips_bump_and_verify(config_file):
+    """Dry-run: nothing fired, so prior frame refs must stay valid and no
+    verification claim is made."""
+    async def interact(session):
+        snap = await session.call_tool("snapshot", {})
+        ref = json.loads(snap.content[0].text)["frame_ref"]
+        power = await session.call_tool("power", {"action": "off", "confirm": True})
+        mouse = await session.call_tool(
+            "mouse",
+            {"x": 0.5, "y": 0.5, "button": "left", "observed_frame_ref": ref, "confirm": True},
+        )
+        return power, mouse
+
+    env = server_env(config_file, KVM_PILOT_MCP_ALLOW_HID="1", KVM_PILOT_MCP_ALLOW_POWER="1",
+                     KVM_PILOT_MCP_DRY_RUN="1")
+    power, mouse = run_session(env, interact)
+    p = result_json(power)
+    assert p["dry_run"] is True and p["verified"] is None
+    m = result_json(mouse)
+    assert m["approved"] is True          # ref still valid: no bump happened
+
+
+def test_observe_power_honest_when_atx_sensing_absent():
+    """GL/unwired-PiKVM shape: get_atx_state reports enabled=false — there is NO
+    trustworthy signal, so the answer is None + why, never a fail-open guess."""
+    from kvm_pilot.mcp.server import _observe_power, _verify_power
+
+    class _GlIsh:
+        def get_atx_state(self):
+            return {"enabled": False, "leds": {"power": False}}
+        def is_powered_on(self):  # fail-open base behavior — must NOT be consulted
+            return True
+
+    observed, source = _observe_power(_GlIsh())
+    assert observed is None
+    assert "atx-power-state-always-off" in source and "snapshot" in source
+    verified, obs, note = _verify_power(_GlIsh(), "off", timeout=0.1)
+    assert verified is None and obs is None
+
+
+def test_verify_power_led_mismatch_is_false_not_silent():
+    from kvm_pilot.mcp.server import _verify_power
+
+    class _WiredStuck:
+        def get_atx_state(self):
+            return {"enabled": True, "leds": {"power": True}}  # never turns off
+
+    verified, observed, note = _verify_power(_WiredStuck(), "off", timeout=0.6, poll=0.1)
+    assert verified is False and observed is True
+    assert "did NOT reach" in note
+
+
+def test_verify_power_reset_reports_observed_only():
+    from kvm_pilot.mcp.server import _verify_power
+
+    class _Wired:
+        def get_atx_state(self):
+            return {"enabled": True, "leds": {"power": True}}
+
+    verified, observed, note = _verify_power(_Wired(), "reset", timeout=0.1)
+    assert verified is None and observed is True
+    assert "no stable target" in note

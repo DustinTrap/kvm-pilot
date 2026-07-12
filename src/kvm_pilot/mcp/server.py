@@ -586,17 +586,87 @@ async def wait_for_state(
     return await anyio.to_thread.run_sync(_wait_sync)
 
 
+# The stable power state each action should land in; reset has no stable target.
+_POWER_EXPECTED: dict[str, bool | None] = {
+    "on": True, "off": False, "off-hard": False, "reset": None,
+}
+
+
+def _observe_power(kvm: KVMDriver) -> tuple[bool | None, str]:
+    """One honest power observation: (state | None, its source / why unverifiable).
+
+    Structural dispatch, no driver-name map: a PiKVM-family driver exposes
+    ``get_atx_state`` — when ATX sensing is unwired/absent (``enabled`` falsy,
+    which is also what GL units always report: quirk ``atx-power-state-always-off``)
+    there is NO trustworthy signal and we say so rather than guessing (the base
+    ``is_powered_on`` fail-opens True there, #168). Everything else (Redfish,
+    fake) answers via ``is_powered_on`` — authoritative PowerState on a BMC.
+    """
+    atx_fn = getattr(kvm, "get_atx_state", None)
+    if atx_fn is not None:
+        try:
+            atx = atx_fn() or {}
+        except KVMPilotError as exc:
+            return None, f"unverifiable: ATX state unreadable ({exc})"
+        if not atx.get("enabled"):
+            return None, (
+                "unverifiable: ATX reports enabled=false — no wired power sensing "
+                "(GL units always report this: quirk atx-power-state-always-off); "
+                "verify visually via snapshot or wait_for_state"
+            )
+        leds = atx.get("leds") or {}
+        return bool(leds.get("power")), "ATX power LED"
+    try:
+        return bool(cast("Power", kvm).is_powered_on()), "power-state readback"
+    except KVMPilotError as exc:
+        return None, f"unverifiable: power state unreadable ({exc})"
+
+
+def _verify_power(
+    kvm: KVMDriver, action: str, *, timeout: float = 10.0, poll: float = 0.5
+) -> tuple[bool | None, bool | None, str]:
+    """Bounded poll toward the action's expected state: (verified, observed, note).
+
+    ``verified`` is None (never a guess) when the driver has no trustworthy
+    signal or the action has no stable target (``reset``).
+    """
+    expected = _POWER_EXPECTED[action]
+    deadline = time.monotonic() + timeout
+    while True:
+        observed, source = _observe_power(kvm)
+        if observed is None:
+            return None, None, source
+        if expected is None:
+            return None, observed, (
+                f"reset issued; no stable target state to verify — "
+                f"observed powered_on={observed} via {source}"
+            )
+        if observed == expected:
+            return True, observed, f"reached powered_on={expected} via {source}"
+        if time.monotonic() >= deadline:
+            return False, observed, (
+                f"did NOT reach powered_on={expected} within {timeout:.0f}s — "
+                f"still powered_on={observed} via {source}"
+            )
+        time.sleep(poll)
+
+
 @mcp.tool(annotations=_DESTRUCTIVE)
 def power(
     action: Literal["on", "off", "off-hard", "reset"],
     confirm: bool = False,
     profile: str | None = None,
-) -> str:
+) -> dict:
     """Change host power state. DESTRUCTIVE.
 
     Disabled unless the server operator has enabled power control in the server's
     own environment (see the co-located README.md). ``confirm=true`` is required as
-    a second factor.
+    a second factor. The result carries an honest effect report (#168):
+    ``verified`` is true/false when the driver has a trustworthy power signal
+    (Redfish PowerState, a wired ATX LED), and ``null`` — with the reason and
+    what to do instead — when it doesn't (GL units: ATX sensing lies). A power
+    action also invalidates prior ``snapshot`` frame refs (generation bump), so
+    a stale mouse click can't land on the post-reboot screen.
     """
     if not _env_flag("KVM_PILOT_MCP_ALLOW_POWER"):
         # Deliberately no copy-pasteable variable assignment here: the gate must be
@@ -615,11 +685,22 @@ def power(
     ) as (cfg, kvm):
         getattr(kvm, _POWER_ACTIONS[action])()
         if _dry_run():
-            return (
-                f"power {action}: DRY-RUN — logged only, nothing was sent to "
-                f"host '{cfg.host}' ({cfg.driver})"
-            )
-        return f"power {action}: requested on host '{cfg.host}' ({cfg.driver})"
+            return {
+                **_provenance(cfg), "requested": action, "dry_run": True,
+                "verified": None, "observed": None,
+                "note": (
+                    f"power {action}: DRY-RUN — logged only, nothing was sent to "
+                    f"host '{cfg.host}' ({cfg.driver})"
+                ),
+            }
+        # The screen must be presumed changed whether or not verification lands.
+        act.bump_generation(cfg.host)
+        verified, observed, note = _verify_power(kvm, action)
+        return {
+            **_provenance(cfg), "requested": action,
+            "verified": verified, "observed": observed, "note": note,
+            "detail": f"power {action}: requested on host '{cfg.host}' ({cfg.driver})",
+        }
 
 
 # -- HID act tools (issue #61): see act.py for the two-guarantee model --------
