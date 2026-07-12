@@ -11,8 +11,21 @@ reliability model, and the operating procedure.
 > interrupted flash **bricks onboard storage** with **no remote recovery**. The
 > command defaults to a dry-run and refuses to execute on a device with no
 > out-of-band recovery path unless you explicitly override. Prefer flashing with
-> physical (or same-site remote-hands) access. This code has **never been run
-> against real hardware** — treat the execute path as unverified.
+> physical (or same-site remote-hands) access.
+
+## Known-good path: the vendor web console (#177)
+
+**On the GL-RM1PE, the web console is the only known-good upgrade path.** A live
+V1.5.1 release2 → V1.9.1 release1 upgrade was performed cleanly through the GL
+web UI (the console stages the package, flashes, and auto-reboots in ~2 minutes).
+The API path this page documents — `kvm-pilot firmware-update --execute` driving
+`/api/upgrade/*` — was observed to **no-op on the same hardware** (`start`
+returns 200, nothing flashes, #94/#95), and no API-driven flash has ever been
+verified on any release. The driver verifies an observed upgrade-state change
+and reports the no-op honestly (#94), and the `firmware-flash-webui-only` quirk
+surfaces this guidance in `healthcheck` and `firmware-update` output. Until the
+web console's endpoint sequence is reverse-engineered (#95), plan RM1PE upgrades
+via the web UI, with physical/same-site access (no out-of-band recovery).
 
 ## Capability & commands
 

@@ -152,6 +152,26 @@ GLKVM_QUIRKS: list[Quirk] = [
         firmware="all",
         source="observed",
     ),
+    Quirk(
+        id="firmware-flash-webui-only",
+        summary=(
+            "The GL /api/upgrade/start remote flash has been observed to no-op on "
+            "a real RM1PE (200 OK, no upgrade state, no reboot, version unchanged "
+            "— #94/#95, on V1.5.1 release2). No API-driven flash has ever been "
+            "verified on ANY release; the request bodies are provisional."
+        ),
+        workaround=(
+            "Upgrade via the GL web console — the only known-good RM1PE upgrade "
+            "path (V1.5.1 release2 -> V1.9.1 release1 live-verified that way, "
+            "#177: the console stages the package, flashes, and reboots in ~2 "
+            "min). RM1PE has no out-of-band recovery, so flash with physical/"
+            "same-site access. If the API flash is run anyway, kvm-pilot "
+            "verifies an observed upgrade state and reports the no-op honestly "
+            "rather than claiming success (#94)."
+        ),
+        firmware="all",
+        source="observed",
+    ),
 ]
 
 

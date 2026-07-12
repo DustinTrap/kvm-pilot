@@ -6,6 +6,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- New GLKVM quirk **`firmware-flash-webui-only`** (#177): the GL web console is
+  the only known-good RM1PE upgrade path (V1.5.1→V1.9.1 live-verified); the
+  `/api/upgrade/*` flash was observed to no-op (#94/#95) and no API-driven
+  flash has ever been verified on any release. `firmware-update` output now
+  steers to the web console on affected devices (it never blocks — the driver
+  already reports a no-op flash honestly), and
+  firmware-update/driver-features/firmware-registry docs carry the guidance.
+
 ### Added (MCP)
 - **Signed, expiring, single-use approval receipts + audit trail** for the
   destructive act tools (#72): every approval mints an HMAC-signed receipt

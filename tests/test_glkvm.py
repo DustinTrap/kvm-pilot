@@ -504,3 +504,17 @@ def test_known_quirks_includes_h264_native_res():
     d = GLKVMDriver("h", "u", "p")
     ids = {q.id for q in d.known_quirks(firmware="V1.9.1 release1")}
     assert "snapshot-h264-at-native-res" in ids
+
+
+def test_webui_only_flash_quirk_applies_to_all_releases():
+    # #177: the observation is V1.5.1-scoped (kept in the summary text), but the
+    # guidance — no API flash has EVER been verified; the web console is the only
+    # known-good path — must surface on every release, V1.9.1 included.
+    d = GLKVMDriver("h", "u", "p")
+    for fw in ("V1.5.1 release2", "V1.9.1 release1"):
+        ids = {q.id for q in d.known_quirks(firmware=fw)}
+        assert "firmware-flash-webui-only" in ids, fw
+    q = next(q for q in d.known_quirks(firmware="V1.9.1 release1")
+             if q.id == "firmware-flash-webui-only")
+    assert q.source == "observed"
+    assert "web console" in q.workaround

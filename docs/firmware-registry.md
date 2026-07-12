@@ -163,6 +163,8 @@ release — GLKVM exposes both at `/api/upgrade/compare` (`local_version` vs
 uses `/api/upgrade/version` → `V1.9.1 release1 (RM1PE)`), not just the kvmd
 component version, so the report and the registry key match the UI.
 
+> V1.9.1 release1 is confirmed **installable on the RM1PE via the GL web console** (live-verified, #177); the `/api/upgrade/*` flash path remains unverified/no-op (#94/#95) — the registry's `remote_update` profile and the `firmware-flash-webui-only` quirk carry this.
+
 ## Distribution & refresh
 
 - **Bundled on PyPI.** `data/firmware_registry.json` ships in the wheel, so the
