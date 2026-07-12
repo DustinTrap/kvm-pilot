@@ -361,3 +361,140 @@ def test_streamer_warm_best_effort_when_ws_unavailable(emu, monkeypatch):
                         lambda self, **kw: (_ for _ in ()).throw(ImportError("no ws")))
     with d.streamer_warm():                            # must not raise
         pass
+
+
+# ---- #187: MJPEG flip for a native-res JPEG -------------------------------- #
+
+
+def _posts(emu, path):
+    return [c for c in emu.state.calls if c == ("POST", path)]
+
+
+def test_snapshot_flips_to_mjpeg_on_h264_and_restores(emu):
+    # Over the real transport: H.264-at-native bytes fail the JPEG guard, the
+    # driver flips video_format 0->1, the retry returns a JPEG at the SAME
+    # resolution, and the prior format is restored for live video clients.
+    emu.state.gl_video_format = 0
+    emu.state.snapshot_h264_at_native = True
+    d = gl(emu)
+    assert d.snapshot().startswith(b"\xff\xd8\xff")
+    assert emu.state.gl_video_format == 0              # restored after the shot
+    assert len(_posts(emu, "/api/streamer/set_params")) == 2  # flip + restore
+
+
+def test_snapshot_flip_gated_when_video_format_not_advertised(emu):
+    # V1.5.1 exposes no params.video_format — no blind POST at unknown
+    # firmware; the honest SnapshotFormatError surfaces (remediation: #177).
+    emu.state.gl_video_format = None
+    emu.state.snapshot_h264_at_native = True
+    d = gl(emu)
+    with pytest.raises(SnapshotFormatError):
+        d.snapshot()
+    assert not _posts(emu, "/api/streamer/set_params")
+
+
+def test_snapshot_flip_reraises_when_already_mjpeg(emu, monkeypatch):
+    # Bad bytes while the encoder is ALREADY MJPEG have some other cause —
+    # flipping again can't help; the original error must surface unchanged.
+    d = gl(emu)
+    original = SnapshotFormatError("non-JPEG bytes")
+    monkeypatch.setattr(PiKVMDriver, "snapshot",
+                        lambda self: (_ for _ in ()).throw(original))
+    monkeypatch.setattr(GLKVMDriver, "_streamer_params",
+                        lambda self: {"video_format": 1})
+    flips = []
+    monkeypatch.setattr(GLKVMDriver, "_set_video_format",
+                        lambda self, fmt: flips.append(fmt))
+    with pytest.raises(SnapshotFormatError) as exc_info:
+        d.snapshot()
+    assert exc_info.value is original
+    assert flips == []
+
+
+def test_snapshot_flip_waits_out_encoder_reinit(emu, monkeypatch):
+    # The switch re-inits the encoder; a transient 503 right after the flip is
+    # part of the switch, not a wedge — retry within the bounded window.
+    d = gl(emu)
+    seq = iter([SnapshotFormatError("h264"), UnavailableError("503", 503)])
+    def fake_base_snapshot(self):
+        try:
+            raise next(seq)
+        except StopIteration:
+            return b"\xff\xd8\xff after reinit"
+    monkeypatch.setattr(PiKVMDriver, "snapshot", fake_base_snapshot)
+    monkeypatch.setattr(GLKVMDriver, "_streamer_params",
+                        lambda self: {"video_format": 0})
+    flips = []
+    monkeypatch.setattr(GLKVMDriver, "_set_video_format",
+                        lambda self, fmt: flips.append(fmt))
+    assert d.snapshot().startswith(b"\xff\xd8\xff")
+    assert flips == [1, 0]                              # flip, then restore
+
+
+def test_snapshot_flip_restore_failure_is_nonfatal(emu, monkeypatch):
+    # A device drop between flip and restore leaves MJPEG set — benign and
+    # logged; the successfully captured frame must still be returned.
+    d = gl(emu)
+    calls = {"n": 0}
+    def fake_base_snapshot(self):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise SnapshotFormatError("h264")
+        return b"\xff\xd8\xff frame"
+    def fragile_set(self, fmt):
+        if fmt == 0:
+            raise UnavailableError("gone", 503)
+    monkeypatch.setattr(PiKVMDriver, "snapshot", fake_base_snapshot)
+    monkeypatch.setattr(GLKVMDriver, "_streamer_params",
+                        lambda self: {"video_format": 0})
+    monkeypatch.setattr(GLKVMDriver, "_set_video_format", fragile_set)
+    assert d.snapshot().startswith(b"\xff\xd8\xff")
+
+
+def test_streamer_warm_holds_mjpeg_until_exit(emu, monkeypatch):
+    # Inside streamer_warm() the flip is held: two H.264-failing snapshots
+    # produce ONE flip and no mid-block restore; the restore fires at exit.
+    emu.state.gl_video_format = 0
+    emu.state.snapshot_h264_at_native = True
+    d = gl(emu)
+    monkeypatch.setattr(GLKVMDriver, "_connect_event_ws",
+                        lambda self, **kw: _FakeWS())
+    with d.streamer_warm(drain_interval=0.05):
+        assert d.snapshot().startswith(b"\xff\xd8\xff")   # flips 0 -> 1
+        assert emu.state.gl_video_format == 1             # held, not restored
+        assert d.snapshot().startswith(b"\xff\xd8\xff")   # already MJPEG: clean
+        assert len(_posts(emu, "/api/streamer/set_params")) == 1
+    assert emu.state.gl_video_format == 0                 # restored at exit
+    assert len(_posts(emu, "/api/streamer/set_params")) == 2
+
+
+def test_stream_trigger_recovery_composes_with_mjpeg_flip(emu, monkeypatch):
+    # The .39 failure shape end-to-end: streamer offline -> WS trigger warms the
+    # encoder -> it emits H.264 at this res -> the MJPEG flip finishes the job.
+    emu.state.gl_video_format = 0
+    emu.state.snapshot_h264_at_native = True
+    d = gl(emu)
+    vsi = {"n": 0}
+    def fake_vsi(self):
+        vsi["n"] += 1
+        return {"streamer_offline": vsi["n"] <= 1}       # offline first, then up
+    seq = {"n": 0}
+    real_snapshot = PiKVMDriver.snapshot
+    def offline_then_real(self):
+        seq["n"] += 1
+        if seq["n"] == 1:
+            raise UnavailableError("503", 503)           # cold streamer
+        return real_snapshot(self)                       # emulator takes over
+    monkeypatch.setattr(PiKVMDriver, "snapshot", offline_then_real)
+    monkeypatch.setattr(GLKVMDriver, "video_signal_info", fake_vsi)
+    monkeypatch.setattr(GLKVMDriver, "_connect_event_ws",
+                        lambda self, **kw: _FakeWS())
+    assert d.snapshot().startswith(b"\xff\xd8\xff")
+    assert emu.state.gl_video_format == 0                 # flip + restore ran
+    assert len(_posts(emu, "/api/streamer/set_params")) == 2
+
+
+def test_known_quirks_includes_h264_native_res():
+    d = GLKVMDriver("h", "u", "p")
+    ids = {q.id for q in d.known_quirks(firmware="V1.9.1 release1")}
+    assert "snapshot-h264-at-native-res" in ids

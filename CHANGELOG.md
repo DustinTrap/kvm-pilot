@@ -7,6 +7,17 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **GLKVM headless JPEG snapshot at native resolution** (#187): when the
+  snapshot bytes fail the JPEG guard (H.264 at native/high res, #107) and the
+  firmware exposes `params.video_format` (V1.9.1+), the driver flips the
+  encoder to MJPEG (`POST /api/streamer/set_params?video_format=1`), retries,
+  and restores the prior format — no EDID change, no H.264 decoder, no
+  browser. Inside `streamer_warm()` the flip is held for the whole block and
+  restored once at exit. Composes with the #142 offline-streamer recovery
+  (offline → warm → H.264 → flip). V1.5.1 doesn't expose the switch and keeps
+  the honest `SnapshotFormatError` (upgrade via the web UI, #177). Mechanism
+  live-proven on V1.9.1; the auto-path is emulator-verified and awaits its
+  first live ledger row. New quirk `snapshot-h264-at-native-res`.
 - A firmware change now **invalidates the device assessment**: `preflight`
   remembers the firmware each device was last assessed at, forces the stable
   checks to re-run live when it differs (out-of-band web-UI flashes included),
