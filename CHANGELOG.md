@@ -7,6 +7,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- A firmware change now **invalidates the device assessment**: `preflight`
+  remembers the firmware each device was last assessed at, forces the stable
+  checks to re-run live when it differs (out-of-band web-UI flashes included),
+  and emits a `firmware-delta` finding diffing what cleared / regressed /
+  stayed open (#180).
 - Run-ledger capability rows can now record the **conditions a result was
   observed under** (`conditions: {resolution, encoder_format, snapshot_cached,
   jpeg_sink_clients}`) — the axes that actually decide a GL snapshot outcome —
@@ -18,6 +23,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   not registered in the wiki `PAGES` allowlist, so a new page can no longer
   silently go unpublished; the MCP README tool table gained the missing
   `access_paths` row (#175).
+
+### Changed
+- The healthcheck's support-evidence finding now labels ledger history as
+  **recorded** (vs this run's own tested-now probes), renders the #156
+  conditions each result was observed under, and flags condition-blind
+  snapshot passes ("verified only under unknown resolution/encoder") instead
+  of overclaiming a bare `verified (n=N)` — the honesty regression that gave
+  #180 its false confidence (#180).
 
 ## [0.1.0b1] — 2026-07-11
 

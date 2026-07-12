@@ -513,6 +513,28 @@ fleet-wide fault. Several non-obvious choices came out of measuring it live:
   dependency-free by reusing `SSHChannel` (`powershell -EncodedCommand`), leaving
   native WS-Man (which needs a third-party client) as an optional extra later.
 
+## Evidence honesty after a firmware change (#180 / #156)
+
+- **A firmware delta invalidates the assessment, detected at the next
+  connection — not per call.** `preflight` persists the last-assessed firmware
+  (`assessed:{driver}@{host}` in the health cache) and, when the live version
+  differs, re-runs the stable checks and emits a `firmware-delta` diff
+  (cleared / new-regressed / still-open). The in-process `_SESSION_AUDITED`
+  guard stays host-keyed on purpose: probing firmware on every MCP tool call
+  would add a network round-trip per call to catch only a mid-process
+  out-of-band flash, which the next process/connection catches anyway.
+- **Condition-blind ledger evidence surfaces a caveat; the maturity ladder is
+  unchanged.** Old snapshot rows without #156 `conditions` genuinely were
+  observed — just under unrecorded resolution/encoder state — so `maturity.py`
+  keeps counting them (changing the ladder would churn the committed registry
+  through the CI drift gate and rewrite honest history). The healthcheck
+  instead labels the evidence "recorded, conditions unrecorded — may still
+  fail at native res", and every *new* snapshot row should carry `conditions`.
+- **The firmware-delta diff compares stable (cacheable) findings only.** The
+  cache never stored the old run's volatile results, so including the new
+  run's volatile findings would report every live warning as a false
+  "regression" after each upgrade.
+
 ## Process
 
 Most structural choices came from adversarial review passes (find → verify →

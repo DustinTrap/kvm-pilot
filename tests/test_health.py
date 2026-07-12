@@ -716,7 +716,7 @@ def test_support_evidence_warns_on_recorded_live_failure(monkeypatch):
     )])
     r = health.check_support_evidence(_fw(product="RM1PE", version="V1.5.1 release2"))
     assert r.id == "support-evidence" and r.severity is Severity.WARNING
-    assert "live FAIL: firmware_update" in r.detail
+    assert "recorded FAIL: firmware_update" in r.detail
     assert "no flash: see #94/#95" in r.detail
     # What was never exercised live is named, not silently omitted.
     assert "never exercised live:" in r.detail and "virtual_media" in r.detail
@@ -743,7 +743,10 @@ def test_support_evidence_info_when_all_recorded_passes(monkeypatch):
     )])
     r = health.check_support_evidence(_fw(product="RM1PE", version="V1.5.1 release2"))
     assert r.severity is Severity.INFO
-    assert "verified live: info (n=1)" in r.detail
+    assert "recorded pass (run ledger): info (n=1)" in r.detail
+    # Recorded-vs-tested-now labeling (#180): the reader must not mistake
+    # ledger history for this run's own live probes.
+    assert "RECORDED results" in r.detail
     assert r.remediation == ""  # nothing failed, nothing destructive unexercised
 
 
@@ -766,3 +769,116 @@ def test_support_evidence_names_firmware_update_fail_on_bundled_ledger():
     assert "firmware_update" in r.detail
     # The derived maturity (#98) from the shipped registry rides along.
     assert "maturity alpha" in r.detail
+
+
+# ---- firmware delta => reassess (#180) ------------------------------------ #
+
+
+def _delta_driver(version, quirks=()):
+    """A stable-cacheable driver whose posture depends on its firmware: a quirk
+    entry yields a stable WARNING (firmware-quirks) that a newer firmware can
+    clear — the shape of the #180 upgrade story."""
+    return stub(
+        host="h",
+        get_info=lambda: {},
+        get_firmware_info=lambda: {"version": version, "model": "M"},
+        known_quirks=lambda firmware=None: list(quirks),
+        has_video_signal=lambda: True,
+        supports=lambda cap: False,
+    )
+
+
+_QUIRK = types.SimpleNamespace(
+    id="snapshot-needs-video-client", source="observed", workaround="warm the streamer"
+)
+
+
+def test_preflight_forces_rerun_and_diff_on_firmware_change(tmp_path):
+    from kvm_pilot import health
+
+    cache = HealthCache(tmp_path / "hc.json")
+    preflight(_delta_driver("1.0", quirks=[_QUIRK]), cache=cache)
+
+    # Same firmware again: served from the stable cache, no delta finding.
+    rep_same = preflight(_delta_driver("1.0", quirks=[_QUIRK]), cache=cache)
+    assert not [r for r in rep_same.results if r.id == "firmware-delta"]
+
+    calls = {"quirks": 0}
+
+    def counting_quirks(firmware=None):
+        calls["quirks"] += 1
+        return []
+
+    upgraded = _delta_driver("2.0")
+    upgraded.known_quirks = counting_quirks
+    rep = preflight(upgraded, cache=cache)
+
+    # The stable audit re-ran live despite a fresh same-key cache being absent
+    # AND the old-key cache being fresh — the firmware delta invalidated it.
+    assert calls["quirks"] == 1
+    delta = next(r for r in rep.results if r.id == "firmware-delta")
+    assert "1.0 → 2.0" in delta.detail
+    assert "cleared: firmware-quirks" in delta.detail
+    assert delta.severity is Severity.INFO  # something cleared, nothing regressed
+    assert delta.cacheable is False
+    # The new posture was recorded so the NEXT run at 2.0 is cached + delta-free.
+    assert health.HealthCache(tmp_path / "hc.json").last_assessed("pikvm@h") == "2.0"
+    rep_after = preflight(_delta_driver("2.0"), cache=cache)
+    assert not [r for r in rep_after.results if r.id == "firmware-delta"]
+
+
+def test_preflight_regression_after_firmware_change_is_warning(tmp_path):
+    cache = HealthCache(tmp_path / "hc.json")
+    preflight(_delta_driver("2.0"), cache=cache)  # clean posture at 2.0
+    rep = preflight(_delta_driver("2.1", quirks=[_QUIRK]), cache=cache)  # 2.1 regresses
+    delta = next(r for r in rep.results if r.id == "firmware-delta")
+    assert delta.severity is Severity.WARNING
+    assert "new/regressed: firmware-quirks" in delta.detail
+    assert "Re-verify" in delta.remediation
+
+
+def test_preflight_records_assessed_even_without_prior(tmp_path):
+    # Old cache files lack assessed: keys — the first post-upgrade run must
+    # just record, never emit a spurious delta.
+    cache = HealthCache(tmp_path / "hc.json")
+    rep = preflight(_delta_driver("1.0"), cache=cache)
+    assert not [r for r in rep.results if r.id == "firmware-delta"]
+    assert cache.last_assessed("pikvm@h") == "1.0"
+
+
+def test_firmware_delta_result_without_prior_results():
+    from kvm_pilot.health import _firmware_delta_result
+
+    r = _firmware_delta_result("1.0", "2.0", None, [])
+    assert r.severity is Severity.INFO
+    assert "no prior assessment retained" in r.detail
+
+
+def test_support_evidence_renders_recorded_conditions(monkeypatch):
+    from kvm_pilot import health, support_matrix
+
+    run = _ledger_run([("snapshot", True, "")])
+    run["capabilities"][0]["conditions"] = {
+        "resolution": "1920x1200", "encoder_format": "mjpeg",
+    }
+    run2 = _ledger_run([("snapshot", False, "H.264 NAL, undecodable")], run_id="r2")
+    run2["capabilities"][0]["conditions"] = {
+        "resolution": "2560x1440", "encoder_format": "h264",
+    }
+    monkeypatch.setattr(support_matrix, "load_ledger", lambda: [run, run2])
+    r = health.check_support_evidence(_fw(product="RM1PE", version="V1.5.1 release2"))
+    # Both operating points appear on the row — the #180 contradiction
+    # reconciles from data.
+    assert "pass @ 1920x1200 mjpeg" in r.detail
+    assert "FAIL @ 2560x1440 h264" in r.detail
+    # Conditions recorded -> the condition-blind caveat must NOT fire.
+    assert "verified only under unknown resolution/encoder" not in r.detail
+
+
+def test_support_evidence_flags_condition_blind_snapshot_passes(monkeypatch):
+    from kvm_pilot import health, support_matrix
+
+    monkeypatch.setattr(support_matrix, "load_ledger",
+                        lambda: [_ledger_run([("snapshot", True, "")])])
+    r = health.check_support_evidence(_fw(product="RM1PE", version="V1.5.1 release2"))
+    assert "verified only under unknown resolution/encoder" in r.detail
