@@ -1066,3 +1066,31 @@ def test_capabilities_reports_live_evidence(config_file):
     assert parsed["driver"] == "fake"
     assert parsed["live_evidence"]["combos"] == []
     assert "support_matrix" in parsed["live_evidence"]["note"]
+
+
+def test_wait_for_state_holds_display_awake(config_file, monkeypatch):
+    """#161: wait_for_state wraps the poll loop in display_awake() — the
+    jiggler is held ON for the wait and the prior state restored after, so the
+    target can't DPMS-sleep mid-wait (the root of 'snapshot fails though video
+    works')."""
+    import kvm_pilot.config as _cfg
+    from kvm_pilot.drivers.fake import FakeDriver
+    from kvm_pilot.mcp import server
+    from kvm_pilot.vision.anthropic import AnthropicBackend
+    monkeypatch.setattr(_cfg, "DEFAULT_CONFIG_PATH", config_file)
+    monkeypatch.setenv("KVM_PILOT_PROFILE", "fakebox")
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    monkeypatch.setenv("KVM_PILOT_MCP_DRY_RUN", "1")
+    monkeypatch.setattr(server, "_vision_backend", lambda: AnthropicBackend(model="pinned"))
+
+    toggles: list[bool] = []
+    orig = FakeDriver.set_jiggler
+
+    def recording(self, active):
+        toggles.append(active)
+        return orig(self, active)
+
+    monkeypatch.setattr(FakeDriver, "set_jiggler", recording)
+    out = _run_tool(server.wait_for_state(_StubContext(), phase="power_off", timeout=5))
+    assert out["reached"] is True
+    assert toggles == [True, False]  # held for the wait, restored after (#161)

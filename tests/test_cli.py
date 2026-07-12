@@ -742,3 +742,49 @@ def test_firmware_check_json_includes_report_outcome(monkeypatch, tmp_path, caps
     out = _json.loads(capsys.readouterr().out)
     assert out["registry_behind"] is True
     assert out["report"]["filed"] is True and out["report"]["url"]
+
+
+# -- keep-awake + display_awake wiring (#159/#161) -------------------------- #
+
+
+def test_keep_awake_command_toggles_jiggler(capsys, monkeypatch):
+    from kvm_pilot.drivers.fake import FakeDriver
+
+    states = []
+    orig = FakeDriver.set_jiggler
+
+    def recording(self, active):
+        states.append(active)
+        return orig(self, active)
+
+    monkeypatch.setattr(FakeDriver, "set_jiggler", recording)
+    assert main(["keep-awake", "on", "--driver", "fake"]) == 0
+    assert states == [True]
+    assert "keep-awake: ON" in capsys.readouterr().out
+    assert main(["keep-awake", "off", "--driver", "fake"]) == 0
+    assert states == [True, False]
+    assert "keep-awake: off" in capsys.readouterr().out
+
+
+def test_watch_holds_display_awake_and_restores(monkeypatch):
+    # #161: the watch loop must wrap the whole wait in display_awake() so the
+    # target can't DPMS-sleep mid-poll — jiggler ON during the wait, prior
+    # state restored after, even though each poll is a plain snapshot.
+    from kvm_pilot import cli as cli_mod
+
+    seen = {}
+
+    class _Analyzer:
+        def __init__(self, kvm):
+            self.kvm = kvm
+
+        def wait_for_state(self, phase, timeout=None, hint="", on_poll=None):
+            seen["kvm"] = self.kvm
+            seen["jiggler_during_wait"] = self.kvm.jiggler_active
+            return types.SimpleNamespace(phase=phase, to_dict=lambda: {"phase": phase})
+
+    monkeypatch.setattr(cli_mod, "_make_analyzer", lambda kvm, args: _Analyzer(kvm))
+    assert cli_mod.main(["watch", "grub_menu", "--driver", "fake"]) == 0
+    assert seen["jiggler_during_wait"] is True
+    toggles = [a for a in seen["kvm"].actions if a[0] == "set_jiggler"]
+    assert toggles == [("set_jiggler", True), ("set_jiggler", False)]
