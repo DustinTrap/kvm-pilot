@@ -14,15 +14,17 @@ Vision runs on Claude **or** any local OpenAI-compatible VLM (LM Studio, Ollama,
 vLLM, llama.cpp). Point it at a model on your own GPU and the screenshots never
 leave your network and cost nothing per frame.
 
-> **Status:** v0.1.0b1 — **first beta, ready for broader testing.** The core
+> **Status:** v0.1.0b2 — **beta, ready for broader testing.** The core
 > paths have graduated from mocked-only to live-verified: a fleet of GL-RM1PE
 > units has exercised `snapshot`/`healthcheck`/`logs`/`power_state`/
 > `virtual_media`/`info` across two firmware lines, and on V1.9.1 those
 > capabilities sit at **beta** maturity in the run ledger that ships in the
-> wheel — derived from real runs, never hand-edited. Reliability work landed
-> where testing hurt the most (headless snapshot, encoder honesty, retry
-> damping, vision consensus), and the firmware registry now feeds itself:
-> `firmware-check` auto-files registry updates and devices report what they see.
+> wheel — derived from real runs, never hand-edited. b2 hardens the paths that
+> can hurt: transports never re-fire a destructive request, MCP approvals are
+> signed single-use receipts with an audit trail, GLKVM snapshots work headless
+> at native resolution, and `kvm-pilot test-report` turns contributing evidence
+> into one command. The firmware registry still feeds itself: `firmware-check`
+> auto-files registry updates and devices report what they see.
 > **Now we need your hardware.** PiKVM, BliKVM, other GLKVM models, and Redfish
 > BMCs (iDRAC/iLO/OpenBMC) are the combos the matrix needs most — success *or*
 > failure, a
