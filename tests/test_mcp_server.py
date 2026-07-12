@@ -49,11 +49,12 @@ EXPECTED_TOOLS = {
     "appliance_status",
     "appliance_reboot",
     "access_paths",
+    "file_firmware_report",
 }
 # Tools that change state (readOnlyHint=False, destructiveHint=True).
 DESTRUCTIVE_TOOLS = {
     "power", "ssh_exec", "type_text", "press_key", "send_shortcut", "ctrl_alt_delete",
-    "mouse", "mount_iso", "eject", "appliance_reboot",
+    "mouse", "mount_iso", "eject", "appliance_reboot", "file_firmware_report",
 }
 
 
@@ -1094,3 +1095,80 @@ def test_wait_for_state_holds_display_awake(config_file, monkeypatch):
     out = _run_tool(server.wait_for_state(_StubContext(), phase="power_off", timeout=5))
     assert out["reached"] is True
     assert toggles == [True, False]  # held for the wait, restored after (#161)
+
+
+# -- file_firmware_report: the EXTERNAL_WRITE-gated emission tool (#190) ----- #
+
+
+def _fwc_env(monkeypatch, config_file, tmp_path, *, registry_latest="V1.9.1 release1"):
+    """Point the server at fakebox, teach FakeDriver the firmware surface, and
+    stage a registry whose latest is ``registry_latest``."""
+    import kvm_pilot.config as _cfg
+    from kvm_pilot.drivers.fake import FakeDriver
+    monkeypatch.setattr(_cfg, "DEFAULT_CONFIG_PATH", config_file)
+    monkeypatch.setenv("KVM_PILOT_PROFILE", "fakebox")
+    monkeypatch.setattr(FakeDriver, "get_firmware_info", lambda self: {
+        "vendor": "gl.inet", "product": "RM1PE", "version": "V1.9.1 release1"},
+        raising=False)
+    monkeypatch.setattr(FakeDriver, "get_available_update", lambda self: {
+        "current": "V1.9.1 release1", "latest": "V1.9.2 release1",
+        "beta": None, "update_available": True}, raising=False)
+    db = tmp_path / "reg.json"
+    db.write_text(json.dumps({
+        "schema_version": 2, "updated": "2026-07-02", "firmware": [
+            {"vendor": "gl.inet", "product": "RM1PE", "latest": registry_latest,
+             "source": "https://dl.gl-inet.com/kvm/rm1/stable", "date": "2026-07-02"}]}))
+    monkeypatch.setenv("KVM_PILOT_FIRMWARE_DB", str(db))
+
+
+def test_file_firmware_report_gate_closed_is_denial_not_error(config_file, tmp_path, monkeypatch):
+    """Registry behind + gate unset: the reconcile half runs, the write half is
+    a same-path denial naming the operator flag — never a raised error."""
+    from kvm_pilot.mcp import server
+    _fwc_env(monkeypatch, config_file, tmp_path)
+    monkeypatch.delenv("KVM_PILOT_MCP_ALLOW_EXTERNAL_WRITE", raising=False)
+    monkeypatch.setenv("KVM_PILOT_MCP_DRY_RUN", "1")
+    out = _run_tool(server.file_firmware_report(_StubContext(), confirm=True))
+    assert out["registry_behind"] is True
+    assert out["approved"] is False
+    assert "KVM_PILOT_MCP_ALLOW_EXTERNAL_WRITE" in out["denied_reason"]
+
+
+def test_file_firmware_report_registry_current_short_circuits(config_file, tmp_path, monkeypatch):
+    """Registry already current: nothing to file — the gate is never consulted
+    and no approval fields appear (this is the read half only)."""
+    from kvm_pilot.mcp import server
+    _fwc_env(monkeypatch, config_file, tmp_path, registry_latest="V1.9.2 release1")
+    monkeypatch.setenv("KVM_PILOT_MCP_DRY_RUN", "1")
+    out = _run_tool(server.file_firmware_report(_StubContext(), confirm=False))
+    assert out == {**out, "registry_behind": False, "filed": False}
+    assert "already reflects" in out["reason"]
+    assert "approved" not in out
+
+
+def test_file_firmware_report_approved_dry_run_previews_body(config_file, tmp_path, monkeypatch):
+    """Gate open + confirm + dry-run: the REAL helper renders the exact issue
+    title/body the ingest workflow would receive, and nothing is sent."""
+    from kvm_pilot.mcp import server
+    _fwc_env(monkeypatch, config_file, tmp_path)
+    monkeypatch.setenv("KVM_PILOT_MCP_ALLOW_EXTERNAL_WRITE", "1")
+    monkeypatch.setenv("KVM_PILOT_MCP_DRY_RUN", "1")  # forces inv.dry_run
+    out = _run_tool(server.file_firmware_report(_StubContext(), confirm=True))
+    assert out["approved"] is True and out["filed"] is False
+    report = out["report"]
+    assert report["dry_run"] is True
+    assert "V1.9.2 release1" in report["title"]
+    assert "### Vendor" in report["body"]          # the ingestable issue form
+
+
+def test_file_firmware_report_gh_missing_is_graceful(config_file, tmp_path, monkeypatch):
+    """Approved for real but no gh CLI in the server env — the documented
+    failure mode: filed=false with an actionable reason, not a crash."""
+    from kvm_pilot.mcp import server
+    _fwc_env(monkeypatch, config_file, tmp_path)
+    monkeypatch.setenv("KVM_PILOT_MCP_ALLOW_EXTERNAL_WRITE", "1")
+    monkeypatch.delenv("KVM_PILOT_MCP_DRY_RUN", raising=False)
+    monkeypatch.setattr("shutil.which", lambda name: None)
+    out = _run_tool(server.file_firmware_report(_StubContext(), confirm=True))
+    assert out["approved"] is True and out["filed"] is False
+    assert "gh" in out["report"]["reason"]

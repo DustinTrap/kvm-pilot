@@ -59,6 +59,8 @@ EFFECT_ENABLE_FLAG: dict[EffectClass, str | None] = {
     EffectClass.POWER_SOFT: "KVM_PILOT_MCP_ALLOW_POWER",
     EffectClass.POWER_HARD: "KVM_PILOT_MCP_ALLOW_POWER",
     EffectClass.CONFIG_MUTATION: "KVM_PILOT_MCP_ALLOW_CONFIG",
+    EffectClass.APPLIANCE_RESET: "KVM_PILOT_MCP_ALLOW_APPLIANCE",
+    EffectClass.EXTERNAL_WRITE: "KVM_PILOT_MCP_ALLOW_EXTERNAL_WRITE",
 }
 
 
@@ -68,8 +70,15 @@ def env_flag(name: str) -> bool:
 
 
 def gate_enabled(effect: EffectClass) -> bool:
-    """True if the operator enabled this effect class (or it needs no gate)."""
-    flag = EFFECT_ENABLE_FLAG.get(effect, "KVM_PILOT_MCP_ALLOW_CONFIG")
+    """True if the operator enabled this effect class (or it needs no gate).
+
+    An effect with no ``EFFECT_ENABLE_FLAG`` entry is fail-closed: a new effect
+    class must get its own operator flag, never silently borrow another gate
+    (#190 — previously an unmapped effect fell back to the CONFIG flag).
+    """
+    if effect not in EFFECT_ENABLE_FLAG:
+        return False
+    flag = EFFECT_ENABLE_FLAG[effect]
     return flag is None or env_flag(flag)
 
 

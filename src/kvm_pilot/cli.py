@@ -571,68 +571,18 @@ def cmd_healthcheck(args) -> int:
 
 
 def _file_firmware_report(submission: dict, args) -> dict:
-    """File the ``reconcile()`` suggestion as a ``firmware-report`` issue upstream (#189).
+    """CLI shim over :func:`kvm_pilot.firmware_registry.file_firmware_report` (#189).
 
-    On by default whenever the registry is behind (``--no-file-report`` opts out);
-    never silent and never fatal — the returned outcome dict says what happened and
-    why, and a filing failure must not break ``firmware-check`` itself.
+    On by default whenever the registry is behind (``--no-file-report`` opts out).
+    The shared helper (also behind the MCP ``file_firmware_report`` tool, #190)
+    never raises — the outcome dict says what happened and why.
     """
-    import datetime
-    import shutil
-    import subprocess  # nosec B404 - intentional: shells out to the gh CLI (it owns auth)
+    from .firmware_registry import file_firmware_report
 
-    from .firmware_registry import render_issue_form, validate_submission
-
-    sub = dict(submission)
-    if args.source:
-        sub["source"] = args.source
-    sub["date"] = args.date or datetime.date.today().isoformat()
-    if not sub.get("source"):
-        return {"filed": False, "reason": "no known source URL for this device — pass "
-                                          "--source <release-channel URL> to file the report"}
-    errs = validate_submission(sub)
-    if errs:  # never file a report the ingest pipeline would park (#188)
-        return {"filed": False, "reason": "report failed validation: " + "; ".join(errs)}
-    # One identity string for both the title and the dedup search — if they
-    # drift apart, every run re-files a duplicate (the emission-side twin of #188).
-    ident = f"{sub['vendor']} {sub['product']} latest {sub['latest']}"
-    title = f"[firmware] {ident} (auto-reported)"
-    body = render_issue_form(sub)
-    if args.dry_run:
-        return {"filed": False, "dry_run": True, "title": title, "body": body,
-                "reason": "dry-run: nothing sent"}
-    if shutil.which("gh") is None:
-        return {"filed": False, "reason": "GitHub CLI (gh) not found — install it and "
-                                          "`gh auth login`, or file the issue form by hand"}
-    search = f'label:firmware-report in:title "{ident}"'
-    try:
-        # --state all: an ingested-and-closed report must still suppress re-filing,
-        # because the local bundled registry stays behind until the next release.
-        listed = subprocess.run(  # nosec B603 B607 - fixed args, no shell; gh from PATH is intentional
-            ["gh", "issue", "list", "--repo", args.repo, "--state", "all", "--limit", "20",
-             "--search", search, "--json", "number"],
-            capture_output=True, text=True, check=True)
-        hits = json.loads(listed.stdout or "[]")
-        if hits:
-            return {"filed": False, "reason": f"already reported in #{hits[0]['number']}"}
-        argv = ["gh", "issue", "create", "--repo", args.repo, "--title", title,
-                "--body", body, "--label", "firmware-report"]
-        created = subprocess.run(argv, capture_output=True, text=True)  # nosec B603
-        note = None
-        if created.returncode and "label" in created.stderr.lower():
-            # No triage rights on the repo: file unlabeled; a maintainer adds the label.
-            created = subprocess.run(argv[:-2], capture_output=True, text=True)  # nosec B603
-            note = ("could not apply the firmware-report label — ask a maintainer to add "
-                    "it so the hourly ingest picks the report up")
-        if created.returncode:
-            return {"filed": False, "reason": f"gh issue create failed: {created.stderr.strip()}"}
-        out = {"filed": True, "url": created.stdout.strip(), "title": title}
-        if note:
-            out["note"] = note
-        return out
-    except (OSError, ValueError, subprocess.CalledProcessError) as exc:
-        detail = (getattr(exc, "stderr", "") or "").strip() or str(exc)
-        return {"filed": False, "reason": f"gh failed: {detail}"}
+    return file_firmware_report(
+        submission, repo=args.repo, source=args.source, date=args.date,
+        dry_run=args.dry_run,
+    )
 
 
 def cmd_firmware_check(args) -> int:

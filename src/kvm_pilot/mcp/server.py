@@ -17,11 +17,13 @@ SAFETY MODEL (see the co-located README.md for the operator-facing version):
     network scan is read-only but not harmless).
   * The destructive tools (``power``, the HID act tools ``type_text`` /
     ``press_key`` / ``send_shortcut`` / ``ctrl_alt_delete`` / ``mouse``, the
-    media tools ``mount_iso`` / ``eject``, and ``ssh_exec``) carry
+    media tools ``mount_iso`` / ``eject``, ``ssh_exec``, and the
+    external-write tool ``file_firmware_report``) carry
     ``destructiveHint`` and are DISABLED until the operator opts the tool's
     *effect class* in via an env flag in the server's own environment
     (``KVM_PILOT_MCP_ALLOW_POWER`` / ``_ALLOW_HID`` / ``_ALLOW_MEDIA`` /
-    ``_ALLOW_SSH``). On top of that each act call requires per-invocation
+    ``_ALLOW_SSH`` / ``_ALLOW_EXTERNAL_WRITE``). An effect class with no
+    registered flag is fail-closed. On top of that each act call requires per-invocation
     approval — a human MCP elicitation when the client supports it, else an
     explicit ``confirm=true`` under the operator's standing policy. Tools are
     classified by effect not transport, so a reboot (``ctrl_alt_delete``, a
@@ -1044,6 +1046,72 @@ def access_paths(profile: str | None = None) -> dict:
         from kvm_pilot.health import access_paths as _access_paths
 
         return {**_provenance(cfg), **_access_paths(kvm)}
+
+
+@mcp.tool(annotations=_DESTRUCTIVE)
+async def file_firmware_report(
+    ctx: Context,
+    confirm: bool = False,
+    repo: str | None = None,
+    source: str | None = None,
+    dry_run: bool = False,
+    profile: str | None = None,
+) -> dict:
+    """Contribute the device's firmware currency to the registry SSoT — files the
+    "Latest known release" report as a GitHub issue when the registry is behind
+    (the MCP twin of CLI ``firmware-check``, #189/#190). EXTERNAL WRITE.
+
+    The read/reconcile part always runs; when the registry already reflects the
+    device-reported latest there is nothing to file and the result says so. The
+    filing itself writes OUTSIDE the managed device (a public GitHub issue via
+    the ``gh`` CLI), so it is gated as its own ``external_write`` effect class:
+    **disabled unless** the operator set ``KVM_PILOT_MCP_ALLOW_EXTERNAL_WRITE``
+    in the server's own environment, plus the usual per-invocation approval
+    (elicitation, or ``confirm=true`` under standing policy). ``dry_run=true``
+    returns the exact issue title/body without sending anything. A missing or
+    unauthenticated ``gh`` comes back as a graceful ``filed=false`` reason.
+    """
+    from kvm_pilot.firmware_registry import (
+        UPSTREAM_REPO,
+        load_registry,
+        reconcile,
+    )
+    from kvm_pilot.firmware_registry import (
+        file_firmware_report as _file_report,
+    )
+
+    repo = repo or UPSTREAM_REPO
+    with _driver(profile, confirm=deny_all, capability=Capability.SYSTEM_INFO) as (cfg, kvm):
+        info_fn = getattr(kvm, "get_firmware_info", None)
+        fw = info_fn() if info_fn is not None else {}
+        vendor = (fw.get("vendor") or "").strip()
+        product = fw.get("product") or ""
+        upd_fn = getattr(kvm, "get_available_update", None)
+        upd = upd_fn() if upd_fn is not None else None
+        submission = None
+        if upd and upd.get("latest"):
+            submission = reconcile(vendor, product, upd["latest"], registry=load_registry())
+        base = {**_provenance(cfg), "vendor": vendor, "product": product,
+                "installed": fw.get("version"), "registry_behind": submission is not None}
+        if submission is None:
+            reason = ("registry already reflects the device-reported latest"
+                      if upd and upd.get("latest")
+                      else "device does not self-report an available-update check")
+            return {**base, "filed": False, "reason": reason}
+        inv = act.new_invocation(
+            host=cfg.host, profile=profile, tool="file_firmware_report",
+            effect=EffectClass.EXTERNAL_WRITE, op="report.file_firmware",
+            transport="gh-cli", args={"repo": repo, "submission": submission},
+            dry_run=_dry_run() or dry_run,
+        )
+        approval = await act.approve_or_deny(ctx, inv, confirm=confirm)
+        if not approval.approved:
+            return {**base, **act.result(inv, approval)}
+        outcome = await anyio.to_thread.run_sync(
+            lambda: _file_report(submission, repo=repo, source=source, dry_run=inv.dry_run)
+        )
+        return {**base, **act.result(inv, approval), "report": outcome,
+                "filed": outcome.get("filed", False)}
 
 
 @mcp.tool(annotations=_READ_ONLY)

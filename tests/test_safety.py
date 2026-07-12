@@ -129,3 +129,11 @@ def test_effect_classes_by_family():
 )
 def test_shortcut_effect_classifies_power_chord_families(keys, expected):
     assert shortcut_effect(keys) is expected
+
+
+def test_file_firmware_report_is_external_write_not_device_destructive():
+    # #190: filing a GitHub issue writes OUTSIDE the managed target — its own
+    # effect class for the MCP gate, but NOT a device op in DESTRUCTIVE_OPS
+    # (guard()/dry-run never see it; the gh helper owns its own dry-run).
+    assert effect_of("report.file_firmware") is EffectClass.EXTERNAL_WRITE
+    assert "report.file_firmware" not in DESTRUCTIVE_OPS
