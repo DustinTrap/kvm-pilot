@@ -49,6 +49,10 @@ driver or CLI dispatch, run what CI runs:
 - **Be honest about hardware.** If you've tested on real hardware, say which
   device and firmware in the PR. The compatibility table in the README should
   reflect what's actually been verified versus assumed.
+- **New docs pages must be registered.** The wiki publishes an explicit allowlist
+  (`PAGES` in `.github/scripts/build_wiki.py`), not a glob — add every new
+  `docs/*.md` there (or to `OPT_OUT` with a reason). CI enforces this
+  (`build_wiki.py --check`, #175).
 
 ## Hardware reports welcome
 
