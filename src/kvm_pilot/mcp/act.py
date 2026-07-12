@@ -195,7 +195,20 @@ class Approval:
     approver: str | None = None
     reason: str | None = None
     remediation: str | None = None  # operator-facing fix for a client-side denial (#149)
-    outcome: Outcome = Outcome.DENIED
+    outcome: Outcome | None = None  # derived from `approved` when omitted
+
+    def __post_init__(self) -> None:
+        # approved and outcome are two views of one fact: derive the generic
+        # outcome when omitted, and reject an inconsistent explicit pair —
+        # Approval(True, outcome=DENIED) is a bug, not data.
+        if self.outcome is None:
+            object.__setattr__(
+                self, "outcome", Outcome.APPROVED if self.approved else Outcome.DENIED
+            )
+        elif self.approved != (self.outcome is Outcome.APPROVED):
+            raise ValueError(
+                f"inconsistent Approval: approved={self.approved} outcome={self.outcome}"
+            )
 
 
 class _ApprovalForm(BaseModel):
@@ -493,9 +506,10 @@ def verify_and_consume(
             )
         elif clock >= receipt.expires_at:
             _RECEIPTS[receipt.receipt_id] = "expired"
+            lifetime = receipt.expires_at - receipt.issued_at
             denial, event = (
                 f"receipt expired: the approval outlived its "
-                f"{_receipt_ttl():.0f}s lifetime — re-approve", "expired",
+                f"{lifetime:.0f}s lifetime — re-approve", "expired",
             )
         else:
             _RECEIPTS[receipt.receipt_id] = "consumed"

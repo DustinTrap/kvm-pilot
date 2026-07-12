@@ -1234,6 +1234,8 @@ def test_power_dry_run_skips_bump_and_verify(config_file):
 def test_observe_power_honest_when_atx_sensing_absent():
     """GL/unwired-PiKVM shape: get_atx_state reports enabled=false — there is NO
     trustworthy signal, so the answer is None + why, never a fail-open guess."""
+    import types
+
     from kvm_pilot.mcp.server import _observe_power, _verify_power
 
     class _GlIsh:
@@ -1241,6 +1243,8 @@ def test_observe_power_honest_when_atx_sensing_absent():
             return {"enabled": False, "leds": {"power": False}}
         def is_powered_on(self):  # fail-open base behavior — must NOT be consulted
             return True
+        def known_quirks(self, firmware=None):  # the driver's own declaration
+            return [types.SimpleNamespace(id="atx-power-state-always-off")]
 
     observed, source = _observe_power(_GlIsh())
     assert observed is None
