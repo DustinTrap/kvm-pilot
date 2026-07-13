@@ -103,3 +103,40 @@ jobs:
           path: dist/
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@cef221092ed1bacb1cc03d23a2d87d1d172e277b # v1.14.0
+
+  # Keep the official MCP registry listing in step with PyPI (#197). Runs after
+  # the PyPI publish because the registry validates the listed package against
+  # pypi.org (the README carries the `mcp-name:` ownership marker). GitHub OIDC
+  # authenticates the io.github.dustintrap namespace — no secret needed. A
+  # registry hiccup must not fail the release itself: the PyPI artifact is
+  # already out, so this job is best-effort by design (continue-on-error).
+  publish-mcp-registry:
+    needs: publish
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    permissions:
+      id-token: write   # GitHub OIDC login for the io.github.* namespace
+      contents: read
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Sync server.json version to the release tag
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME:-${{ github.event.release.tag_name }}}"
+          V="${TAG#v}"
+          jq --arg v "$V" '.version = $v | .packages[].version = $v' server.json > server.json.tmp
+          mv server.json.tmp server.json
+          jq -r '"Publishing \(.name) \(.version)"' server.json
+      - name: Install mcp-publisher
+        run: |
+          set -euo pipefail
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/latest/download/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_$(uname -m).tar.gz" \
+            | tar xz mcp-publisher
+          ./mcp-publisher --version
+      - name: Publish to the MCP registry
+        run: |
+          set -euo pipefail
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish

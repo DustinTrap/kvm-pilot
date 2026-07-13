@@ -30,15 +30,20 @@ yourself. On **Claude Code**:
 
 ```bash
 claude mcp add kvm-pilot -s user \
-    -e KVM_PILOT_PROFILE=<profile> -e KVM_PILOT_MCP_DRY_RUN=1 -- \
+    -e KVM_PILOT_PROFILE=<profile> -e KVM_PILOT_MCP_READ_ONLY=1 -- \
     kvm-pilot-mcp
 ```
 
 - **`-s user`** (not `-s local`) makes it available no matter which directory you
   launch the agent from — a `-s local` registration only loads in the current
   project's directory.
-- **`KVM_PILOT_MCP_DRY_RUN=1`** is a safe default: destructive tool calls are
-  logged, not sent. Drop it once you trust a flow.
+- **`KVM_PILOT_MCP_READ_ONLY=1`** is the safest first rung: destructive tools
+  aren't registered at all, so the agent can run status reports, healthchecks,
+  and snapshots but *cannot* touch power, keyboard, or media. Climb the **trust
+  ladder** as your hardware gets verified: swap it for
+  `KVM_PILOT_MCP_DRY_RUN=1` to rehearse destructive flows (calls logged, not
+  sent), then open the per-effect `KVM_PILOT_MCP_ALLOW_*` gates one at a time
+  (see the [MCP server README](https://github.com/DustinTrap/kvm-pilot/blob/main/src/kvm_pilot/mcp/README.md)).
 
 **Then restart your agent session.** MCP servers load at session start, so on
 Claude Code you must **exit your current session and start a new one** for the
@@ -167,6 +172,15 @@ A short list that saves most new users their first few mistakes:
   server's IP / hostname / FQDN ready (it's *not* the KVM's address).
 - **A black screen isn't necessarily "off."** See §6 — confirm with the screen and
   an SSH reachability check, not the power reading alone.
+
+- **Close the loop — this beta runs on community evidence.** After a good first
+  run, `kvm-pilot test-report --profile <p>` probes your device (read-only by
+  default) and appends an evidence row you can paste into a two-minute
+  [hardware report](https://github.com/DustinTrap/kvm-pilot/issues/new?template=hardware-report.yml).
+  **Success or failure both count** — a failure report on your device+firmware
+  is exactly what moves the
+  [Hardware-Compatibility matrix](https://github.com/DustinTrap/kvm-pilot/wiki/Hardware-Compatibility),
+  and the hourly ingest does the rest automatically.
 
 New to this? Your agent can also just walk you through it — ask it to *"get me
 started with kvm-pilot"* and it will point you back here and offer the safe first
