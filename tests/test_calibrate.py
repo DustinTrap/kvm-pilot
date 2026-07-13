@@ -158,7 +158,7 @@ def test_persistence_roundtrip_and_resolution_staleness(tmp_path, monkeypatch):
 
 def test_maybe_apply_reports_honestly(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
-    kvm = FakeScreenKVM()  # no signal_state -> resolution "unknown"
+    kvm = FakeScreenKVM()  # no video_signal_info -> resolution "unknown"
     # No stored calibration: input passes through, calibrated=False.
     assert maybe_apply("h2", kvm, 0.5, 0.5) == (0.5, 0.5, False)
     save_calibration(
@@ -170,3 +170,30 @@ def test_maybe_apply_reports_honestly(tmp_path, monkeypatch):
     x, y, calibrated = maybe_apply("h2", kvm, 0.5, 0.5)
     assert calibrated is True
     assert x == pytest.approx((0.5 - 0.1) / 0.8)
+
+
+def test_maybe_apply_unknown_current_mode_applies_best_effort(tmp_path, monkeypatch):
+    """Live .20 lesson: on-demand streamers make the mode unreadable between
+    invocations — absence of evidence must not starve the correction. Only an
+    *observed* different mode refuses."""
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    save_calibration(
+        MouseCalibration(
+            host="h3", resolution="1600x900", scale_x=1.0, offset_x=0.01,
+            scale_y=1.0, offset_y=0.01, residual=0.005, verified_at=1.0,
+        )
+    )
+    blind = FakeScreenKVM()  # cannot report a resolution
+    assert maybe_apply("h3", blind, 0.5, 0.5)[2] is True
+
+    class SeeingKVM(FakeScreenKVM):
+        def __init__(self, w, h):
+            super().__init__()
+            self._res = (w, h)
+
+        def video_signal_info(self):
+            return {"width": self._res[0], "height": self._res[1]}
+
+    assert maybe_apply("h3", SeeingKVM(1600, 900), 0.5, 0.5)[2] is True
+    # An observed mode change is real staleness — refuse.
+    assert maybe_apply("h3", SeeingKVM(1024, 768), 0.5, 0.5) == (0.5, 0.5, False)

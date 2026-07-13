@@ -1,3 +1,3 @@
 """Single source of version truth for kvm-pilot."""
 
-__version__ = "0.1.0b4"
+__version__ = "0.1.0b5"
