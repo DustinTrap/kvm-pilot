@@ -34,6 +34,7 @@ client/driver code stays stdlib-only; `mcp` is imported only in this subpackage.
 | `send_shortcut` | `destructiveHint` | Send a key chord (e.g. `ControlLeft,AltLeft,F2`). Gated **by effect**: a reboot/power chord (Ctrl+Alt+Del, Magic SysRq) needs `ALLOW_POWER`; an ordinary session chord needs `ALLOW_HID` |
 | `ctrl_alt_delete` | `destructiveHint` | Send Ctrl+Alt+Del (a reboot) — classified `power_soft`, so it needs `KVM_PILOT_MCP_ALLOW_POWER`, not the HID gate |
 | `mouse` | `destructiveHint` | Move (and optionally click) the mouse. Coords in `percent` (0.0-1.0, default), `pixel`, or `raw` kvmd. A **click** must carry `observed_frame_ref` from a prior `snapshot`; it's refused if the host rebooted/swapped media since (generation changed) so it can't land on a stale screen. Needs `KVM_PILOT_MCP_ALLOW_HID` |
+| `calibrate_mouse` | reversible write | Measure & store this host's mouse commanded→observed correction (#128): park → 5-point grid → fit → held-out verify. Afterwards `mouse` percent coords apply it transparently and report `calibrated: true`. Moves the live cursor ~10-30s on a **static** screen; pointer moves only, but gated like HID input (`KVM_PILOT_MCP_ALLOW_HID` + one approval for the whole run). Needs Pillow on the server (`pip install 'kvm-pilot[calibrate]'`); stored per (host, capture resolution) — a resolution change makes it stale, never applied |
 | `mount_iso` | reversible write | Mount an ISO (local path or URL; `usb=true` for a flash drive) as virtual media — needs `KVM_PILOT_MCP_ALLOW_MEDIA` + approval |
 | `eject` | reversible write | Detach virtual media (inverse of `mount_iso`) — needs `KVM_PILOT_MCP_ALLOW_MEDIA` + approval |
 | `ssh_exec` | `destructiveHint` | Run a command on the managed host's OS over SSH — **disabled unless the operator opts in** (`KVM_PILOT_MCP_ALLOW_SSH`). `host=` overrides the target at runtime |
@@ -59,7 +60,7 @@ per-invocation approvals below apply regardless of annotation.
 | read, open-world | ✅ | — | ✅ | ⚠️ | `classify_screen` — the *server-side vision backend* may be a cloud VLM (a local backend never leaves your network) |
 | read, open-world, timed | ✅ | — | — | ⚠️ | `wait_for_state` — same vision caveat, and a timed wait is not idempotent |
 | destructive | — | ⚠️ | — | — | `power` `type_text` `press_key` `send_shortcut` `ctrl_alt_delete` `mouse` `ssh_exec` `appliance_reboot` — not safely repeatable (a second reset reboots again) |
-| reversible write | — | — | ✅ | — | `eject` — undoable and convergent; still MEDIA-gated |
+| reversible write | — | — | ✅ | — | `eject` (undoable and convergent; still MEDIA-gated), `calibrate_mouse` (pointer moves only, re-run converges; still HID-gated) |
 | reversible write, open-world | — | — | ✅ | ⚠️ | `mount_iso` (may fetch an ISO by URL), `file_firmware_report` (files a GitHub issue; dedupes against existing ones, hence idempotent) — still gated by MEDIA / EXTERNAL_WRITE |
 
 Every tool result names the **host and driver it acted on**, and read-only

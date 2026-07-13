@@ -63,6 +63,7 @@ EXPECTED_ANNOTATIONS = {
     "appliance_reboot": DESTRUCTIVE,
     "mount_iso": REVERSIBLE_WRITE_REMOTE,
     "eject": REVERSIBLE_WRITE,
+    "calibrate_mouse": REVERSIBLE_WRITE,  # pointer moves only; HID-gated all the same
     "file_firmware_report": REVERSIBLE_WRITE_REMOTE,
 }
 EXPECTED_TOOLS = set(EXPECTED_ANNOTATIONS)

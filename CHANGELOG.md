@@ -4,6 +4,47 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0b4] — 2026-07-13
+
+**Beta 4 — mouse auto-calibration.** Fixes the oldest live-hardware complaint
+(#128, "the agent clicks where the button should be and misses"): kvm-pilot now
+measures each host's real commanded→observed mouse mapping and corrects for it
+transparently.
+
+### Added
+- **`calibrate-mouse` CLI / `calibrate_mouse` MCP tool** (#128) — parks the
+  cursor, commands a 5-point grid, locates the observed cursor by frame
+  differencing (the baseline cursor's departure mark is *identified from the
+  data* as the blob recurring across every frame — never assumed from the
+  commanded corner), least-squares fits per-axis scale+offset, and verifies a
+  **held-out** point within `--tolerance` (default 0.02 of the screen). The
+  correction is stored per (host, capture resolution) and goes stale on a
+  resolution change — it is then never applied. Failures are actionable
+  errors, never partial stores: non-static screens, invisible cursors,
+  implausible fits, and non-linear pointer acceleration are each named with a
+  remedy. Pointer moves only, but gated like HID input (one approval covers
+  the run); under dry-run the tool short-circuits explicitly, since pointer
+  moves are not `DESTRUCTIVE_OPS` and the driver guard wouldn't intercept
+  them. Snapshot decoding needs Pillow — the new `calibrate` extra
+  (`pip install 'kvm-pilot[calibrate]'`); the detection/fit math is stdlib and
+  fully tested with synthetic frames.
+- Percent-space `mouse` moves/clicks (MCP and CLI) apply the stored
+  calibration transparently and report `calibrated: true/false` per the
+  honest-sensor doctrine. Pixel/raw coordinates mean "exactly here" and are
+  never adjusted.
+
+### Fixed
+- `docs/cli.md` again satisfies its own "every command must appear here"
+  contract: added the missing `keep-awake`, `recover-hid`, `appliance`, and
+  `paths` rows (found by the #194 docs review) alongside the new
+  `calibrate-mouse`.
+- MCP registry publish: the release job's `mcp-publisher` download 404'd
+  (assets use Go arch names — `amd64`, not `x86_64`); mapped and
+  version-pinned. Registry validation learnings applied: description ≤ 100
+  chars; the namespace and the PyPI `mcp-name:` marker are case-sensitive
+  (`io.github.DustinTrap/kvm-pilot`) — this release's README carries the
+  corrected marker, so the listing goes live with b4 (#197).
+
 ## [0.1.0b3] — 2026-07-13
 
 **Beta 3 — the externally visible contracts release.** The safety internals

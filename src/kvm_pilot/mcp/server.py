@@ -16,7 +16,8 @@ SAFETY MODEL (see the co-located README.md for the operator-facing version):
     (``ssh_discover`` additionally requires ``confirm=true`` — an active
     network scan is read-only but not harmless).
   * The state-changing tools (``power``, the HID act tools ``type_text`` /
-    ``press_key`` / ``send_shortcut`` / ``ctrl_alt_delete`` / ``mouse``, the
+    ``press_key`` / ``send_shortcut`` / ``ctrl_alt_delete`` / ``mouse`` /
+    ``calibrate_mouse``, the
     media tools ``mount_iso`` / ``eject``, ``ssh_exec``, and the
     external-write tool ``file_firmware_report``) carry per-tool annotations
     (#195: ``destructiveHint`` for the irreversible ones; the reversible media
@@ -60,6 +61,12 @@ from mcp.server.fastmcp.exceptions import ToolError
 from mcp.types import ToolAnnotations
 
 from kvm_pilot import resolve_host
+from kvm_pilot.calibrate import (
+    CalibrationError,
+    maybe_apply,
+    run_calibration,
+    save_calibration,
+)
 from kvm_pilot.config import HostConfig
 from kvm_pilot.drivers import Capability, KVMDriver, make_driver_from_config
 from kvm_pilot.errors import CapabilityError, KVMPilotError, VisionError
@@ -978,9 +985,21 @@ def _mouse_stale(host: str, observed_frame_ref: str | None) -> str | None:
     return None
 
 
-def _run_mouse(kvm: KVMDriver, x: float, y: float, coord_space: str, button: str | None) -> None:
+def _run_mouse(
+    kvm: KVMDriver, x: float, y: float, coord_space: str, button: str | None,
+    host: str | None = None,
+) -> bool:
+    """Execute the move(+click); returns whether a stored calibration was applied.
+
+    Percent coords route through the per-host correction when one exists for
+    the current resolution (#128) — pixel/raw coords are the caller saying
+    "exactly here" and are never adjusted.
+    """
+    calibrated = False
     hid = cast("HID", kvm)
     if coord_space == "percent":
+        if host is not None:
+            x, y, calibrated = maybe_apply(host, kvm, x, y)
         hid.mouse_move(act.pct_to_kvmd(x), act.pct_to_kvmd(y))
     elif coord_space == "raw":
         hid.mouse_move(int(x), int(y))
@@ -993,6 +1012,7 @@ def _run_mouse(kvm: KVMDriver, x: float, y: float, coord_space: str, button: str
         move_px(int(x), int(y))
     if button is not None:
         hid.mouse_click(button)
+    return calibrated
 
 
 @mcp.tool(annotations=_DESTRUCTIVE)
@@ -1039,17 +1059,91 @@ async def mouse(
         receipt, denied = _consume_receipt(inv, approval)
         if denied is not None:
             return {**_provenance(cfg), **denied}
+        calibrated = False
         if not inv.dry_run:
             try:
-                _run_mouse(kvm, x, y, coord_space, button)
+                calibrated = _run_mouse(kvm, x, y, coord_space, button, host=cfg.host)
             except Exception as exc:
                 act.audit_dispatch_error(inv, receipt, exc)
                 raise
         detail = f"moved to ({x}, {y}) [{coord_space}]" + (f" + {button} click" if button else "")
         return {
             **_provenance(cfg),
-            **act.result(inv, approval, detail=detail, extra={"coord_space": coord_space},
+            **act.result(inv, approval, detail=detail,
+                         extra={"coord_space": coord_space, "calibrated": calibrated},
                          receipt=receipt),
+        }
+
+
+@mcp.tool(annotations=_REVERSIBLE_WRITE)
+async def calibrate_mouse(
+    ctx: Context,
+    confirm: bool = False,
+    tolerance: float = 0.02,
+    profile: str | None = None,
+) -> dict:
+    """Measure and store this host's mouse commanded→observed correction (#128).
+
+    Fixes "the agent clicks where the button should be and misses": commands
+    absolute moves to known points, locates the observed cursor by frame
+    differencing, fits a per-axis scale+offset, verifies a held-out point
+    within ``tolerance`` (screen fraction), and stores the correction per
+    (host, capture resolution). Afterwards the ``mouse`` tool applies it
+    transparently to percent coordinates and reports ``calibrated: true``.
+
+    Pointer moves only — no clicks, no keystrokes — but it visibly moves the
+    live console's cursor for ~10-30s, so it is gated like HID input
+    (``KVM_PILOT_MCP_ALLOW_HID`` + approval; one approval covers the whole
+    run). Preconditions: a live video signal, a **static** screen (desktop,
+    BIOS menu, or login prompt — not video playback), and a visible cursor.
+    Needs Pillow on the *server* (``pip install 'kvm-pilot[calibrate]'``).
+    Failures are actionable errors, not partial stores; a stored calibration
+    for a different capture resolution is stale and is never applied.
+    """
+    with _driver(profile, confirm=allow_all, capability=Capability.HID) as (cfg, kvm):
+        if not kvm.supports(Capability.VIDEO):
+            raise ToolError(
+                f"the '{cfg.driver}' driver has no video capture — calibration "
+                "observes the cursor on snapshots, so it needs a capture device"
+            )
+        inv = act.new_invocation(
+            host=cfg.host, profile=profile, tool="calibrate_mouse",
+            effect=EffectClass.HID_INPUT, op="hid.mouse_calibrate", transport="hid.mouse",
+            args={"tolerance": tolerance}, dry_run=_dry_run(),
+        )
+        approval = await act.approve_or_deny(ctx, inv, confirm=confirm)
+        if not approval.approved:
+            return {**_provenance(cfg), **act.result(inv, approval)}
+        receipt, denied = _consume_receipt(inv, approval)
+        if denied is not None:
+            return {**_provenance(cfg), **denied}
+        if inv.dry_run:
+            # Pointer moves aren't in DESTRUCTIVE_OPS, so the driver's dry-run
+            # guard would NOT intercept them — skip explicitly.
+            return {
+                **_provenance(cfg),
+                **act.result(inv, approval, detail="dry-run: would calibrate", receipt=receipt),
+            }
+        try:
+            cal = await anyio.to_thread.run_sync(
+                lambda: run_calibration(kvm, host=cfg.host, tolerance=tolerance)
+            )
+            stored = save_calibration(cal)
+        except CalibrationError as exc:
+            act.audit_dispatch_error(inv, receipt, exc)
+            raise ToolError(str(exc)) from exc
+        except Exception as exc:
+            act.audit_dispatch_error(inv, receipt, exc)
+            raise
+        return {
+            **_provenance(cfg),
+            **act.result(
+                inv, approval,
+                detail=f"calibrated: residual {cal.residual:.3f} of screen "
+                       f"(tolerance {tolerance}) at {cal.resolution}",
+                extra={"calibration": cal.to_dict(), "stored": str(stored)},
+                receipt=receipt,
+            ),
         }
 
 

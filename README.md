@@ -1,4 +1,4 @@
-<!-- mcp-name: io.github.dustintrap/kvm-pilot -->
+<!-- mcp-name: io.github.DustinTrap/kvm-pilot -->
 
 # kvm-pilot
 
@@ -114,7 +114,7 @@ pip install "kvm-pilot[totp,ws] @ git+https://github.com/DustinTrap/kvm-pilot"
 `kvm-pilot-mcp` server in your agent, credentials, and sample prompts. The
 server is published to the official
 [MCP registry](https://github.com/modelcontextprotocol/registry) as
-**`io.github.dustintrap/kvm-pilot`** (from the first release carrying this
+**`io.github.DustinTrap/kvm-pilot`** (from the first release carrying this
 README), so registry-aware hosts can discover and install it by name. The
 Python/CLI quickstart below is for scripting.
 

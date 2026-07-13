@@ -33,8 +33,13 @@ support (`kvm-pilot capabilities` lists them, offline).
 | `power-cycle` | ⚡ | power | Hard power cycle (off-hard → on). |
 | `type` | ⚡ | hid | Type text on the host console; `--slow` for finicky firmware. |
 | `key` | ⚡ | hid | Press a key (`Enter`, `F2`) or send a chord of kvmd key codes (`ControlLeft+AltLeft+F2`, #112). |
-| `mouse-move` | ⚡ | hid | Absolute mouse move; `--space percent` (default, 0.0–1.0, resolution-proof) \| `pixel` \| `raw` (#124). |
-| `click` | ⚡ | hid | Mouse click (`left`/`right`/`middle`); `--at X Y` moves first, `--double` (#124). |
+| `mouse-move` | ⚡ | hid | Absolute mouse move; `--space percent` (default, 0.0–1.0, resolution-proof) \| `pixel` \| `raw` (#124). Percent coords apply the stored per-host calibration when present (#128) and say so. |
+| `click` | ⚡ | hid | Mouse click (`left`/`right`/`middle`); `--at X Y` moves first, `--double` (#124). `--at` percent coords apply the stored calibration (#128). |
+| `calibrate-mouse` | ⚡ | hid, video | Measure & store this host's commanded→observed mouse correction (#128): park → 5-point grid → least-squares fit → held-out verify (`--tolerance`, default 0.02 of the screen). Moves the live cursor ~10–30s on a **static** screen; needs Pillow (`pip install 'kvm-pilot[calibrate]'`). Stored per (host, capture resolution); a resolution change makes it stale (never applied). |
+| `keep-awake` | | hid | Toggle the on-device mouse jiggler (`on`/`off`) so the target display doesn't DPMS-sleep between steps (#159). |
+| `recover-hid` | | hid | Reset/re-enumerate the USB HID gadget when keystrokes aren't reaching the target (#160). |
+| `appliance` | ⚡ (reboot) | — (appliance_ssh) | The KVM appliance's **own** OS (#162): `loadavg` (read-only diagnostics) or `reboot` (gated recovery; drops KVM control ~60s, target power untouched). |
+| `paths` | | — | Show which independent recovery paths are live (kvmd-REST / appliance-SSH / target-SSH / OOB power / console-HID), labeled by failure domain — the lockout-exposure view (#162). `--json`. |
 | `media-list` | | virtual_media | List images already on the KVM's MSD storage — check before downloading/uploading an ISO (#127). |
 | `mount` | ⚡ | virtual_media | Mount an ISO (local path or URL); verifies the media actually reports online (#77). `--name`, `--usb`. |
 | `eject` | ⚡ | virtual_media | Detach virtual media (inverse of `mount`). |
