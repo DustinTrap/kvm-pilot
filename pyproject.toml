@@ -46,6 +46,10 @@ dependencies = ["mcp>=1.10,<2", "websocket-client>=1.9.0"]
 
 [project.optional-dependencies]
 totp = ["pyotp>=2.10.0"]
+# Mouse auto-calibration (#128): Pillow decodes snapshots to locate the cursor.
+# The calibrate-mouse CLI/MCP surface ships in base and errors actionably
+# without it; the detection/fit math is stdlib and tested without Pillow.
+calibrate = ["Pillow>=10.0"]
 # `ws` retained for back-compat (`pip install kvm-pilot[ws]`); websocket-client is
 # now a base dependency (see above), so this is a no-op alias.
 ws = ["websocket-client>=1.9.0"]

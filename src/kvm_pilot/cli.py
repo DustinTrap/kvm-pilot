@@ -36,6 +36,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from .__about__ import __version__
+from .calibrate import CalibrationError, maybe_apply, run_calibration, save_calibration
 from .client import KVMClient
 from .config import resolve_host
 from .drivers import make_driver_from_config
@@ -370,29 +371,61 @@ def cmd_key(args) -> int:
     return 0
 
 
-def _mouse_to(kvm, x: float, y: float, space: str) -> None:
+def _mouse_to(kvm, x: float, y: float, space: str) -> bool:
+    """Move; returns whether a stored per-host calibration adjusted the coords.
+
+    Only percent coords are corrected (#128) — pixel/raw mean "exactly here".
+    """
     if space == "percent":
+        x, y, calibrated = maybe_apply(getattr(kvm, "host", ""), kvm, x, y)
         kvm.mouse_move_percent(x, y)
-    elif space == "pixel":
+        return calibrated
+    if space == "pixel":
         kvm.mouse_move_pixels(int(x), int(y))
     else:  # raw kvmd -32768..32767, (0, 0) at screen center
         kvm.mouse_move(int(x), int(y))
+    return False
 
 
 def cmd_mouse_move(args) -> int:
     kvm = _rich_client(args, Capability.HID)
-    _mouse_to(kvm, args.x, args.y, args.space)
-    print(f"mouse: moved to ({args.x}, {args.y}) [{args.space}]")
+    calibrated = _mouse_to(kvm, args.x, args.y, args.space)
+    suffix = " (calibrated)" if calibrated else ""
+    print(f"mouse: moved to ({args.x}, {args.y}) [{args.space}]{suffix}")
     return 0
 
 
 def cmd_click(args) -> int:
     kvm = _rich_client(args, Capability.HID)
+    calibrated = False
     if args.at:
-        _mouse_to(kvm, args.at[0], args.at[1], args.space)
+        calibrated = _mouse_to(kvm, args.at[0], args.at[1], args.space)
     kvm.mouse_click(args.button, double=args.double)
     where = f" at ({args.at[0]}, {args.at[1]}) [{args.space}]" if args.at else ""
-    print(f"mouse: {args.button} {'double-click' if args.double else 'click'}{where}")
+    suffix = " (calibrated)" if calibrated else ""
+    print(f"mouse: {args.button} {'double-click' if args.double else 'click'}{where}{suffix}")
+    return 0
+
+
+def cmd_calibrate_mouse(args) -> int:
+    """Measure & store the commanded→observed mouse correction (#128)."""
+    kvm = _rich_client(args, Capability.HID)
+    if not kvm.supports(Capability.VIDEO):
+        print("this driver has no video capture — calibration observes the cursor "
+              "on snapshots, so it needs a capture device", file=sys.stderr)
+        return 1
+    if args.dry_run:
+        # Pointer moves aren't DESTRUCTIVE_OPS, so the driver's dry-run guard
+        # would not intercept them — short-circuit here instead.
+        print("DRY-RUN: would calibrate (park → 5-point grid → held-out verify)")
+        return 0
+    try:
+        cal = run_calibration(kvm, host=getattr(kvm, "host", ""), tolerance=args.tolerance)
+    except CalibrationError as exc:
+        print(f"calibration failed: {exc}", file=sys.stderr)
+        return 1
+    stored = save_calibration(cal)
+    print(json.dumps({"calibration": cal.to_dict(), "stored": str(stored)}, indent=2))
     return 0
 
 
@@ -1347,6 +1380,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--double", action="store_true", help="Double-click")
     _add_common(p)
     p.set_defaults(func=cmd_click, _preflight=True)
+
+    p = sub.add_parser("calibrate-mouse",
+                       help="Measure & store this host's mouse coordinate correction (#128) — "
+                            "moves the live cursor ~10-30s on a static screen; needs Pillow "
+                            "(pip install 'kvm-pilot[calibrate]')")
+    p.add_argument("--tolerance", type=float, default=0.02,
+                   help="Max held-out verification miss, as a screen fraction (default 0.02)")
+    _add_common(p)
+    p.set_defaults(func=cmd_calibrate_mouse, _preflight=True)
 
     p = sub.add_parser("media-list",
                        help="List images already on the KVM's virtual-media storage (read-only)")

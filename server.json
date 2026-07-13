@@ -1,18 +1,18 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
-  "name": "io.github.dustintrap/kvm-pilot",
-  "description": "Drive physical machines through IP-KVMs and Redfish BMCs: verified power control, HID, screen vision, virtual media — effect-gated with signed approval receipts and an audit trail.",
+  "name": "io.github.DustinTrap/kvm-pilot",
+  "description": "AI-agent control of physical machines via IP-KVM, Redfish BMC, and SSH: gated, verified, audited.",
   "repository": {
     "url": "https://github.com/DustinTrap/kvm-pilot",
     "source": "github"
   },
-  "version": "0.1.0b3",
+  "version": "0.1.0b4",
   "packages": [
     {
       "registryType": "pypi",
       "registryBaseUrl": "https://pypi.org",
       "identifier": "kvm-pilot",
-      "version": "0.1.0b3",
+      "version": "0.1.0b4",
       "transport": {
         "type": "stdio"
       },
