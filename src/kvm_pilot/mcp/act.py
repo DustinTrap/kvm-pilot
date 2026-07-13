@@ -81,7 +81,14 @@ def gate_enabled(effect: EffectClass) -> bool:
     An effect with no ``EFFECT_ENABLE_FLAG`` entry is fail-closed: a new effect
     class must get its own operator flag, never silently borrow another gate
     (#190 — previously an unmapped effect fell back to the CONFIG flag).
+
+    ``KVM_PILOT_MCP_READ_ONLY`` force-closes every effect gate regardless of
+    the ``ALLOW_*`` flags (#196). In read-only mode the state-changing tools
+    are not even registered; this is the independent second layer, so a
+    registration bypass still fails closed instead of mutating.
     """
+    if env_flag("KVM_PILOT_MCP_READ_ONLY"):
+        return False
     if effect not in EFFECT_ENABLE_FLAG:
         return False
     flag = EFFECT_ENABLE_FLAG[effect]

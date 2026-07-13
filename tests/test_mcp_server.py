@@ -24,38 +24,48 @@ pytest.importorskip("mcp")
 from mcp import ClientSession, StdioServerParameters  # noqa: E402
 from mcp.client.stdio import stdio_client  # noqa: E402
 
-EXPECTED_TOOLS = {
-    "info",
-    "capabilities",
-    "support_matrix",
-    "power_state",
-    "logs",
-    "snapshot",
-    "classify_screen",
-    "wait_for_state",
-    "power",
-    "healthcheck",
-    "ssh_reachable",
-    "ssh_exec",
-    "ssh_discover",
-    "type_text",
-    "press_key",
-    "send_shortcut",
-    "ctrl_alt_delete",
-    "mouse",
-    "mount_iso",
-    "eject",
-    "list_virtual_media",
-    "appliance_status",
-    "appliance_reboot",
-    "access_paths",
-    "file_firmware_report",
+# Expected annotations per tool, as (readOnlyHint, destructiveHint,
+# idempotentHint, openWorldHint). All four are asserted explicitly (#195):
+# clients build approval/parallelism policy from these bits and the spec
+# defaults are punitive, so a new tool registered without a full annotation
+# set must fail here, not ship. Rationale per profile lives next to the
+# ToolAnnotations constants in ``kvm_pilot/mcp/server.py`` and in the
+# annotations table in ``kvm_pilot/mcp/README.md``.
+READ = (True, False, True, False)
+READ_VISION = (True, False, True, True)  # server-side vision may be a cloud VLM
+READ_VISION_WAIT = (True, False, False, True)  # ...and a timed wait isn't idempotent
+DESTRUCTIVE = (False, True, False, False)
+REVERSIBLE_WRITE = (False, False, True, False)
+REVERSIBLE_WRITE_REMOTE = (False, False, True, True)
+
+EXPECTED_ANNOTATIONS = {
+    "info": READ,
+    "healthcheck": READ,
+    "capabilities": READ,
+    "support_matrix": READ,
+    "power_state": READ,
+    "logs": READ,
+    "snapshot": READ,
+    "classify_screen": READ_VISION,
+    "wait_for_state": READ_VISION_WAIT,
+    "list_virtual_media": READ,
+    "ssh_reachable": READ,
+    "ssh_discover": READ,
+    "appliance_status": READ,
+    "access_paths": READ,
+    "power": DESTRUCTIVE,
+    "type_text": DESTRUCTIVE,
+    "press_key": DESTRUCTIVE,
+    "send_shortcut": DESTRUCTIVE,
+    "ctrl_alt_delete": DESTRUCTIVE,
+    "mouse": DESTRUCTIVE,
+    "ssh_exec": DESTRUCTIVE,
+    "appliance_reboot": DESTRUCTIVE,
+    "mount_iso": REVERSIBLE_WRITE_REMOTE,
+    "eject": REVERSIBLE_WRITE,
+    "file_firmware_report": REVERSIBLE_WRITE_REMOTE,
 }
-# Tools that change state (readOnlyHint=False, destructiveHint=True).
-DESTRUCTIVE_TOOLS = {
-    "power", "ssh_exec", "type_text", "press_key", "send_shortcut", "ctrl_alt_delete",
-    "mouse", "mount_iso", "eject", "appliance_reboot", "file_firmware_report",
-}
+EXPECTED_TOOLS = set(EXPECTED_ANNOTATIONS)
 
 
 @pytest.fixture()
@@ -133,12 +143,71 @@ def test_handshake_lists_annotated_tools(config_file):
     tools = run_session(server_env(config_file), interact)
     by_name = {t.name: t for t in tools}
     assert set(by_name) == EXPECTED_TOOLS
-    for name in EXPECTED_TOOLS - DESTRUCTIVE_TOOLS:
-        assert by_name[name].annotations.readOnlyHint is True, name
-    for name in DESTRUCTIVE_TOOLS:
+    for name, expected in EXPECTED_ANNOTATIONS.items():
         ann = by_name[name].annotations
-        assert ann.readOnlyHint is False, name
-        assert ann.destructiveHint is True, name
+        assert ann is not None, name
+        got = (ann.readOnlyHint, ann.destructiveHint, ann.idempotentHint, ann.openWorldHint)
+        assert got == expected, f"{name}: annotations {got} != expected {expected}"
+
+
+# Read-only launch mode (#196): the tools that survive the registration filter.
+# ssh_discover is annotated read-only but is an active network scan — excluded
+# from the least-privilege posture.
+READ_ONLY_MODE_TOOLS = {
+    name for name, (ro, _de, _idem, _ow) in EXPECTED_ANNOTATIONS.items() if ro
+} - {"ssh_discover"}
+
+
+def test_read_only_mode_registers_only_read_tools(config_file):
+    """#196 layer 1: under READ_ONLY the destructive tools don't exist at all,
+    even with ALLOW_* flags deliberately set — READ_ONLY wins."""
+
+    async def interact(session):
+        tools = (await session.list_tools()).tools
+        health = await session.call_tool("healthcheck", {})
+        power = await session.call_tool("power", {"action": "off", "confirm": True})
+        return tools, health, power
+
+    env = server_env(
+        config_file,
+        KVM_PILOT_MCP_READ_ONLY="1",
+        KVM_PILOT_MCP_ALLOW_POWER="1",
+        KVM_PILOT_MCP_ALLOW_HID="1",
+    )
+    tools, health, power = run_session(env, interact)
+    assert {t.name for t in tools} == READ_ONLY_MODE_TOOLS
+    assert result_json(health)["read_only"] is True
+    assert power.isError  # never registered, so the call can only error
+
+
+def test_read_only_mode_forces_gates_closed(monkeypatch):
+    """#196 layer 2: every effect gate reads closed even with every ALLOW_* set,
+    so a tool that slipped past the registration filter is still gate-denied."""
+    from kvm_pilot.mcp import act
+    from kvm_pilot.safety import EffectClass
+
+    for flag in act.EFFECT_ENABLE_FLAG.values():
+        if flag is not None:
+            monkeypatch.setenv(flag, "1")
+    monkeypatch.setenv("KVM_PILOT_MCP_READ_ONLY", "1")
+    assert all(not act.gate_enabled(effect) for effect in EffectClass)
+
+
+def test_read_only_mode_driver_denies_destructive(monkeypatch, config_file):
+    """#196 layer 3: even handed an allow-all confirm, ``_driver`` builds the
+    driver deny-all in read-only mode — a destructive call raises, never sends."""
+    from kvm_pilot.mcp import server as server_mod
+    from kvm_pilot.safety import SafetyError, allow_all
+
+    # DEFAULT_CONFIG_PATH is resolved at import time, so in-process we patch the
+    # module attribute (the stdio tests set KVM_PILOT_CONFIG pre-spawn instead).
+    monkeypatch.setattr("kvm_pilot.config.DEFAULT_CONFIG_PATH", config_file)
+    monkeypatch.setenv("KVM_PILOT_MCP_READ_ONLY", "1")
+    monkeypatch.setenv("KVM_PILOT_SKIP_HEALTHCHECK", "1")
+    monkeypatch.delenv("KVM_PILOT_MCP_DRY_RUN", raising=False)
+    with pytest.raises(SafetyError):
+        with server_mod._driver("fakebox", confirm=allow_all) as (_cfg, kvm):
+            kvm.power_off()
 
 
 def test_healthcheck_tool_returns_report(config_file):

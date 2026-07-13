@@ -1,3 +1,5 @@
+<!-- mcp-name: io.github.dustintrap/kvm-pilot -->
+
 # kvm-pilot
 
 **AI-driven bare-metal control for IP-KVMs (PiKVM, the GL.iNet GLKVM fork GL-RM1 / GL-RM1PE, BliKVM) and Redfish BMCs (iDRAC, iLO, OpenBMC).**
@@ -110,6 +112,10 @@ pip install "kvm-pilot[totp,ws] @ git+https://github.com/DustinTrap/kvm-pilot"
 **Driving a KVM from an AI agent (MCP)?** Start with the
 [Getting started guide](https://github.com/DustinTrap/kvm-pilot/blob/main/docs/getting-started.md) — it covers enabling the
 `kvm-pilot-mcp` server in your agent, credentials, and sample prompts. The
+server is published to the official
+[MCP registry](https://github.com/modelcontextprotocol/registry) as
+**`io.github.dustintrap/kvm-pilot`** (from the first release carrying this
+README), so registry-aware hosts can discover and install it by name. The
 Python/CLI quickstart below is for scripting.
 
 ## Quickstart

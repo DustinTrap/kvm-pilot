@@ -4,7 +4,44 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.0b3] — 2026-07-13
+
+**Beta 3 — the externally visible contracts release.** The safety internals
+(effect gates, signed receipts, typed outcomes, audit trail) were already ahead
+of the MCP ecosystem; this release makes them *legible from the outside*:
+precise per-tool annotations that clients can build policy on, a true
+least-privilege read-only launch mode enforced below the tool layer, and an
+official MCP registry listing. Distilled from the 2026-07-13 competitive gap
+analysis (#194).
+
+### Added
+- **`KVM_PILOT_MCP_READ_ONLY` launch mode** (#196) — the least-privilege
+  posture for first contact with a fleet: only read-only tools are registered
+  (minus `ssh_discover`, an active scan), every effect gate is force-closed
+  regardless of `ALLOW_*`, and every driver is built with a deny-all confirm,
+  so even a registration bypass fails closed instead of mutating (tool
+  filtering alone is not enforcement). Results carry `read_only: true`. The
+  documented trust ladder is now READ_ONLY → DRY_RUN → per-effect `ALLOW_*`,
+  and the getting-started guide starts new users on the first rung.
+- **Official MCP registry listing** (#197) — `server.json` at the repo root
+  names the server `io.github.dustintrap/kvm-pilot`; the release workflow
+  gains a best-effort `publish-mcp-registry` job (GitHub OIDC, runs after the
+  PyPI publish, version-synced to the release tag) and the README carries the
+  `mcp-name:` ownership marker the registry validates against PyPI. The
+  listing goes live with the first release that ships this README.
+
+### Changed
+- **Per-tool MCP annotations** (#195) — every tool now declares all four MCP
+  hints explicitly (`readOnly`/`destructive`/`idempotent`/`openWorld`), and a
+  regression test fails CI if a tool ships without them (clients build
+  approval/parallelism policy from these bits, and the spec defaults treat an
+  unannotated tool as maximally dangerous and internet-reaching). Notable
+  precision changes: `mount_iso`/`eject`/`file_firmware_report` are now
+  annotated as reversible (non-destructive) writes — their MEDIA /
+  EXTERNAL_WRITE gates and approvals are unchanged; `classify_screen` /
+  `wait_for_state` are flagged open-world because the *server-side vision
+  backend* may be a cloud VLM (a local backend never leaves the network); all
+  LAN-only tools now say so (`openWorldHint=false`).
 
 ### Fixed
 - The README (PyPI long description) used relative links for the

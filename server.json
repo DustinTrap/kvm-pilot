@@ -1,0 +1,59 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
+  "name": "io.github.dustintrap/kvm-pilot",
+  "description": "Drive physical machines through IP-KVMs and Redfish BMCs: verified power control, HID, screen vision, virtual media — effect-gated with signed approval receipts and an audit trail.",
+  "repository": {
+    "url": "https://github.com/DustinTrap/kvm-pilot",
+    "source": "github"
+  },
+  "version": "0.1.0b3",
+  "packages": [
+    {
+      "registryType": "pypi",
+      "registryBaseUrl": "https://pypi.org",
+      "identifier": "kvm-pilot",
+      "version": "0.1.0b3",
+      "transport": {
+        "type": "stdio"
+      },
+      "environmentVariables": [
+        {
+          "name": "KVM_PILOT_PROFILE",
+          "description": "Profile name from ~/.config/kvm-pilot/config.toml naming the KVM/BMC to target",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "KVM_PILOT_MCP_READ_ONLY",
+          "description": "Least-privilege posture: only read-only tools are registered; effect gates force-closed. Recommended for first contact (set to 1)",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "KVM_PILOT_MCP_DRY_RUN",
+          "description": "Rehearsal posture: destructive calls are logged, never sent (set to 1)",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "KVM_PILOT_MCP_ALLOW_POWER",
+          "description": "Operator opt-in enabling power control of the managed host (per-effect gate; see also _ALLOW_HID, _ALLOW_MEDIA, _ALLOW_SSH, _ALLOW_APPLIANCE, _ALLOW_EXTERNAL_WRITE)",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "KVM_PILOT_PASSWD",
+          "description": "Device password when not using a config-file profile (KVM_PILOT_HOST / KVM_PILOT_USER accompany it)",
+          "isRequired": false,
+          "isSecret": true
+        },
+        {
+          "name": "ANTHROPIC_API_KEY",
+          "description": "Optional: enables server-side vision for classify_screen / wait_for_state; without it, classification falls back to the calling agent",
+          "isRequired": false,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}

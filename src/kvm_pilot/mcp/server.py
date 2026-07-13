@@ -15,11 +15,13 @@ SAFETY MODEL (see the co-located README.md for the operator-facing version):
     deny-all confirm callback and carry a ``readOnlyHint`` tool annotation
     (``ssh_discover`` additionally requires ``confirm=true`` — an active
     network scan is read-only but not harmless).
-  * The destructive tools (``power``, the HID act tools ``type_text`` /
+  * The state-changing tools (``power``, the HID act tools ``type_text`` /
     ``press_key`` / ``send_shortcut`` / ``ctrl_alt_delete`` / ``mouse``, the
     media tools ``mount_iso`` / ``eject``, ``ssh_exec``, and the
-    external-write tool ``file_firmware_report``) carry
-    ``destructiveHint`` and are DISABLED until the operator opts the tool's
+    external-write tool ``file_firmware_report``) carry per-tool annotations
+    (#195: ``destructiveHint`` for the irreversible ones; the reversible media
+    and external-write tools are annotated non-destructive but stay gated all
+    the same) and are DISABLED until the operator opts the tool's
     *effect class* in via an env flag in the server's own environment
     (``KVM_PILOT_MCP_ALLOW_POWER`` / ``_ALLOW_HID`` / ``_ALLOW_MEDIA`` /
     ``_ALLOW_SSH`` / ``_ALLOW_EXTERNAL_WRITE``). An effect class with no
@@ -82,8 +84,48 @@ if TYPE_CHECKING:
 mcp = FastMCP("kvm-pilot")
 _log = logging.getLogger("kvm_pilot.mcp")
 
-_READ_ONLY = ToolAnnotations(readOnlyHint=True)
-_DESTRUCTIVE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False)
+# Tool annotations (#195): every tool declares all four hints explicitly,
+# because clients act on them (auto-approval and parallel dispatch of read-only
+# tools, confirmation UI keyed off destructiveHint) and the spec defaults are
+# punitive — an unset destructiveHint reads as True and an unset openWorldHint
+# reads as "reaches the internet". Hints advise well-behaved clients; the
+# ALLOW_* effect gates in act.py remain the security boundary.
+#
+#   _READ            pure reads against the device/ledger on the operator's own
+#                    network.
+#   _READ_VISION     read-only, but the server-side vision backend may be a
+#                    cloud VLM (openWorldHint=True is the worst case; with a
+#                    local backend nothing leaves the network). wait_for_state
+#                    is additionally time-dependent, so its variant drops the
+#                    idempotent hint.
+#   _DESTRUCTIVE     state-changing and not safely repeatable (a second reset
+#                    reboots again; a second keystroke types again).
+#   _REVERSIBLE_*    state-changing but undoable and convergent (eject of
+#                    already-ejected media is a no-op; re-mounting the same
+#                    image yields the same attached state). Still gated by
+#                    effect class + per-invocation approval — destructiveHint
+#                    speaks to irreversibility, not to whether we gate it.
+#                    The _REMOTE variant may leave the operator's network
+#                    (mount by URL; filing a GitHub issue — which dedupes
+#                    against existing issues, hence idempotent).
+_READ = ToolAnnotations(
+    readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
+)
+_READ_VISION = ToolAnnotations(
+    readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True
+)
+_READ_VISION_WAIT = ToolAnnotations(
+    readOnlyHint=True, destructiveHint=False, idempotentHint=False, openWorldHint=True
+)
+_DESTRUCTIVE = ToolAnnotations(
+    readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False
+)
+_REVERSIBLE_WRITE = ToolAnnotations(
+    readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False
+)
+_REVERSIBLE_WRITE_REMOTE = ToolAnnotations(
+    readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True
+)
 
 _POWER_ACTIONS = {
     "on": "power_on",
@@ -99,6 +141,41 @@ _env_flag = act.env_flag
 
 def _dry_run() -> bool:
     return _env_flag("KVM_PILOT_MCP_DRY_RUN")
+
+
+def _read_only_mode() -> bool:
+    """Least-privilege launch posture (#196): destructive tools don't exist.
+
+    Distinct from dry-run (a rehearsal mode — destructive tools stay registered
+    and log what they *would* send). Read-only wins over ``ALLOW_*`` and over
+    dry-run; the trust ladder is READ_ONLY → DRY_RUN → open effect gates one at
+    a time.
+    """
+    return _env_flag("KVM_PILOT_MCP_READ_ONLY")
+
+
+# ssh_discover is annotated read-only (it changes nothing) but it is an active
+# network scan — it has no place in the least-privilege intake/demo posture.
+_READ_ONLY_MODE_EXCLUDED = {"ssh_discover"}
+
+
+def _apply_read_only_mode() -> None:
+    """Under ``KVM_PILOT_MCP_READ_ONLY``, unregister every non-read-only tool.
+
+    Annotation-driven, like kubernetes-mcp-server's ``--read-only``: a tool
+    survives only if it declares ``readOnlyHint=True`` (and isn't excluded
+    above). This is the visible layer; ``gate_enabled`` force-closes every
+    effect class and ``_driver`` builds drivers with a deny-all confirm as the
+    independent layers beneath it, so a filter bypass fails closed rather than
+    mutating (the CVE-2026-46519 lesson: tool filtering alone is not
+    enforcement).
+    """
+    if not _read_only_mode():
+        return
+    for tool in list(mcp._tool_manager.list_tools()):
+        ann = tool.annotations
+        if ann is None or ann.readOnlyHint is not True or tool.name in _READ_ONLY_MODE_EXCLUDED:
+            mcp.remove_tool(tool.name)
 
 
 @contextmanager
@@ -124,6 +201,11 @@ def _driver(
     """
     act.enforce_allowlist(profile)  # fail-closed KVM_PILOT_MCP_PROFILES; raises ToolError
     cfg = resolve_host(profile or os.environ.get("KVM_PILOT_PROFILE"))
+    if _read_only_mode():
+        # Defense in depth (#196): in read-only mode every driver denies all
+        # destructive calls at the safety layer, so even a tool that slipped
+        # past the registration filter cannot mutate the target.
+        confirm = deny_all
     kvm = make_driver_from_config(cfg, confirm=confirm, dry_run=_dry_run())
     try:
         if capability is not None and not kvm.supports(capability):
@@ -189,6 +271,8 @@ def _provenance(cfg: HostConfig) -> dict:
     out: dict = {"host": cfg.host, "driver": cfg.driver}
     if _dry_run():
         out["dry_run"] = True
+    if _read_only_mode():
+        out["read_only"] = True
     return out
 
 
@@ -224,14 +308,14 @@ def _vision_backend() -> VisionBackend:
 # -- tools --------------------------------------------------------------------
 
 
-@mcp.tool(annotations=_READ_ONLY)
+@mcp.tool(annotations=_READ)
 def info(profile: str | None = None) -> dict:
     """Return device / system info (read-only)."""
     with _driver(profile, confirm=deny_all, capability=Capability.SYSTEM_INFO) as (cfg, kvm):
         return {**_provenance(cfg), "info": cast("SystemInfo", kvm).get_info()}
 
 
-@mcp.tool(annotations=_READ_ONLY)
+@mcp.tool(annotations=_READ)
 def healthcheck(profile: str | None = None) -> dict:
     """Audit the device's readiness/recovery, security posture, and firmware (#80).
 
@@ -246,7 +330,7 @@ def healthcheck(profile: str | None = None) -> dict:
         return {**_provenance(cfg), **run_healthcheck(kvm).to_dict()}
 
 
-@mcp.tool(annotations=_READ_ONLY)
+@mcp.tool(annotations=_READ)
 def capabilities(profile: str | None = None) -> dict:
     """List the capabilities the target's driver supports (read-only, offline).
 
@@ -279,7 +363,7 @@ def capabilities(profile: str | None = None) -> dict:
         }
 
 
-@mcp.tool(annotations=_READ_ONLY)
+@mcp.tool(annotations=_READ)
 def support_matrix(
     vendor: str | None = None,
     product: str | None = None,
@@ -310,7 +394,7 @@ def support_matrix(
     }
 
 
-@mcp.tool(annotations=_READ_ONLY)
+@mcp.tool(annotations=_READ)
 def power_state(profile: str | None = None) -> dict:
     """Return whether the host is powered on, plus ATX detail where the driver has it
     (read-only)."""
@@ -322,7 +406,7 @@ def power_state(profile: str | None = None) -> dict:
         return state
 
 
-@mcp.tool(annotations=_READ_ONLY)
+@mcp.tool(annotations=_READ)
 def logs(seek: int = 0, profile: str | None = None) -> dict:
     """Return the device/host event log as text (read-only).
 
@@ -336,7 +420,7 @@ def logs(seek: int = 0, profile: str | None = None) -> dict:
         return {**_provenance(cfg), "log": cast("Logs", kvm).get_logs(seek=seek)}
 
 
-@mcp.tool(annotations=_READ_ONLY)
+@mcp.tool(annotations=_READ)
 def snapshot(profile: str | None = None):
     """Capture the current KVM screen (read-only).
 
@@ -376,7 +460,7 @@ def snapshot(profile: str | None = None):
         return [json.dumps(payload), Image(data=img, format="jpeg")]
 
 
-@mcp.tool(annotations=_READ_ONLY)
+@mcp.tool(annotations=_READ_VISION)
 def classify_screen(hint: str = "", profile: str | None = None):
     """Classify the current screen's boot/run phase (read-only).
 
@@ -492,7 +576,7 @@ def _final_frame_ref(cfg: HostConfig, kvm: KVMDriver, state) -> str | None:
         return None
 
 
-@mcp.tool(annotations=_READ_ONLY)
+@mcp.tool(annotations=_READ_VISION_WAIT)
 async def wait_for_state(
     ctx: Context,
     phase: str,
@@ -969,7 +1053,7 @@ async def mouse(
         }
 
 
-@mcp.tool(annotations=_READ_ONLY)
+@mcp.tool(annotations=_READ)
 def list_virtual_media(profile: str | None = None) -> dict:
     """Inventory the KVM's virtual-media (MSD) storage (read-only).
 
@@ -995,7 +1079,7 @@ def list_virtual_media(profile: str | None = None) -> dict:
         return out
 
 
-@mcp.tool(annotations=_DESTRUCTIVE)
+@mcp.tool(annotations=_REVERSIBLE_WRITE_REMOTE)
 async def mount_iso(
     ctx: Context,
     source: str,
@@ -1020,7 +1104,7 @@ async def mount_iso(
     )
 
 
-@mcp.tool(annotations=_DESTRUCTIVE)
+@mcp.tool(annotations=_REVERSIBLE_WRITE)
 async def eject(ctx: Context, confirm: bool = False, profile: str | None = None) -> dict:
     """Detach virtual media (the inverse of ``mount_iso``). DESTRUCTIVE (media).
 
@@ -1035,7 +1119,7 @@ async def eject(ctx: Context, confirm: bool = False, profile: str | None = None)
     )
 
 
-@mcp.tool(annotations=_READ_ONLY)
+@mcp.tool(annotations=_READ)
 def ssh_reachable(profile: str | None = None, host: str | None = None) -> dict:
     """Is the managed host's OS reachable over SSH? (read-only, in-band).
 
@@ -1095,7 +1179,7 @@ def ssh_exec(
     return {**_provenance(cfg), **ch.ssh_exec(command)}
 
 
-@mcp.tool(annotations=_READ_ONLY)
+@mcp.tool(annotations=_READ)
 def appliance_status(profile: str | None = None) -> dict:
     """Read-only diagnostics from the KVM APPLIANCE's own OS over SSH.
 
@@ -1151,7 +1235,7 @@ def appliance_reboot(confirm: bool = False, profile: str | None = None) -> dict:
     return {**_provenance(cfg), **ch.reboot()}
 
 
-@mcp.tool(annotations=_READ_ONLY)
+@mcp.tool(annotations=_READ)
 def access_paths(profile: str | None = None) -> dict:
     """Which INDEPENDENT recovery paths are live for the device — the lockout view.
 
@@ -1167,7 +1251,7 @@ def access_paths(profile: str | None = None) -> dict:
         return {**_provenance(cfg), **_access_paths(kvm)}
 
 
-@mcp.tool(annotations=_DESTRUCTIVE)
+@mcp.tool(annotations=_REVERSIBLE_WRITE_REMOTE)
 async def file_firmware_report(
     ctx: Context,
     confirm: bool = False,
@@ -1232,7 +1316,7 @@ async def file_firmware_report(
                 "filed": outcome.get("filed", False)}
 
 
-@mcp.tool(annotations=_READ_ONLY)
+@mcp.tool(annotations=_READ)
 def ssh_discover(cidr: str, confirm: bool = False, port: int = 22) -> dict:
     """Scan a CIDR for hosts with an open SSH port. RISKY — opt-in.
 
@@ -1256,6 +1340,7 @@ def ssh_discover(cidr: str, confirm: bool = False, port: int = 22) -> dict:
 
 
 def main() -> None:
+    _apply_read_only_mode()
     mcp.run()
 
 

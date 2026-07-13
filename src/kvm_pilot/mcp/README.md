@@ -24,8 +24,8 @@ client/driver code stays stdlib-only; `mcp` is imported only in this subpackage.
 | `power_state` | `readOnlyHint` | `powered_on` plus ATX detail where the driver has it |
 | `logs` | `readOnlyHint` | Device/host event log as text (`seek` = seconds of lookback). The text diagnostic when video/streamer/power looks wrong — it names a fault (e.g. a stuck encoder behind a `snapshot` 503) a screenshot can't |
 | `snapshot` | `readOnlyHint` | Current screen, returned as a real JPEG **image** content block the model can see. The JSON payload carries the live `signal` state (`hdmi_signal` = the authoritative picture-present flag, plus online/resolution/fps/`streamer_idle`) and `unchanged_since_last_snapshot` — byte-identical pixels across an expected screen change are stale/cached: verify via `signal` + `logs` before acting (#141/#143) |
-| `classify_screen` | `readOnlyHint` | Boot/run phase. Uses the server-side vision backend (Anthropic or a local VLM, see below) when configured; **if the server has no vision key it falls back to caller-side** — returning the screenshot + prompt/schema for a vision-capable agent to classify. Cheap on-device gates (power-off/no-signal/boot-progress/OCR) resolve with no key at all. Result is a `mode="server"` dict, or a `[json, image]` list to classify yourself |
-| `wait_for_state` | `readOnlyHint` | Block (bounded) until the screen reaches a named boot/run phase — the MCP twin of CLI `watch`. Validates the phase token up front, polls the cheap gates + server-side vision with backoff, emits MCP progress per poll, and returns the reached phase + confidence + a `frame_ref` to anchor a follow-up `mouse` click; a timeout comes back as a same-path `reached: false` result with the last observed state. `timeout` is capped server-side at 300 s — chain calls for longer waits. **Needs server-side vision for phases the cheap gates can't resolve**: with no vision key it fails fast pointing you at `classify_screen` polling (caller-side classification) instead of burning the timeout |
+| `classify_screen` | `readOnlyHint` (open-world) | Boot/run phase. Uses the server-side vision backend (Anthropic or a local VLM, see below) when configured; **if the server has no vision key it falls back to caller-side** — returning the screenshot + prompt/schema for a vision-capable agent to classify. Cheap on-device gates (power-off/no-signal/boot-progress/OCR) resolve with no key at all. Result is a `mode="server"` dict, or a `[json, image]` list to classify yourself |
+| `wait_for_state` | `readOnlyHint` (open-world) | Block (bounded) until the screen reaches a named boot/run phase — the MCP twin of CLI `watch`. Validates the phase token up front, polls the cheap gates + server-side vision with backoff, emits MCP progress per poll, and returns the reached phase + confidence + a `frame_ref` to anchor a follow-up `mouse` click; a timeout comes back as a same-path `reached: false` result with the last observed state. `timeout` is capped server-side at 300 s — chain calls for longer waits. **Needs server-side vision for phases the cheap gates can't resolve**: with no vision key it fails fast pointing you at `classify_screen` polling (caller-side classification) instead of burning the timeout |
 | `ssh_reachable` | `readOnlyHint` | Is the **managed host's OS** reachable over SSH (in-band)? Targets the host *behind* the KVM (its own `ssh_host`), not the appliance — use it to prefer remote recovery before physical intervention. Pass `host=` to override the target at runtime (e.g. an install-time DHCP address the profile can't know); also surfaced as an `ssh-reachable` healthcheck when `ssh_host` is configured |
 | `list_virtual_media` | `readOnlyHint` | Inventory the KVM's virtual-media (MSD) storage: stored images (name/size/completeness), the selected drive image, and whether media is attached. **Check this before asking the operator to download or upload an ISO** — the image may already be on the device from an earlier job; on brands with a known host-visible gadget name it also returns `host_visible_as` — the device name the target's boot menu shows when the medium is truly presented (e.g. 'Glinet Optical Drive' on GLKVM, #78); its absence next to a generic CD/DVD entry means the media is not really inserted |
 | `power` | `destructiveHint` | `on` / `off` / `off-hard` / `reset` — **disabled unless the operator opts in** (`KVM_PILOT_MCP_ALLOW_POWER`) |
@@ -34,14 +34,33 @@ client/driver code stays stdlib-only; `mcp` is imported only in this subpackage.
 | `send_shortcut` | `destructiveHint` | Send a key chord (e.g. `ControlLeft,AltLeft,F2`). Gated **by effect**: a reboot/power chord (Ctrl+Alt+Del, Magic SysRq) needs `ALLOW_POWER`; an ordinary session chord needs `ALLOW_HID` |
 | `ctrl_alt_delete` | `destructiveHint` | Send Ctrl+Alt+Del (a reboot) — classified `power_soft`, so it needs `KVM_PILOT_MCP_ALLOW_POWER`, not the HID gate |
 | `mouse` | `destructiveHint` | Move (and optionally click) the mouse. Coords in `percent` (0.0-1.0, default), `pixel`, or `raw` kvmd. A **click** must carry `observed_frame_ref` from a prior `snapshot`; it's refused if the host rebooted/swapped media since (generation changed) so it can't land on a stale screen. Needs `KVM_PILOT_MCP_ALLOW_HID` |
-| `mount_iso` | `destructiveHint` | Mount an ISO (local path or URL; `usb=true` for a flash drive) as virtual media — needs `KVM_PILOT_MCP_ALLOW_MEDIA` + approval |
-| `eject` | `destructiveHint` | Detach virtual media (inverse of `mount_iso`) — needs `KVM_PILOT_MCP_ALLOW_MEDIA` + approval |
+| `mount_iso` | reversible write | Mount an ISO (local path or URL; `usb=true` for a flash drive) as virtual media — needs `KVM_PILOT_MCP_ALLOW_MEDIA` + approval |
+| `eject` | reversible write | Detach virtual media (inverse of `mount_iso`) — needs `KVM_PILOT_MCP_ALLOW_MEDIA` + approval |
 | `ssh_exec` | `destructiveHint` | Run a command on the managed host's OS over SSH — **disabled unless the operator opts in** (`KVM_PILOT_MCP_ALLOW_SSH`). `host=` overrides the target at runtime |
-| `file_firmware_report` | `destructiveHint` | Reconcile the device's firmware currency against the registry SSoT and, when the registry is behind, file the "Latest known release" report as a GitHub issue via the `gh` CLI (the MCP twin of CLI `firmware-check`, #189/#190). An **external write** (its own effect class): **disabled unless** `KVM_PILOT_MCP_ALLOW_EXTERNAL_WRITE` + per-invocation approval; validated and deduped exactly like the CLI path; `dry_run=true` previews the issue body; a missing/unauthenticated `gh` is a graceful `filed=false` reason |
+| `file_firmware_report` | reversible write (external) | Reconcile the device's firmware currency against the registry SSoT and, when the registry is behind, file the "Latest known release" report as a GitHub issue via the `gh` CLI (the MCP twin of CLI `firmware-check`, #189/#190). An **external write** (its own effect class): **disabled unless** `KVM_PILOT_MCP_ALLOW_EXTERNAL_WRITE` + per-invocation approval; validated and deduped exactly like the CLI path; `dry_run=true` previews the issue body; a missing/unauthenticated `gh` is a graceful `filed=false` reason |
 | `ssh_discover` | `readOnlyHint` | Scan a CIDR for open SSH — **RISKY/opt-in** (active network scan; `confirm=true` required). Only to help find a target the user can't address, on networks they own |
 | `appliance_status` | `readOnlyHint` | Read-only diagnostics from the **KVM appliance's own OS** over appliance-SSH (load, D-state video threads). Note: load is ~10 even when idle on these units, so it is not a health signal — use `healthcheck`'s `encoder-wedge` finding |
 | `appliance_reboot` | `destructiveHint` | Reboot the **KVM appliance** (not the target) to clear a wedged encoder — **disabled unless the operator opts in** (`KVM_PILOT_MCP_ALLOW_APPLIANCE`) + `confirm=true`. Drops KVM control ~60s; target power untouched. Never automate it |
 | `access_paths` | `readOnlyHint` | Which **independent recovery paths** are live for the device — the lockout-exposure view (#162): kvmd-REST / appliance-SSH / target-SSH / out-of-band power / console-HID, each labeled by failure *domain* so redundancy isn't oversold. `summary.out_of_band_live=false` means every path shares the appliance's fate — a fully hung appliance can't be recovered remotely |
+
+### Annotation profiles (#195)
+
+Every tool declares **all four** MCP hints explicitly (a CI test enforces it —
+the spec defaults are punitive: an unset `destructiveHint` reads as *true* and
+an unset `openWorldHint` reads as *"reaches the internet"*). Clients build real
+policy from these bits (auto-approval and parallel dispatch of read-only tools,
+confirmation UI on destructive ones), so precision matters. **Hints are
+advisory, never a security boundary** — the `ALLOW_*` effect gates and
+per-invocation approvals below apply regardless of annotation.
+
+| Profile | readOnly | destructive | idempotent | openWorld | Tools |
+|---|---|---|---|---|---|
+| read | ✅ | — | ✅ | — | `info` `healthcheck` `capabilities` `support_matrix` `power_state` `logs` `snapshot` `list_virtual_media` `ssh_reachable` `ssh_discover` `appliance_status` `access_paths` |
+| read, open-world | ✅ | — | ✅ | ⚠️ | `classify_screen` — the *server-side vision backend* may be a cloud VLM (a local backend never leaves your network) |
+| read, open-world, timed | ✅ | — | — | ⚠️ | `wait_for_state` — same vision caveat, and a timed wait is not idempotent |
+| destructive | — | ⚠️ | — | — | `power` `type_text` `press_key` `send_shortcut` `ctrl_alt_delete` `mouse` `ssh_exec` `appliance_reboot` — not safely repeatable (a second reset reboots again) |
+| reversible write | — | — | ✅ | — | `eject` — undoable and convergent; still MEDIA-gated |
+| reversible write, open-world | — | — | ✅ | ⚠️ | `mount_iso` (may fetch an ISO by URL), `file_firmware_report` (files a GitHub issue; dedupes against existing ones, hence idempotent) — still gated by MEDIA / EXTERNAL_WRITE |
 
 Every tool result names the **host and driver it acted on**, and read-only
 tools always run with a deny-all confirm callback, so a bug in a read path can
@@ -159,11 +178,23 @@ The `power` gate is layered; no single layer is trusted on its own:
    tool on an "always allow" list). The `destructiveHint`/`readOnlyHint`
    annotations are published so hosts can render a differentiated approval UI —
    but annotations are hints, never a security boundary.
-4. **Dry-run.** With `KVM_PILOT_MCP_DRY_RUN=1` every driver is built with
+4. **Read-only launch mode (#196).** With `KVM_PILOT_MCP_READ_ONLY=1` the
+   state-changing tools are **not registered at all** (`tools/list` shows only
+   the read-only surface, minus `ssh_discover` — an active scan has no place in
+   a least-privilege posture), and two independent layers back the filter up:
+   every effect gate is force-closed regardless of `ALLOW_*`, and every driver
+   is built with a deny-all confirm — so even a bypassed registration cannot
+   mutate a target (tool filtering alone is not enforcement; that lesson is
+   [CVE-2026-46519](https://www.manifold.security/blog/mcp-server-kubernetes-readonly-bypass)).
+   Results carry `read_only: true`. The **trust ladder** for a new fleet:
+   start `READ_ONLY` (intake, status reports, support evidence) → graduate to
+   `DRY_RUN` (rehearse destructive flows, calls logged not sent) → open
+   `ALLOW_*` effect gates one at a time as the matrix verifies your hardware.
+5. **Dry-run.** With `KVM_PILOT_MCP_DRY_RUN=1` every driver is built with
    `dry_run=True`: destructive commands are logged and *skipped*, and every
    tool result says it ran in dry-run mode. **Recommended default until your
    own device+capability combos are verified in the matrix.**
-5. **Untrusted screen content.** `snapshot` and `classify_screen` feed
+6. **Untrusted screen content.** `snapshot` and `classify_screen` feed
    *target-controlled* console output into the agent's context. A compromised
    or hostile host can render text designed to steer the agent (prompt
    injection) — one more reason to keep layer 3 on.
@@ -204,6 +235,7 @@ kvm-pilot-mcp                    # start the stdio server (or: python -m kvm_pil
 | `KVM_PILOT_MCP_PROFILES` | **Fail-closed** allowlist of profile names the server may target (comma-separated). Unset = no allowlist; set-but-empty = allow nothing; a target not on the list is refused (never a fall-back to all configured hosts) |
 | `KVM_PILOT_MCP_ELICIT` | Set to `off` to force the pre-authorized posture (the `ALLOW_*` env gate + per-call `confirm=true` become the standing authorization) even for elicitation-capable clients; otherwise a per-invocation human approval is requested when the client supports it. The escape hatch when a chat client keeps cancelling pending approvals (`denied_reason: "approval cancel"`, see troubleshooting above) — trade-off: `off` disables per-call human approval, an operator decision |
 | `KVM_PILOT_SSH_HOST` / `KVM_PILOT_SSH_USER` / `KVM_PILOT_SSH_PORT` / `KVM_PILOT_SSH_KEY` | The **managed host's** SSH target (a different machine from the KVM) for `ssh_reachable` / `ssh_exec`; also settable per-profile as `ssh_host` etc. |
+| `KVM_PILOT_MCP_READ_ONLY` | Least-privilege launch posture (#196): only read-only tools are registered (minus `ssh_discover`), every effect gate is force-closed regardless of `ALLOW_*`, and drivers are built deny-all. Wins over `ALLOW_*` and `DRY_RUN`. The recommended first rung of the trust ladder (`READ_ONLY` → `DRY_RUN` → per-effect `ALLOW_*`) |
 | `KVM_PILOT_MCP_DRY_RUN` | Build every driver with `dry_run=True`; destructive calls are logged, never sent |
 | `KVM_PILOT_MCP_RECEIPT_TTL` | Lifetime (seconds) of a per-invocation approval receipt (#72); default 60, clamped to [1, 3600]. A dispatch presented with an expired receipt fails closed and must be re-approved |
 | `KVM_PILOT_VISION_BACKEND` | Vision backend for `classify_screen` / `wait_for_state`: `anthropic` (default) or `local` (any OpenAI-compatible VLM: LM Studio, Ollama, vLLM) |
