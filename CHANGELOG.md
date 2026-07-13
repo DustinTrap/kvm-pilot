@@ -4,6 +4,37 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0b5] — 2026-07-13
+
+**Beta 5 — calibration fixes from the first live fleet run.** b4's mouse
+auto-calibration went to real hardware (GL-RM1PE ×2, V1.9.1) hours after
+release; the live run validated the algorithm (residual **0.0106** of the
+screen ≈ 17px at 1600×900 on a RHEL/GDM host, visually verified) and found two
+functional bugs in the surrounding plumbing — both fixed here. If you
+installed b4, upgrade: calibration on PiKVM-family devices recorded no
+resolution and, on GL's on-demand streamer, was never applied via the CLI path.
+
+### Fixed
+- `current_resolution()` called a nonexistent method (`signal_state` instead
+  of `video_signal_info`), so every stored calibration said
+  `resolution: "unknown"` — silently weakening the resolution-staleness
+  protection on exactly the hardware that reports its mode.
+- The staleness guard refused to apply a stored calibration whenever the
+  current mode was *unreadable* — which on GL's on-demand streamer is
+  whenever nothing is watching, i.e. most of the time. Staleness is now
+  judged on evidence: an **observed** different mode still refuses; an
+  unobservable one applies best-effort (the snapshot-anchored click flow
+  wakes the streamer and confirms the mode exactly where certainty matters).
+
+### Live-run evidence (first #128 hardware validation)
+- Positive: 10.0.1.20 (RHEL GDM login) — scale ≈1.002/1.004, a real 1.4%
+  y-offset found, held-out residual 0.0106, correction applied and visually
+  confirmed at dead center.
+- Negative: 10.0.1.11 (Fedora text console, no mouse cursor) — failed
+  actionably ("cursor not found"), nothing stored; the blinking text cursor
+  produced blobs in some frames and the later defenses caught it (static-gate
+  multi-sampling filed as a follow-up).
+
 ## [0.1.0b4] — 2026-07-13
 
 **Beta 4 — mouse auto-calibration.** Fixes the oldest live-hardware complaint

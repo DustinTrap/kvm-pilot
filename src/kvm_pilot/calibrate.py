@@ -263,12 +263,18 @@ def load_calibration(host: str, resolution: str | None = None) -> MouseCalibrati
 
 
 def current_resolution(kvm) -> str:
-    """Capture resolution as "WxH", or "unknown" when unreported (fake, no signal)."""
-    signal_state = getattr(kvm, "signal_state", None)
-    if signal_state is None:
+    """Capture resolution as "WxH", or "unknown" when unreported (fake, no signal).
+
+    Uses the PiKVM-family ``video_signal_info()`` readout (the #158-honest one:
+    width/height are None when there is no signal, never the stale
+    last-negotiated mode). Live-hardware lesson from the first .20 run: get the
+    method name from the driver, not from memory.
+    """
+    info = getattr(kvm, "video_signal_info", None)
+    if info is None:
         return "unknown"
     try:
-        sig = signal_state()
+        sig = info()
     except KVMPilotError:
         return "unknown"
     w, h = sig.get("width"), sig.get("height")
@@ -276,15 +282,25 @@ def current_resolution(kvm) -> str:
 
 
 def maybe_apply(host: str, kvm, x: float, y: float) -> tuple[float, float, bool]:
-    """Apply a stored, resolution-matching correction to percent coords.
+    """Apply a stored correction to percent coords unless it is *observably* stale.
 
     Returns ``(x, y, calibrated)`` — the untouched input with ``False`` when no
     usable calibration exists, so callers can report honestly (#141 doctrine).
     The resolution probe runs only when a stored row exists at all.
+
+    Staleness is judged on evidence, not absence of it (live .20 lesson): on
+    GL's on-demand streamer the resolution is unreadable whenever nothing is
+    watching, which is *most of the time* — refusing on "unknown" would starve
+    the feature on exactly the devices that need it. So: a mode we *observed*
+    to differ refuses; a mode we cannot read right now applies best-effort.
+    The click flow re-anchors on a fresh ``snapshot`` anyway (which wakes the
+    streamer and makes the mode readable), so certainty exists exactly where
+    it matters.
     """
     if load_calibration(host) is None:
         return (x, y, False)
-    cal = load_calibration(host, current_resolution(kvm))
+    res = current_resolution(kvm)
+    cal = load_calibration(host, None if res == "unknown" else res)
     if cal is None:
         return (x, y, False)
     cx, cy = cal.apply(x, y)
