@@ -81,3 +81,35 @@ def test_power_transitions_are_reflected_on_get(redfish_emulator_url):
     assert driver.is_powered_on() is True
     driver.power_off_hard()
     assert driver.is_powered_on() is False
+
+
+def test_boot_device_target_round_trips_against_external_reference(redfish_emulator_url):
+    # Independent corroboration our own mock can't give: a real BootSourceOverride
+    # PATCH changes the target, observed via a fresh GET on a DMTF-conformant
+    # service (validates the target write + our normalized<->Redfish mapping).
+    # NOTE: sushy-tools' --fake pins BootSourceOverrideEnabled to "Continuous" (it
+    # does not honor once/disabled), so once-vs-persistent-vs-clear is asserted
+    # against the in-repo emulator + real BMCs, not here.
+    driver = _driver(redfish_emulator_url)
+    for device in ("cd", "hdd", "pxe"):
+        driver.set_boot_device(device)
+        assert driver.get_boot_options()["target"] == device
+
+
+def test_boot_device_rejects_unadvertised_target_against_external(redfish_emulator_url):
+    # Feature-detect against ground truth: sushy advertises [Pxe, Cd, Hdd,
+    # UefiHttp] but NOT Usb, so a usb request must fail fast (CapabilityError),
+    # not send a doomed PATCH the BMC would 400.
+    from kvm_pilot.errors import CapabilityError
+
+    driver = _driver(redfish_emulator_url)
+    assert "usb" not in driver.get_boot_options()["allowable"]
+    with pytest.raises(CapabilityError):
+        driver.set_boot_device("usb")
+
+
+def test_cli_boot_device_show_reports_external_allowable(redfish_emulator_url, capsys):
+    rc = main(_cli(redfish_emulator_url, "boot-device", "--show", "--skip-healthcheck"))
+    assert rc == 0
+    out = json.loads(capsys.readouterr().out)
+    assert "pxe" in out["allowable"] and "cd" in out["allowable"]
