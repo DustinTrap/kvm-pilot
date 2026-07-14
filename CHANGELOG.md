@@ -13,6 +13,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `sensors` / `logs` work with no new CLI/MCP code — the pre-Redfish BMC path
   (e.g. Dell iDRAC6 / R710). 34 hardware-free tests. IPMI completeness is now
   roughly Redfish minus VirtualMedia.
+- **IPMI serial console / SOL (#208).** `SerialConsole` for `IpmiDriver`
+  (`serial_read`/`serial_write` over a PTY-backed `ipmitool sol activate`) plus a
+  `kvm-pilot console` command for an interactive text console (exit with `~.`).
+  Gated as `ipmi.serial_console` (HID_INPUT — it can inject keystrokes). Text-only;
+  drives Linux/ESXi serial installers, not the Windows GUI installer.
 
 ### Testing
 - IPMI driver cross-checked against an independent OpenIPMI `ipmi_sim` BMC

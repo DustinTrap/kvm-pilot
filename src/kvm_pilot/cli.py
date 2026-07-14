@@ -263,6 +263,19 @@ def cmd_logs(args) -> int:
     return 0
 
 
+def cmd_console(args) -> int:
+    kvm = _client(args, Capability.SERIAL_CONSOLE)
+    interactive = getattr(kvm, "serial_interactive", None)
+    if interactive is None:
+        print(f"an interactive console is not implemented for the {_driver_label(kvm)} "
+              "driver (it exposes serial_read/serial_write only)", file=sys.stderr)
+        return 1
+    print(f"Opening SOL serial console to {kvm.host}. Exit with '~.' (tilde then period). "
+          "Text-only; needs BIOS console redirection / a serial getty on the host.",
+          file=sys.stderr)
+    return int(interactive() or 0)
+
+
 def cmd_boot_progress(args) -> int:
     kvm = _client(args, Capability.BOOT_PROGRESS)
     phase = cast("BootProgress", kvm).get_boot_progress()
@@ -1428,6 +1441,11 @@ def build_parser() -> argparse.ArgumentParser:
                    help="Seconds of lookback (0 = everything available)")
     _add_common(p)
     p.set_defaults(func=cmd_logs)
+
+    p = sub.add_parser("console",
+                       help="Attach an interactive serial console (IPMI SOL); exit with ~.")
+    _add_common(p)
+    p.set_defaults(func=cmd_console, _preflight=True)
 
     p = sub.add_parser("ssh-check",
                        help="Is the managed host's OS reachable over SSH? (read-only)")

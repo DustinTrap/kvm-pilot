@@ -9,15 +9,18 @@ process argv / ``ps``.
 
 Capabilities: Power (``chassis power``), SystemInfo (``chassis status`` / ``fru`` /
 ``mc info``), BootConfig (``chassis bootdev`` / ``bootparam``), Sensors (``sdr``),
-Logs (SEL). SerialConsole (SOL) and Watchdog are deferred (#28/#13). IPMI has no
-video, HID, or virtual media — those need the vendor's own KVM/OEM channel.
+Logs (SEL), SerialConsole (SOL — ``sol activate`` over a PTY, #208). Watchdog is
+deferred. IPMI has no video, HID, or virtual media — those need the vendor's own
+KVM/OEM channel.
 """
 
 from __future__ import annotations
 
 import os
+import select
 import shutil
 import subprocess  # nosec B404 - fixed argv (no shell), password via env not argv
+import time
 from typing import TYPE_CHECKING, Any
 
 from ..errors import CapabilityError, KVMPilotError, TimeoutError
@@ -71,6 +74,9 @@ class IpmiDriver(PowerMixin, CapabilityMixin):
         self._ipmitool = ipmitool
         self._timeout = timeout
         self.safety = SafetyPolicy(dry_run=dry_run, confirm=confirm)
+        # Lazily-opened SOL session (ipmitool `sol activate` on a PTY); see SerialConsole.
+        self._sol: subprocess.Popen | None = None
+        self._sol_fd: int | None = None
 
     @classmethod
     def from_config(
@@ -255,6 +261,132 @@ class IpmiDriver(PowerMixin, CapabilityMixin):
         # seek (seconds lookback) has no cheap IPMI analogue — SEL is returned whole;
         # callers filter by the timestamps in each entry if needed.
         return self._run("sel", "list")
+
+    # -- SerialConsole (SOL) --------------------------------------------
+    #
+    # IPMI Serial-over-LAN relays the host's serial port as text (GRUB, dmesg,
+    # a getty, kernel panics, a text installer). ipmitool's `sol activate` is an
+    # interactive streaming command that drives a terminal, so we back the
+    # serial_read/serial_write protocol with a persistent `sol activate` child on
+    # a PTY: writes go to the PTY master (→ ipmitool stdin → the host console),
+    # reads drain the master with a select() timeout. The session is opened
+    # lazily on first use and gated once (opening it can inject keystrokes into
+    # the running host — the same reason HID input is gated). SOL is a
+    # single-session channel, so we free any stale session before activating.
+
+    def _sol_activate(self) -> int | None:
+        """Ensure a live SOL session and return its PTY master fd (None if the
+        gate skipped it under dry-run)."""
+        if self._sol is not None and self._sol.poll() is None:
+            return self._sol_fd
+        if shutil.which(self._ipmitool) is None:
+            raise CapabilityError(
+                f"'{self._ipmitool}' was not found on PATH; the IPMI driver shells "
+                "out to it (install ipmitool / OpenIPMI)."
+            )
+        if not self.safety.guard("ipmi.serial_console", f"Open SOL serial console to {self.host}"):
+            return None  # dry-run: gated + skipped
+        # SOL is single-session; drop any stale one so activate doesn't bounce.
+        try:
+            self._run("sol", "deactivate")
+        except KVMPilotError:
+            pass
+        import pty  # Unix-only; imported lazily so the module still imports elsewhere
+
+        master, slave = pty.openpty()
+        env = {**os.environ, "IPMI_PASSWORD": self._passwd}
+        argv = self._base_argv() + ["sol", "activate"]
+        self._sol = subprocess.Popen(  # nosec B603 - fixed argv from config, shell=False
+            argv, stdin=slave, stdout=slave, stderr=slave, env=env, close_fds=True
+        )
+        os.close(slave)
+        os.set_blocking(master, False)
+        self._sol_fd = master
+        return master
+
+    def serial_read(self, timeout: float = 1.0) -> str:
+        """Drain pending SOL console output as text, blocking up to ``timeout`` for
+        the first byte. Returns '' if nothing arrives (or under dry-run)."""
+        fd = self._sol_activate()
+        if fd is None:
+            return ""
+        chunks: list[str] = []
+        deadline = time.monotonic() + max(0.0, timeout)
+        first = True
+        while True:
+            wait = max(0.0, deadline - time.monotonic()) if first else 0.0
+            ready, _, _ = select.select([fd], [], [], wait)
+            if not ready:
+                break
+            try:
+                data = os.read(fd, 65536)
+            except OSError:
+                break  # EIO once the PTY/child is gone
+            if not data:
+                break
+            chunks.append(data.decode("utf-8", "replace"))
+            first = False
+        return "".join(chunks)
+
+    def serial_write(self, data: str) -> None:
+        """Send text (keystrokes) to the host serial console. A trailing '\\r'
+        is Enter. Gated on first activation."""
+        fd = self._sol_activate()
+        if fd is None:
+            return
+        os.write(fd, data.encode("utf-8"))
+
+    def serial_interactive(self) -> int:
+        """Attach an interactive SOL console to the CURRENT terminal and block
+        until the user exits (ipmitool escape ``~.``). Returns ipmitool's exit
+        code. This is the human-drives-an-install path (the `console` CLI); the
+        serial_read/serial_write pair is the programmatic one. Gated."""
+        if shutil.which(self._ipmitool) is None:
+            raise CapabilityError(
+                f"'{self._ipmitool}' was not found on PATH; install ipmitool / OpenIPMI."
+            )
+        if not self.safety.guard(
+            "ipmi.serial_console", f"Open interactive SOL console to {self.host} (exit with ~.)"
+        ):
+            return 0  # dry-run
+        try:
+            self._run("sol", "deactivate")
+        except KVMPilotError:
+            pass
+        env = {**os.environ, "IPMI_PASSWORD": self._passwd}
+        argv = self._base_argv() + ["sol", "activate"]
+        # stdio inherited => a real interactive console; ipmitool manages raw mode.
+        proc = subprocess.run(argv, env=env)  # nosec B603 - fixed argv, shell=False
+        return proc.returncode
+
+    def serial_close(self) -> None:
+        """Tear down the SOL session: send ipmitool's ``~.`` escape, stop the
+        child, and free the BMC's single SOL channel. Safe when nothing's open."""
+        fd, proc = self._sol_fd, self._sol
+        self._sol_fd, self._sol = None, None
+        if fd is not None:
+            try:
+                os.write(fd, b"~.")
+            except OSError:
+                pass
+        if proc is not None:
+            try:
+                proc.terminate()
+                proc.wait(timeout=5)
+            except Exception:  # noqa: BLE001 - best-effort teardown
+                try:
+                    proc.kill()
+                except Exception:  # noqa: BLE001
+                    pass
+        if fd is not None:
+            try:
+                os.close(fd)
+            except OSError:
+                pass
+        try:
+            self._run("sol", "deactivate")
+        except KVMPilotError:
+            pass
 
 
 def _kv(text: str) -> dict[str, str]:
