@@ -4,6 +4,44 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0b6] — 2026-07-14
+
+**Beta 6 — remote boot-control + Wake-on-LAN.** A cohesive set for driving what a
+host boots and powering it on out-of-band, matured against simulators
+(the in-repo Redfish emulator + independent sushy-tools) ahead of real
+BMC validation. See the [iLO/iDRAC hardware test plan](docs/hardware-test-plan-ilo-idrac.md).
+
+### Added
+- **Wake-on-LAN (#199).** `wol.py` magic-packet core; `kvm-pilot wake`
+  (`--mac`/`--broadcast`) + a `wake` MCP tool; `HostConfig.mac` / `wol_broadcast`.
+  **`power on` now falls back to WoL** when the KVM has no wired ATX/GPIO power
+  path (GL units report `ATX enabled=false`) and the profile carries a `mac` —
+  the magic packet reaches the NIC directly, bypassing the missing power channel.
+  *Hardware-validated:* woke a real suspended RHEL host in 52 s.
+- **Redfish boot-device control (#28/#201).** New `BOOT_CONFIG` capability +
+  `BootConfig` protocol; `kvm-pilot boot-device <pxe|cd|hdd|usb|bios|diag|none>
+  [--once|--persistent] [--legacy] [--show]` plus `boot_options` / `set_boot_device`
+  MCP tools. Feature-detects the BMC's advertised targets and `BootSourceOverrideMode`,
+  and auto-retries without the mode property on BMCs (iLO4/iDRAC7) that reject it.
+- **In-band boot control (#150).** `boot-device --via ssh` sets a one-time UEFI
+  `BootNext` via `efibootmgr` over the SSH channel (single-gated as `ssh.set_boot_next`).
+
+### Changed
+- Boot-device and WoL are gated: `redfish.set_boot_device` / `ssh.set_boot_next`
+  (`CONFIG_MUTATION`) and `wol.wake` (`POWER_SOFT`) join `DESTRUCTIVE_OPS` /
+  `OP_EFFECT`; the MCP tools require the matching operator enable-flag + `confirm`.
+
+### Testing
+- The Redfish emulator gained a `Boot` object, `PATCH`, and iLO4/iDRAC7 quirk
+  knobs; boot-device is also validated against **sushy-tools** (an independent
+  Redfish), which surfaced a real behavior difference (its `--fake` pins
+  `BootSourceOverrideEnabled`). ~75 new tests across wol/redfish-boot/efiboot/CLI/MCP.
+
+### Not yet validated
+- Real-hardware BMC runs on HPE iLO / Dell iDRAC are **pending (#29)** — the code
+  is exercised on simulators only. iDRAC6-era boxes (e.g. R710) have no Redfish;
+  IPMI is tracked separately (#62).
+
 ## [0.1.0b5] — 2026-07-13
 
 **Beta 5 — calibration fixes from the first live fleet run.** b4's mouse
