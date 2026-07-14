@@ -127,6 +127,20 @@ echo "## C4  Documentation (sources of truth)"
 if grep -qE '^## \[Unreleased\]' CHANGELOG.md 2>/dev/null; then
   BODY="$(awk '/^## \[Unreleased\]/{f=1;next} /^## \[/{f=0} f' CHANGELOG.md | grep -vE '^\s*$' || true)"
   [ -z "$BODY" ] && echo "CHANGELOG_UNRELEASED: EMPTY" || echo "CHANGELOG_UNRELEASED: has content"
+else
+  # No [Unreleased] section is fine right after a release, but becomes a lie once
+  # feature commits land on main without one — the old check only fired around a
+  # release event and stayed silent (v0.7.0: this session merged the IPMI driver
+  # #206 + ipmi_sim cross-check #207 post-b6 with no [Unreleased] entry, caught by
+  # hand). If src/docs commits exist since the latest tag, the CHANGELOG omits them.
+  if [ -n "${LOCAL_TAG:-}" ] && git rev-parse "${LOCAL_TAG}" >/dev/null 2>&1; then
+    NSINCE=$(git rev-list --count --no-merges "${LOCAL_TAG}..HEAD" -- src/ docs/ 2>/dev/null || echo 0)
+    if [ "${NSINCE:-0}" -gt 0 ]; then
+      echo "CHANGELOG_UNRELEASED_MISSING: ${NSINCE} src/docs commit(s) since ${LOCAL_TAG} but no [Unreleased] section"
+    else
+      echo "CHANGELOG_UNRELEASED: (no section; no unreleased src/docs commits — ok)"
+    fi
+  fi
 fi
 if [ -n "${VER:-}" ]; then
   grep -qE "^## \[${VER}\]" CHANGELOG.md 2>/dev/null && echo "CHANGELOG_HAS_${VER}: yes" || echo "CHANGELOG_HAS_${VER}: NO"
