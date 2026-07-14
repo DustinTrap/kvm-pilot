@@ -44,6 +44,7 @@ EXPECTED_ANNOTATIONS = {
     "capabilities": READ,
     "support_matrix": READ,
     "power_state": READ,
+    "boot_options": READ,
     "logs": READ,
     "snapshot": READ,
     "classify_screen": READ_VISION,
@@ -54,6 +55,8 @@ EXPECTED_ANNOTATIONS = {
     "appliance_status": READ,
     "access_paths": READ,
     "power": DESTRUCTIVE,
+    "wake": DESTRUCTIVE,
+    "set_boot_device": DESTRUCTIVE,
     "type_text": DESTRUCTIVE,
     "press_key": DESTRUCTIVE,
     "send_shortcut": DESTRUCTIVE,
@@ -1399,3 +1402,86 @@ def test_act_result_carries_receipt_and_real_expiry(config_file):
     assert parsed["approved"] is True
     assert parsed["receipt"]["state"] == "consumed"
     assert parsed["approval"]["expires"] is not None
+
+
+# -- boot-device (BootSourceOverride, #201) — effect gate + confirm + execute --
+
+def test_set_boot_device_errors_without_config_gate(config_file):
+    async def interact(session):
+        return await session.call_tool("set_boot_device", {"device": "pxe", "confirm": True})
+
+    result = run_session(server_env(config_file), interact)
+    assert result.isError is True
+    text = result.content[0].text
+    assert "operator" in text
+    assert "KVM_PILOT_MCP_ALLOW_CONFIG" not in text  # no copy-pasteable incantation
+
+
+def test_set_boot_device_requires_confirm(config_file):
+    async def interact(session):
+        return await session.call_tool("set_boot_device", {"device": "pxe"})
+
+    env = server_env(config_file, KVM_PILOT_MCP_ALLOW_CONFIG="1")
+    result = run_session(env, interact)
+    assert result.isError is True
+    assert "not confirmed" in result.content[0].text
+
+
+def test_set_boot_device_executes_on_fake(config_file):
+    async def interact(session):
+        return await session.call_tool("set_boot_device", {"device": "pxe", "confirm": True})
+
+    env = server_env(config_file, KVM_PILOT_MCP_ALLOW_CONFIG="1")
+    result = run_session(env, interact)
+    assert result.isError is False
+    text = result.content[0].text
+    assert '"target": "pxe"' in text and '"enabled": "Once"' in text
+
+
+def test_boot_options_is_read_only(config_file):
+    async def interact(session):
+        return await session.call_tool("boot_options", {})
+
+    result = run_session(server_env(config_file), interact)
+    assert result.isError is False
+    assert '"enabled": "Disabled"' in result.content[0].text
+
+
+# -- wake / Wake-on-LAN (#199) — power gate + confirm + dry-run ---------------
+
+def test_wake_errors_without_power_gate(config_file):
+    async def interact(session):
+        return await session.call_tool("wake", {"mac": "aa:bb:cc:dd:ee:ff", "confirm": True})
+
+    result = run_session(server_env(config_file), interact)
+    assert result.isError is True
+    assert "operator" in result.content[0].text
+
+
+def test_wake_requires_confirm(config_file):
+    async def interact(session):
+        return await session.call_tool("wake", {"mac": "aa:bb:cc:dd:ee:ff"})
+
+    result = run_session(server_env(config_file, KVM_PILOT_MCP_ALLOW_POWER="1"), interact)
+    assert result.isError is True
+    assert "not confirmed" in result.content[0].text
+
+
+def test_wake_requires_mac(config_file):
+    async def interact(session):
+        return await session.call_tool("wake", {"confirm": True})
+
+    result = run_session(server_env(config_file, KVM_PILOT_MCP_ALLOW_POWER="1"), interact)
+    assert result.isError is True
+    assert "no MAC" in result.content[0].text
+
+
+def test_wake_dry_run_reports_without_sending(config_file):
+    async def interact(session):
+        return await session.call_tool("wake", {"mac": "aa:bb:cc:dd:ee:ff", "confirm": True})
+
+    env = server_env(config_file, KVM_PILOT_MCP_ALLOW_POWER="1", KVM_PILOT_MCP_DRY_RUN="1")
+    result = run_session(env, interact)
+    assert result.isError is False
+    text = result.content[0].text
+    assert '"dry_run": true' in text and "aa:bb:cc:dd:ee:ff" in text

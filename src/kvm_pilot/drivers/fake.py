@@ -85,6 +85,10 @@ class FakeDriver(PowerMixin, CapabilityMixin):
         self.keys: list[str] = []
         self.shortcuts: list[str] = []
         self.mounted: list[str] = []
+        # BootConfig (BootSourceOverride) in-memory state.
+        self.boot_enabled = "Disabled"   # Disabled | Once | Continuous
+        self.boot_target = "none"        # normalized token
+        self.boot_mode = "UEFI"          # UEFI | Legacy
 
     def _record(self, name: str, detail: Any = None) -> None:
         self.actions.append((name, detail))
@@ -122,6 +126,32 @@ class FakeDriver(PowerMixin, CapabilityMixin):
     def reset_hard(self, wait: bool = True) -> None:
         if self.safety.guard("atx.reset_hard", f"HARD reset {self.host}"):
             self._record("reset_hard")
+
+    # -- BootConfig (gated) ---------------------------------------------
+
+    _BOOT_TARGETS = ("pxe", "cd", "hdd", "usb", "bios", "diag", "none")
+
+    def get_boot_options(self) -> dict:
+        return {
+            "enabled": self.boot_enabled,
+            "once": self.boot_enabled == "Once",
+            "persistent": self.boot_enabled == "Continuous",
+            "target": self.boot_target,
+            "mode": self.boot_mode,
+            "mode_settable": True,
+            "allowable": sorted(self._BOOT_TARGETS),
+        }
+
+    def set_boot_device(self, device: str, *, once: bool = True, uefi: bool = True) -> dict:
+        key = str(device).strip().lower()
+        if key not in self._BOOT_TARGETS:
+            raise ValueError(f"unknown boot device {device!r}")
+        if self.safety.guard("redfish.set_boot_device", f"Set next boot -> {key} on {self.host}"):
+            self.boot_enabled = "Disabled" if key == "none" else ("Once" if once else "Continuous")
+            self.boot_target = key
+            self.boot_mode = "UEFI" if uefi else "Legacy"
+            self._record("set_boot_device", key)
+        return self.get_boot_options()
 
     # -- HID -------------------------------------------------------------
 
