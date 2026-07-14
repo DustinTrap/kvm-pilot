@@ -212,7 +212,7 @@ def test_driver_defaults_to_pikvm_when_unset(monkeypatch):
 def test_unsupported_driver_via_env_is_a_clean_error(monkeypatch, capsys):
     # An unknown driver kind (no from-config support) must produce a clean error
     # (exit 1), not a crash.
-    monkeypatch.setenv("KVM_PILOT_DRIVER", "ipmi")
+    monkeypatch.setenv("KVM_PILOT_DRIVER", "nosuchdriver")
     rc = main(["info", "--host", "h"])
     assert rc == 1
     assert "does not support" in capsys.readouterr().err
@@ -1035,3 +1035,14 @@ def test_power_off_never_falls_back_to_wol(monkeypatch):
     rc = main(["power", "off", "--driver", "fake", "--yes"])
     assert rc == 0
     assert called == []
+
+
+def test_driver_ipmi_capabilities_offline(capsys):
+    # The ipmi driver plugs into the capability protocols, so `capabilities`
+    # (structural, no ipmitool call) works with no IPMI-specific CLI code.
+    rc = main(["capabilities", "--driver", "ipmi", "--host", "10.0.1.99"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    for cap in ("power", "system_info", "boot_config", "sensors", "logs"):
+        assert cap in out
+    assert "hid" not in out and "video" not in out  # IPMI has neither

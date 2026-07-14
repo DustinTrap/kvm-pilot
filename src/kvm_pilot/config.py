@@ -99,6 +99,13 @@ class HostConfig:
     mac: str | None = None
     wol_broadcast: str = "255.255.255.255"
 
+    # IPMI (ipmi driver) — the BMC's IPMI transport. host/user/passwd are shared
+    # with the other BMC drivers. ipmi_cipher pins the RAKP cipher suite (some
+    # BMCs need 3 or 17); omit to let ipmitool negotiate.
+    ipmi_interface: str = "lanplus"
+    ipmi_port: int = 623
+    ipmi_cipher: int | None = None
+
 
 def _load_file(path: Path) -> dict[str, Any]:
     if not path.exists():
@@ -136,6 +143,15 @@ def _warn_if_secrets_world_readable(path: Path, data: dict[str, Any]) -> None:
         )
 
 
+def _opt_int(value: object) -> int | None:
+    """Coerce an optional int-ish value (int, numeric str from env, or None)."""
+    if isinstance(value, int):
+        return value
+    if isinstance(value, str) and value.strip():
+        return int(value)
+    return None
+
+
 def resolve_host(
     profile: str | None = None,
     *,
@@ -161,6 +177,9 @@ def resolve_host(
     appliance_ssh_key: str | None = None,
     mac: str | None = None,
     wol_broadcast: str | None = None,
+    ipmi_interface: str | None = None,
+    ipmi_port: int | None = None,
+    ipmi_cipher: int | None = None,
     config_path: Path | None = None,
 ) -> HostConfig:
     """Resolve a HostConfig from args > env > file (in that priority)."""
@@ -247,6 +266,10 @@ def resolve_host(
         mac=pick("mac", mac, "KVM_PILOT_MAC"),
         wol_broadcast=pick(
             "wol_broadcast", wol_broadcast, "KVM_PILOT_WOL_BROADCAST", "255.255.255.255"),
+        ipmi_interface=pick(
+            "ipmi_interface", ipmi_interface, "KVM_PILOT_IPMI_INTERFACE", "lanplus"),
+        ipmi_port=int(pick("ipmi_port", ipmi_port, "KVM_PILOT_IPMI_PORT", 623)),
+        ipmi_cipher=_opt_int(pick("ipmi_cipher", ipmi_cipher, "KVM_PILOT_IPMI_CIPHER")),
     )
 
 
