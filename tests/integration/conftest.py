@@ -84,3 +84,28 @@ def redfish_emulator_url() -> str:
             proc.wait(timeout=10)
         except subprocess.TimeoutExpired:
             proc.kill()
+
+
+@pytest.fixture(scope="session")
+def ipmi_bmc():
+    """Connection params for an external IPMI BMC (OpenIPMI ``ipmi_sim`` or real).
+
+    Env-driven (mirrors ``redfish_emulator_url``): point at an already-running
+    ``ipmi_sim`` (or a real BMC) via ``KVM_PILOT_IPMI_HOST`` [+ ``_PORT`` /
+    ``_USER`` / ``_PASSWD`` / ``_CIPHER``]. Skips when unset so the default suite
+    stays hermetic (macOS has no ipmi_sim build).
+    """
+    host = os.environ.get("KVM_PILOT_IPMI_HOST")
+    if not host:
+        pytest.skip(
+            "external IPMI BMC unavailable: set KVM_PILOT_IPMI_HOST (+ _PORT/_USER/"
+            "_PASSWD/_CIPHER) to an ipmi_sim or real BMC"
+        )
+    cipher = os.environ.get("KVM_PILOT_IPMI_CIPHER")
+    return {
+        "host": host,
+        "port": int(os.environ.get("KVM_PILOT_IPMI_PORT", "623")),
+        "user": os.environ.get("KVM_PILOT_IPMI_USER", "admin"),
+        "passwd": os.environ.get("KVM_PILOT_IPMI_PASSWD", "password"),
+        "cipher": int(cipher) if cipher else None,
+    }
