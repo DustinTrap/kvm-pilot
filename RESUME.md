@@ -4,80 +4,81 @@
 > the end of every session (`.claude/skills/checkpoint/`). Standing project rules
 > live in [CLAUDE.md](CLAUDE.md); this file is only **where we are right now**.
 
-**Last updated:** 2026-07-12 · `main @ e835ebb` · **v0.1.0b2 released to PyPI** (both of today's batches shipped in it; `[Unreleased]` is empty)
+**Last updated:** 2026-07-14 · `main @ 02a5e73` · **v0.1.0b6 released to PyPI**; IPMI driver + ipmi_sim cross-check landed on `main` **post-b6 (unreleased)**
 
 ## Current state
-Two no-hardware batches shipped today, **18 issues closed**, CI green throughout.
+The **remote boot-control + Wake-on-LAN epic (#200) shipped as v0.1.0b6**, and an
+**IPMI driver (#62)** landed after it — the pre-Redfish BMC path for the R710.
 
-- **Batch 1 — "honest eyes at native res"** (b9e9aff…0bc9580, 9 closed:
-  #175 #156 #180 #187 #161 #190 + #151/#126/#144): GLKVM **MJPEG snapshot flip**
-  (#187 — JPEG at native res via `set_params?video_format=1`, held across
-  `streamer_warm()`, V1.5.1 gated out), **firmware-delta ⇒ forced reassessment**
-  + recorded-vs-tested-now evidence (#180), ledger **`conditions` axes** (#156),
-  MCP **`file_firmware_report`** behind the new `EXTERNAL_WRITE` gate (#190),
-  docs-parity CI guard (#175).
-- **Batch 2 — "safety-critical reliability + evidence harness"**
-  (f565146…ab61733, 9 closed: #167 #170 #169 #168 #149 #72 #177 #103 #99):
-  - **Transports** (#167/#170): 409/503 retry method-gated (a destructive POST is
-    never re-fired; #164 breaker semantics preserved); typed `ProtocolError`
-    instead of raw-bytes leak on JSON decode failure.
-  - **Redfish** (#169): `mount_iso` verifies `Inserted=true` (MediaOfflineError
-    on silent no-op); 401 re-auth `logout()`s the old session first (slot leak).
-  - **MCP power** (#168): returns `{verified, observed, note}` + generation bump;
-    honest `verified: null` on GL (ATX lies — quirk relayed from the driver).
-  - **Approval layer** (#149+#72): typed `outcome` field; ELICIT=off hint only
-    after ≥2 consecutive client-side kills; **single-use HMAC-signed expiring
-    receipts** verified at all 3 dispatch sites (`KVM_PILOT_MCP_RECEIPT_TTL`,
-    default 60s) + JSON audit records on `kvm_pilot.mcp.audit` (log lines only,
-    operator's choice). Follow-up filed: **#192** duration-scoped standing approvals.
-  - **`kvm-pilot test-report`** (#99): the first ledger writer — read-only probes
-    auto (snapshot rows always carry #156 conditions), destructive via
-    `--include` + `--attest` through the normal safety gates, pass = assertion +
-    observed effect, honest FAILs. Ledger target `--ledger` >
-    `$KVM_PILOT_TEST_LEDGER` > `~/.config/kvm-pilot/test_runs.jsonl` (never the
-    installed package data).
-  - Riders: #177 quirk `firmware-flash-webui-only` + upgrade-path docs;
-    #103 maturity column on the generated wiki Hardware-Compatibility page.
-- Both batches got a `/simplify` pass; working tree clean, pushed, CI green.
+- **v0.1.0b6 (released 2026-07-14, PRs #203/#204/#205):**
+  - **Wake-on-LAN (#199)** — `wol.py` magic-packet core (hardware-validated: woke a
+    suspended host in ~52s), `kvm-pilot wake` CLI + `wake` MCP tool + `mac`/
+    `wol_broadcast` config (#23), and **`power on` falls back to WoL** when the KVM
+    has no wired ATX/GPIO power path.
+  - **Redfish boot-device control (#28/#201)** — `BOOT_CONFIG` capability +
+    `BootConfig` protocol; `kvm-pilot boot-device <pxe|cd|hdd|usb|bios|diag|none>
+    [--once|--persistent] [--legacy] [--show]` + `boot_options`/`set_boot_device`
+    MCP tools; one-time/persistent, UEFI/legacy, feature-detect allowable + auto-
+    retry-without-mode. Cross-checked against **sushy-tools** (found: `--fake` pins
+    `BootSourceOverrideEnabled=Continuous`).
+  - **In-band boot control (#150)** — `boot-device --via ssh` sets one-time UEFI
+    `BootNext` via `efibootmgr` over the SSH channel (gated `ssh.set_boot_next`).
+- **POST-b6 on `main`, NOT yet released** (next beta bundles these):
+  - **IPMI driver (#206 · `6f01ce7`)** — `drivers/ipmi.py` shells out to
+    `ipmitool -I lanplus` (password via `IPMI_PASSWORD` env, never argv). Power /
+    SystemInfo / BootConfig / Sensors / Logs → `power`/`boot-device`/`sensors`/
+    `logs` work with no new CLI/MCP code. 34 hardware-free tests. IPMI completeness
+    now ≈ Redfish minus VirtualMedia. **This is the R710/iDRAC6 (no-Redfish) path.**
+  - **ipmi_sim cross-check (#207 · `02a5e73`)** — `tests/integration/test_ipmi_external.py`
+    + env-gated `ipmi_bmc` fixture. Ran **6/6 green** against an independent
+    OpenIPMI `ipmi_sim` BMC (answers as MontaVista, not the Dell fixtures) on a
+    Fedora VM stood up on the homelab SNO cluster. Stock-sim limits documented in
+    `docs/decisions.md`. CI all-green; merged.
+- CHANGELOG has **no `[Unreleased]` section yet** for #206/#207 — add one before the
+  next release.
 
 ## Next steps
-- **LIVE FLEET SESSION (the big owed item)** — everything shipped today is
-  unit/emulator-verified only (user's explicit choice). One command now does the
-  intake: **`kvm-pilot test-report --profile <p>`** on `.39`/`.20`/`.11`:
-  - validates the **#187 MJPEG auto-flip** headless at native res (watch the
-    #107 encoder wedge under MJPEG-at-native via the `encoder-wedge` finding),
-  - records the **first conditions-bearing ledger rows** (#156) — e.g.
-    `snapshot pass @ 2560x1440 mjpeg`,
-  - exercises the **#180 firmware-delta** path if any unit gets flashed,
-  - then regenerate maturity (`kvm_pilot.maturity --write`) and PR the rows.
-- **Router epic #181 remaining**: read_screen/send_input intents, warm/EDID
-  strategies (the #187 flip should become a router strategy), MCP routed-exec tool.
-- **#184** (blocked on WHITESKELETON auth), **#185** (needs fast BMC), **#192**
-  (standing approvals, new), **#100/#101** (telemetry pipeline remainder — #100
-  partially superseded by #189/#190, worth re-scoping), **#96** epic remainder.
-- Other open: #183 (password-only targets in router interfaces), #157 (EDID
-  control gap), #152 (per-KVM-type skill), #148 (.mcpb bundle), #172/#171 (docs),
-  #163 (ProxyJump RFC), #123-#117 (Reflexes, post-GA), #64/#62/#29/#28 (drivers),
-  #21-#13 (test infra: ipmi_sim, QEMU vision harness — all hardware-free builds).
+- **Real-BMC validation (#29) — the big owed item, planned for tonight.**
+  Runbook: [`docs/hardware-test-plan-ilo-idrac.md`](docs/hardware-test-plan-ilo-idrac.md).
+  - **DL380 G9 = iLO4** (HAS Redfish, quirky) → full Redfish boot-device + power test.
+  - **R710 = iDRAC6** (NO Redfish, predates it) → expect clean 404, use the new
+    **IPMI** driver (`--driver ipmi`; iDRAC default `root`/`calvin`).
+  - Blocked on the operator providing iLO/iDRAC IPs + creds.
+- **Next beta release**: bump `__about__.py`, move #206/#207 into a dated CHANGELOG
+  section, `gh release create` (Trusted-Publishing → PyPI). Human call.
+- **Doc debt (found by this checkpoint)**: `boot-device` and `wake` shipped in b6
+  but are missing from `docs/cli.md` + `src/kvm_pilot/skill/SKILL.md` command lists.
+- **Deferred IPMI**: SOL `SerialConsole` + `Watchdog` (#13/#28).
+- Other open: OCR #202, router epic #181 remainder, #157 (EDID), #148 (.mcpb),
+  #163 (ProxyJump), Reflexes #123–#117 (post-GA).
 
 ## Device state left non-default (this tool mutates real hardware)
-*(unchanged since 2026-07-08 — no hardware touched on 07-11 or 07-12)*
-- **ed25519 key installed on two connected hosts** (operator-approved):
-  `dtrapani@10.0.1.165` (RHEL) + `dtrapani@10.0.1.18` (server11); comment `kvmbench`.
-- **All three connected hosts at the login/lock screen** (rebooted 07-08).
-- **.20 host (RHEL @ .165): in-band DEAD** — re-run
-  `sudo ip route replace 10.0.1.0/24 dev wlp0s20f3 src 10.0.1.165` after reboot.
-- **WHITESKELETON (10.0.1.19):** Windows lock screen; OpenSSH on; key NOT installed.
-- **.11/.20/.39 KVMs: keep-awake / jiggler ON.** Scorecards in
-  `~/.config/kvm-pilot/scorecards/`. **.39 = V1.9.1.**
+- **`ipmisim` VM (ns `ipmi-test`) on the SNO cluster `sno-lab` — LEFT RUNNING per
+  operator request.** Fedora + `OpenIPMI-lanserv` + `ipmitool` + `kvm-pilot@main`;
+  repo clone with the integration test at `/home/fedora/kp`. Reach it:
+  `KUBECONFIG=~/.kube/sno-lab kubectl port-forward -n ipmi-test
+  pod/virt-launcher-ipmisim-<id> 2222:22` then
+  `ssh -i ~/.ssh/id_ed25519 -p 2222 fedora@localhost` (pod id changes on VM
+  restart; `kubectl get pods -n ipmi-test -l kubevirt.io=virt-launcher`).
+  ipmi_sim: `sudo ipmi_sim -c /etc/ipmi/lan.conf -f /etc/ipmi/ipmisim1.emu -n`
+  (localhost:9001, `ipmiusr`/`test`). A local port-forward background task was
+  active at session end (dies with the session — re-establish as above).
+- **`.16` = the KVM-`.20`-connected host** (RHEL 10.2, my `~/.ssh/id_ed25519`
+  installed, passwordless): ethernet cable plugged in this session → **wired
+  `10.0.1.16` up**; WoL validated (eno1 `5c:60:ba:bb:cf:63`). WiFi alias `.165`
+  exists but the Mac can't reach it (client isolation) — use wired `.16`.
+- **Physical KVM fleet `.11`/`.20`/`.39`** not touched post-compaction this session;
+  prior state may persist (keep-awake/jiggler left ON in earlier sessions; `.39` =
+  firmware V1.9.1). See [[sno-openshift-fed-ws-01-buildout]] for the cluster this
+  IPMI VM runs on.
 
 ## Fleet facts (connected systems)
-- **KVM `.11` → `server11`** (Fedora 44), in-band `10.0.1.18` `dtrapani` (key ok).
-- **KVM `.20` → RHEL 10.2 host**, in-band `10.0.1.165` `dtrapani` (key ok; the
-  DOWN `br0` steals the /24 route after every reboot — re-apply the fix).
-- **KVM `.39` → WHITESKELETON** (Win11), in-band `10.0.1.19` `dusti` (no key).
-- ATX unwired fleet-wide → reboots must be OS-initiated; no remote recovery of a
-  hung host.
+- **KVM `.11` → `fed-ws-01`** (Dell T7610) — now running **SNO OpenShift**
+  (`sno-lab`, node 10.0.1.100), virt-ready (LVMS + CNV). The `ipmisim` VM runs here.
+- **KVM `.20` → RHEL 10.2 host** (`.16` wired / `.165` WiFi), key installed.
+- **KVM `.39` → WHITESKELETON** (Win11), firmware V1.9.1.
+- ATX unwired fleet-wide → reboots are OS-initiated; WoL is the only OOB power-on
+  (hence the #199 `power on` → WoL fallback).
 
 _Standing rules (issue-per-finding · direct commits to `main` · stdlib-only at
 core import · `pip install` ships every surface · docs↔shipped parity · run
