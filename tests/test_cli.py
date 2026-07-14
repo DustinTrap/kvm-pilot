@@ -979,3 +979,59 @@ def test_wake_rejects_bad_mac(capsys):
     rc = main(["wake", "--mac", "not-a-mac", "--host", "fake", "--yes"])
     assert rc == 2
     assert "invalid MAC" in capsys.readouterr().err
+
+
+# -- power on -> Wake-on-LAN fallback when ATX isn't wired (#199) ------------
+
+def _fake_power_on_raises_no_atx(self, wait=True):
+    from kvm_pilot.errors import CapabilityError
+    raise CapabilityError("Power control is unavailable: ATX reports enabled=false")
+
+
+def test_power_on_falls_back_to_wol_when_atx_unavailable(monkeypatch, capsys):
+    from kvm_pilot import wol as wol_mod
+    from kvm_pilot.drivers.fake import FakeDriver
+    monkeypatch.setattr(FakeDriver, "power_on", _fake_power_on_raises_no_atx)
+    monkeypatch.setenv("KVM_PILOT_MAC", "5c:60:ba:bb:cf:63")
+    sent = {}
+    monkeypatch.setattr(wol_mod, "send_magic_packet",
+                        lambda mac, **kw: sent.update(mac=mac, **kw) or b"")
+    rc = main(["power", "on", "--driver", "fake", "--yes"])
+    assert rc == 0
+    assert sent["mac"] == "5c:60:ba:bb:cf:63"
+    assert "Wake-on-LAN" in capsys.readouterr().out
+
+
+def test_power_on_no_atx_no_mac_raises_with_hint(monkeypatch, capsys):
+    from kvm_pilot import wol as wol_mod
+    from kvm_pilot.drivers.fake import FakeDriver
+    monkeypatch.setattr(FakeDriver, "power_on", _fake_power_on_raises_no_atx)
+    monkeypatch.delenv("KVM_PILOT_MAC", raising=False)
+    called = []
+    monkeypatch.setattr(wol_mod, "send_magic_packet", lambda *a, **k: called.append(1))
+    rc = main(["power", "on", "--driver", "fake", "--yes"])
+    assert rc == 1                        # CapabilityError -> exit 1
+    assert called == []                   # no WoL without a MAC
+    assert "Wake-on-LAN" in capsys.readouterr().err  # the actionable hint
+
+
+def test_power_on_no_fallback_when_atx_works(monkeypatch):
+    from kvm_pilot import wol as wol_mod
+    called = []
+    monkeypatch.setattr(wol_mod, "send_magic_packet", lambda *a, **k: called.append(1))
+    monkeypatch.setenv("KVM_PILOT_MAC", "5c:60:ba:bb:cf:63")
+    rc = main(["power", "on", "--driver", "fake", "--yes"])  # fake power_on succeeds
+    assert rc == 0
+    assert called == []                   # fallback only fires on CapabilityError
+
+
+def test_power_off_never_falls_back_to_wol(monkeypatch):
+    # WoL can only power ON — off/reset must not trigger the fallback even if
+    # power_off were to raise.
+    from kvm_pilot import wol as wol_mod
+    called = []
+    monkeypatch.setattr(wol_mod, "send_magic_packet", lambda *a, **k: called.append(1))
+    monkeypatch.setenv("KVM_PILOT_MAC", "5c:60:ba:bb:cf:63")
+    rc = main(["power", "off", "--driver", "fake", "--yes"])
+    assert rc == 0
+    assert called == []
