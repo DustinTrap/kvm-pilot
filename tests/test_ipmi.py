@@ -35,11 +35,16 @@ CHASSIS_STATUS = (
     "Power Overload       : false\n"
     "Last Power Event     : command\n"
 )
+# Real Dell iDRAC6 (R710) FRU shape: the server model is in *Board Product*, while
+# *Product Name* is the iDRAC's configured hostname ("localhost") — a placeholder we
+# must skip, not report as the model (#62 real-hardware finding).
 FRU = (
     "FRU Device Description : Builtin FRU Device (ID 0)\n"
     " Board Mfg             : DELL\n"
+    " Board Product         : PowerEdge R710\n"
+    " Board Serial          : CN1374001D00VJ\n"
     " Product Manufacturer  : DELL\n"
-    " Product Name          : PowerEdge R710\n"
+    " Product Name          : localhost\n"
     " Product Serial        : ABC12345\n"
 )
 MC_INFO = (
@@ -188,10 +193,17 @@ class TestSystemInfo:
         drv, _ = ipmi
         info = drv.get_info()
         assert info["manufacturer"] == "DELL"
+        # model comes from Board Product, NOT the "localhost" Product Name placeholder.
         assert info["model"] == "PowerEdge R710"
         assert info["serial_number"] == "ABC12345"
         assert info["power_state"] == "on"
         assert info["bmc_version"] == "1.85"
+
+    def test_placeholder_product_name_does_not_mask_model(self, ipmi):
+        # Regression for the real iDRAC6 finding: Product Name="localhost" must be
+        # skipped so the model resolves to the Board Product, never "localhost".
+        drv, _ = ipmi
+        assert drv.get_info()["model"] != "localhost"
 
 
 class TestBootConfig:

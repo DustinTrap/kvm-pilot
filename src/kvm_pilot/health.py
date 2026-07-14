@@ -165,7 +165,7 @@ _KNOWN_DEFAULT_CREDS = {("admin", "admin"), ("admin", "password"), ("root", "roo
 
 def _driver_kind(driver: Any) -> str:
     name = type(driver).__name__.lower()
-    for kind in ("glkvm", "blikvm", "redfish", "fake"):
+    for kind in ("glkvm", "blikvm", "redfish", "ipmi", "fake"):
         if kind in name:
             return kind
     return "pikvm"
