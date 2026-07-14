@@ -92,6 +92,13 @@ class HostConfig:
     appliance_ssh_port: int = 22
     appliance_ssh_key: str | None = None
 
+    # Wake-on-LAN: the managed HOST's wired NIC MAC (the WoL target — not the
+    # KVM appliance) + the broadcast address the magic packet goes to. Used by
+    # `kvm-pilot wake` / power-on fallback when the KVM has no wired ATX power
+    # channel (the CRITICAL "no out-of-band reset" finding, #199).
+    mac: str | None = None
+    wol_broadcast: str = "255.255.255.255"
+
 
 def _load_file(path: Path) -> dict[str, Any]:
     if not path.exists():
@@ -152,6 +159,8 @@ def resolve_host(
     appliance_ssh_user: str | None = None,
     appliance_ssh_port: int | None = None,
     appliance_ssh_key: str | None = None,
+    mac: str | None = None,
+    wol_broadcast: str | None = None,
     config_path: Path | None = None,
 ) -> HostConfig:
     """Resolve a HostConfig from args > env > file (in that priority)."""
@@ -235,6 +244,9 @@ def resolve_host(
             pick("appliance_ssh_port", appliance_ssh_port, "KVM_PILOT_APPLIANCE_SSH_PORT", 22)),
         appliance_ssh_key=pick(
             "appliance_ssh_key", appliance_ssh_key, "KVM_PILOT_APPLIANCE_SSH_KEY"),
+        mac=pick("mac", mac, "KVM_PILOT_MAC"),
+        wol_broadcast=pick(
+            "wol_broadcast", wol_broadcast, "KVM_PILOT_WOL_BROADCAST", "255.255.255.255"),
     )
 
 

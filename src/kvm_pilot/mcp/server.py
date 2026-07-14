@@ -858,6 +858,47 @@ def set_boot_device(
         }
 
 
+@mcp.tool(annotations=_DESTRUCTIVE)
+def wake(
+    mac: str | None = None,
+    broadcast: str | None = None,
+    count: int = 3,
+    confirm: bool = False,
+    profile: str | None = None,
+) -> dict:
+    """Send a Wake-on-LAN magic packet to power the host on. POWER (soft).
+
+    Disabled unless the operator enabled power control (the power-enable env var,
+    see the co-located README.md) in the server's own environment. ``confirm=true``
+    is required. ``mac`` defaults to the profile's ``mac``; ``broadcast`` to its
+    ``wol_broadcast``. No KVM driver is contacted — WoL is a broadcast sent from
+    the server's own host onto the target's L2 segment.
+    """
+    if not _env_flag("KVM_PILOT_MCP_ALLOW_POWER"):
+        raise ToolError(
+            "power control is disabled on this server. Only the human operator can "
+            "enable it, by setting the power-enable environment variable (documented "
+            "in the server's README.md) in the MCP server's own environment before "
+            "starting it. It cannot be enabled from within an agent session."
+        )
+    if not confirm:
+        raise ToolError("wake was not confirmed")
+    cfg = resolve_host(profile or os.environ.get("KVM_PILOT_PROFILE"))
+    target = mac or cfg.mac
+    if not target:
+        raise ToolError("no MAC — pass mac=, or set 'mac' in the host profile")
+    bc = broadcast or cfg.wol_broadcast
+    from kvm_pilot import wol
+
+    if _dry_run():
+        return {**_provenance(cfg), "requested_mac": target, "broadcast": bc, "dry_run": True}
+    wol.send_magic_packet(target, broadcast=bc, count=count)
+    return {
+        **_provenance(cfg), "requested_mac": target, "broadcast": bc,
+        "count": count, "dry_run": False,
+    }
+
+
 # -- HID act tools (issue #61): see act.py for the two-guarantee model --------
 
 

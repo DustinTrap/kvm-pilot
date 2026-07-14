@@ -55,6 +55,7 @@ EXPECTED_ANNOTATIONS = {
     "appliance_status": READ,
     "access_paths": READ,
     "power": DESTRUCTIVE,
+    "wake": DESTRUCTIVE,
     "set_boot_device": DESTRUCTIVE,
     "type_text": DESTRUCTIVE,
     "press_key": DESTRUCTIVE,
@@ -1444,3 +1445,43 @@ def test_boot_options_is_read_only(config_file):
     result = run_session(server_env(config_file), interact)
     assert result.isError is False
     assert '"enabled": "Disabled"' in result.content[0].text
+
+
+# -- wake / Wake-on-LAN (#199) — power gate + confirm + dry-run ---------------
+
+def test_wake_errors_without_power_gate(config_file):
+    async def interact(session):
+        return await session.call_tool("wake", {"mac": "aa:bb:cc:dd:ee:ff", "confirm": True})
+
+    result = run_session(server_env(config_file), interact)
+    assert result.isError is True
+    assert "operator" in result.content[0].text
+
+
+def test_wake_requires_confirm(config_file):
+    async def interact(session):
+        return await session.call_tool("wake", {"mac": "aa:bb:cc:dd:ee:ff"})
+
+    result = run_session(server_env(config_file, KVM_PILOT_MCP_ALLOW_POWER="1"), interact)
+    assert result.isError is True
+    assert "not confirmed" in result.content[0].text
+
+
+def test_wake_requires_mac(config_file):
+    async def interact(session):
+        return await session.call_tool("wake", {"confirm": True})
+
+    result = run_session(server_env(config_file, KVM_PILOT_MCP_ALLOW_POWER="1"), interact)
+    assert result.isError is True
+    assert "no MAC" in result.content[0].text
+
+
+def test_wake_dry_run_reports_without_sending(config_file):
+    async def interact(session):
+        return await session.call_tool("wake", {"mac": "aa:bb:cc:dd:ee:ff", "confirm": True})
+
+    env = server_env(config_file, KVM_PILOT_MCP_ALLOW_POWER="1", KVM_PILOT_MCP_DRY_RUN="1")
+    result = run_session(env, interact)
+    assert result.isError is False
+    text = result.content[0].text
+    assert '"dry_run": true' in text and "aa:bb:cc:dd:ee:ff" in text

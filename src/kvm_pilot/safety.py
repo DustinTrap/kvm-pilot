@@ -38,6 +38,9 @@ DESTRUCTIVE_OPS: set[str] = {
     "atx.reset_hard",
     "atx.power_on",  # included: powering a box on is a state change worth gating
     "atx.click",
+    # Wake-on-LAN: sending a magic packet powers a sleeping/off host ON — a state
+    # change, gated like any power-on (the WoL fallback when there's no ATX, #199).
+    "wol.wake",
     "msd.set_params",
     "msd.connect",
     "msd.disconnect",
@@ -120,6 +123,7 @@ class EffectClass(StrEnum):
 OP_EFFECT: dict[str, EffectClass] = {
     # ATX / power
     "atx.power_on": EffectClass.POWER_SOFT,
+    "wol.wake": EffectClass.POWER_SOFT,   # WoL magic packet powers a host on
     "atx.power_off": EffectClass.POWER_SOFT,
     "atx.power_off_hard": EffectClass.POWER_HARD,
     "atx.reset_hard": EffectClass.POWER_HARD,
