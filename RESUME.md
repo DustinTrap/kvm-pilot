@@ -4,7 +4,7 @@
 > the end of every session (`.claude/skills/checkpoint/`). Standing project rules
 > live in [CLAUDE.md](CLAUDE.md); this file is only **where we are right now**.
 
-**Last updated:** 2026-07-14 · `main @ 02a5e73` · **v0.1.0b6 released to PyPI**; IPMI driver + ipmi_sim cross-check landed on `main` **post-b6 (unreleased)**
+**Last updated:** 2026-07-14 · `main @ 556b7ae` · **v0.1.0b6 released to PyPI**; IPMI driver + ipmi_sim cross-check landed on `main` **post-b6 (unreleased)**; `ipmisim` test VM now on the LAN via DHCP (`10.0.1.152`)
 
 ## Current state
 The **remote boot-control + Wake-on-LAN epic (#200) shipped as v0.1.0b6**, and an
@@ -54,15 +54,22 @@ The **remote boot-control + Wake-on-LAN epic (#200) shipped as v0.1.0b6**, and a
 
 ## Device state left non-default (this tool mutates real hardware)
 - **`ipmisim` VM (ns `ipmi-test`) on the SNO cluster `sno-lab` — LEFT RUNNING per
-  operator request.** Fedora + `OpenIPMI-lanserv` + `ipmitool` + `kvm-pilot@main`;
-  repo clone with the integration test at `/home/fedora/kp`. Reach it:
-  `KUBECONFIG=~/.kube/sno-lab kubectl port-forward -n ipmi-test
-  pod/virt-launcher-ipmisim-<id> 2222:22` then
-  `ssh -i ~/.ssh/id_ed25519 -p 2222 fedora@localhost` (pod id changes on VM
-  restart; `kubectl get pods -n ipmi-test -l kubevirt.io=virt-launcher`).
-  ipmi_sim: `sudo ipmi_sim -c /etc/ipmi/lan.conf -f /etc/ipmi/ipmisim1.emu -n`
-  (localhost:9001, `ipmiusr`/`test`). A local port-forward background task was
-  active at session end (dies with the session — re-establish as above).
+  operator request, now on the LAN via DHCP.** Fedora + `OpenIPMI-lanserv` +
+  `ipmitool` + `kvm-pilot@main`; repo clone with the integration test at
+  `/home/fedora/kp`. **Reach it directly from the LAN:
+  `ssh -i ~/.ssh/id_ed25519 fedora@10.0.1.152`** (DHCP lease; MAC of the LAN NIC
+  `02:66:04:5f:f3:60` — reserve it on the UDM if a stable IP is wanted, else the
+  lease may change on renewal/restart). ipmi_sim:
+  `sudo ipmi_sim -c /etc/ipmi/lan.conf -f /etc/ipmi/ipmisim1.emu -n` (binds
+  `localhost:9001`, `ipmiusr`/`test` — to hit it over the LAN, change lan.conf
+  `addr` to `0.0.0.0`/the LAN IP + open the guest firewall).
+- **Cluster networking changed to give the VM its LAN IP (additive, reversible):**
+  installed the **Kubernetes NMState Operator** (`openshift-nmstate`), added NNCP
+  **`ovn-lan-bridge-mapping`** (OVN `bridge-mappings: lan→br-ex`, `Available`), and
+  a localnet NAD **`ipmi-test/lan`**. The VM has a **secondary `bridge` NIC** on
+  that NAD (pod network kept primary). Node's primary/API path via br-ex was
+  verified reachable throughout. To revert: remove the VM's `lan` interface/network,
+  then `kubectl delete nncp ovn-lan-bridge-mapping net-attach-def/lan -n ipmi-test`.
 - **`.16` = the KVM-`.20`-connected host** (RHEL 10.2, my `~/.ssh/id_ed25519`
   installed, passwordless): ethernet cable plugged in this session → **wired
   `10.0.1.16` up**; WoL validated (eno1 `5c:60:ba:bb:cf:63`). WiFi alias `.165`
