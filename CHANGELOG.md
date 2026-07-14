@@ -4,7 +4,10 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.0b7] — 2026-07-14
+
+**Beta 7 — IPMI.** A full IPMI 2.0 driver for pre-Redfish BMCs (Dell iDRAC6, older
+HPE iLO, Supermicro), validated end-to-end against a live Dell iDRAC6 (R710).
 
 ### Added
 - **IPMI driver (#62).** `--driver ipmi` shells out to `ipmitool -I lanplus`
