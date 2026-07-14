@@ -112,6 +112,12 @@ class RedfishState:
         self.boot_expose_mode = True
         self.boot_patch_rejects_mode = False
         self.boot_patch_status = 200
+        # boot_patch_fail_status: a boot PATCH returns this status for ANY body
+        # (a non-mode failure — 500, or a 400 unrelated to the mode property — so
+        # the driver must NOT swallow it as the mode-retry case). boot_absent: the
+        # ComputerSystem exposes no Boot object at all (a minimal BMC).
+        self.boot_patch_fail_status: int | None = None
+        self.boot_absent = False
         self.patches: list[tuple[str, dict]] = []
 
 
@@ -310,7 +316,7 @@ class _Handler(BaseHTTPRequestHandler):
         }
         if st.boot_expose_mode:
             boot["BootSourceOverrideMode"] = st.boot_override_mode
-        return {
+        doc = {
             "@odata.id": SYS,
             "@odata.type": "#ComputerSystem.v1_20_0.ComputerSystem",
             "Manufacturer": "ACME", "Model": "Server 9000", "SerialNumber": "SN-1",
@@ -327,6 +333,9 @@ class _Handler(BaseHTTPRequestHandler):
             # (Dell shape); the driver must scan both and follow the link.
             "Actions": {"#ComputerSystem.Reset": reset},
         }
+        if st.boot_absent:
+            doc.pop("Boot")
+        return doc
 
     def _chassis(self) -> dict:
         doc = {"@odata.id": CHAS}
@@ -424,6 +433,12 @@ class _Handler(BaseHTTPRequestHandler):
         boot = body.get("Boot")
         if not isinstance(boot, dict):
             self._send({"error": {"message": "unsupported PATCH target"}}, status=400)
+            return
+        if st.boot_patch_fail_status:
+            self._send({"error": {"@Message.ExtendedInfo": [
+                {"MessageId": "Base.1.0.InternalError",
+                 "Message": "the BMC could not apply the boot override"}]}},
+                status=st.boot_patch_fail_status)
             return
         target = boot.get("BootSourceOverrideTarget")
         if target is not None and target not in st.boot_allowable:
