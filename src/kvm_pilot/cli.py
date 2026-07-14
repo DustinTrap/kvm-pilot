@@ -361,6 +361,8 @@ def cmd_wake(args) -> int:
 
 
 def cmd_boot_device(args) -> int:
+    if getattr(args, "via", "auto") == "ssh":
+        return _boot_device_via_ssh(args)
     bc = cast("BootConfig", _client(args, Capability.BOOT_CONFIG))
     if args.device is None:
         if not args.show:
@@ -371,6 +373,66 @@ def cmd_boot_device(args) -> int:
         return 0
     result = bc.set_boot_device(args.device, once=not args.persistent, uefi=not args.legacy)
     print(json.dumps(result, indent=2))
+    return 0
+
+
+def _boot_device_via_ssh(args) -> int:
+    """boot-device over the in-band SSH channel via efibootmgr BootNext (#150).
+
+    Single-gate design: the efibootmgr READ is harmless and runs on a
+    pre-consented channel; only the state-changing SET is gated, once, as
+    ``ssh.set_boot_next`` — so the flow never double-prompts through the
+    per-command ``ssh.exec`` gate. efibootmgr needs root, so commands are
+    ``sudo``-prefixed (passwordless sudo or a tty required on the target).
+    """
+    from . import efiboot
+    from .ssh import SSHChannel
+
+    cfg = _resolve_cfg(args)
+    ch = SSHChannel.from_config(cfg, confirm=allow_all, dry_run=False)
+    read = ch.ssh_exec("sudo efibootmgr")
+    if not read["ok"]:
+        print(f"boot-device (ssh): efibootmgr read failed: "
+              f"{read.get('stderr') or read.get('returncode')}", file=sys.stderr)
+        return 1
+    parsed = efiboot.parse_efibootmgr(read["stdout"])
+    if args.device is None:
+        if not args.show:
+            print("boot-device: give a device (pxe|cd|hdd|usb) or --show", file=sys.stderr)
+            return 2
+        print(json.dumps({"via": "ssh", "current": parsed["current"],
+                          "order": parsed["order"], "entries": parsed["entries"]}, indent=2))
+        return 0
+    if args.persistent:
+        print("boot-device (ssh): --persistent isn't supported over SSH yet; "
+              "efibootmgr BootNext is one-time only", file=sys.stderr)
+        return 2
+    try:
+        entry = efiboot.match_boot_entry(parsed["entries"], args.device)
+    except ValueError as exc:
+        print(f"boot-device (ssh): {exc}", file=sys.stderr)
+        return 2
+    if entry is None:
+        print(f"boot-device (ssh): no '{args.device}' boot entry found. Available:",
+              file=sys.stderr)
+        for bid in sorted(parsed["entries"]):
+            print(f"  Boot{bid}: {parsed['entries'][bid]}", file=sys.stderr)
+        return 2
+    confirm = allow_all if getattr(args, "yes", False) else interactive_confirm
+    policy = SafetyPolicy(dry_run=getattr(args, "dry_run", False), confirm=confirm)
+    cmd = f"sudo {efiboot.set_boot_next_command(entry)}"
+    desc = f"Set next boot -> {args.device} (BootNext {entry}) on {ch.target}"
+    if not policy.guard("ssh.set_boot_next", desc):
+        print(json.dumps({"via": "ssh", "dry_run": True, "device": args.device,
+                          "entry": entry, "command": cmd}, indent=2))
+        return 0
+    res = ch.ssh_exec(cmd)
+    if not res["ok"]:
+        print(f"boot-device (ssh): set BootNext failed: "
+              f"{res.get('stderr') or res.get('returncode')}", file=sys.stderr)
+        return 1
+    print(json.dumps({"via": "ssh", "device": args.device, "entry": entry,
+                      "boot_next": entry, "once": True}, indent=2))
     return 0
 
 
@@ -1405,6 +1467,9 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--persistent", action="store_true",
                    help="Persist across reboots (default: one-time, cleared after next boot)")
     p.add_argument("--legacy", action="store_true", help="Legacy BIOS boot mode (default: UEFI)")
+    p.add_argument("--via", choices=["auto", "redfish", "ssh"], default="auto",
+                   help="Control path: 'redfish'/'auto' = BMC BootSourceOverride; "
+                        "'ssh' = in-band efibootmgr BootNext on the host OS (#150)")
     _add_common(p)
     p.set_defaults(func=cmd_boot_device, _preflight=True)
 
