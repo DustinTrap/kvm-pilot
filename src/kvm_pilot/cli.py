@@ -51,11 +51,19 @@ if TYPE_CHECKING:
     # capability-partial (a BMC — strong on structured state, but no keyboard or
     # screen), so capability-specific subcommands gate on supports() before
     # dispatch instead of AttributeError-ing deep in a handler.
-    from .drivers.base import BootConfig, BootProgress, FirmwareUpdate, Logs, Sensors
+    from .drivers.base import (
+        BootConfig,
+        BootProgress,
+        FirmwareUpdate,
+        Logs,
+        Sensors,
+        VirtualMedia,
+    )
     from .drivers.fake import FakeDriver
+    from .drivers.ipmi import IpmiDriver
     from .drivers.redfish import RedfishDriver
 
-    AnyDriver = KVMClient | FakeDriver | RedfishDriver
+    AnyDriver = KVMClient | FakeDriver | RedfishDriver | IpmiDriver
     RichDriver = KVMClient | FakeDriver
 
 
@@ -568,7 +576,7 @@ def cmd_media_list(args) -> int:
 
 
 def cmd_mount(args) -> int:
-    kvm = _client(args, Capability.VIRTUAL_MEDIA)
+    kvm = cast("VirtualMedia", _client(args, Capability.VIRTUAL_MEDIA))
     name = kvm.mount_iso(args.source, image_name=args.name, cdrom=not args.usb)
     print(f"mounted: {name}")
     return 0
@@ -576,7 +584,7 @@ def cmd_mount(args) -> int:
 
 def cmd_eject(args) -> int:
     # The inverse of mount: without it, detaching an ISO required writing Python.
-    kvm = _client(args, Capability.VIRTUAL_MEDIA)
+    kvm = cast("VirtualMedia", _client(args, Capability.VIRTUAL_MEDIA))
     kvm.msd_disconnect()
     print("ejected: virtual media detached")
     return 0
@@ -1218,7 +1226,7 @@ def cmd_events(args) -> int:
 # -- parser ----------------------------------------------------------------
 
 def _add_common(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--driver", choices=["pikvm", "glkvm", "blikvm", "redfish", "fake"],
+    p.add_argument("--driver", choices=["pikvm", "glkvm", "blikvm", "redfish", "ipmi", "fake"],
                    help="Device driver (overrides KVM_PILOT_DRIVER / config profile; "
                         "default pikvm; 'glkvm' = GL.iNet GLKVM fork, 'redfish' = a DMTF "
                         "Redfish BMC (no HID/Video — capability-partial), 'fake' = no hardware)")

@@ -145,13 +145,17 @@ def test_make_driver_from_config_dispatches_on_cfg_driver() -> None:
 
     assert isinstance(make_driver_from_config(HostConfig(host="h", driver="glkvm")), GLKVMDriver)
     assert isinstance(make_driver_from_config(HostConfig(host="h", driver="fake")), FakeDriver)
-    # redfish now builds via RedfishDriver.from_config (construction only, lazy login).
+    # redfish/ipmi build via their from_config (construction only, no BMC contacted).
     assert isinstance(
         make_driver_from_config(HostConfig(host="h", driver="redfish")), RedfishDriver
     )
+    from kvm_pilot.drivers import IpmiDriver
+    assert isinstance(
+        make_driver_from_config(HostConfig(host="h", driver="ipmi")), IpmiDriver
+    )
     # A genuinely unknown kind still raises a clean, actionable error.
     with pytest.raises(KVMPilotError, match="does not support"):
-        make_driver_from_config(HostConfig(host="h", driver="ipmi"))
+        make_driver_from_config(HostConfig(host="h", driver="nosuchdriver"))
 
 
 def test_factory_attaches_ssh_channel_when_configured() -> None:

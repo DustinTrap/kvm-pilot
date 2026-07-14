@@ -38,6 +38,7 @@ if TYPE_CHECKING:
     from ..config import HostConfig
     from .fake import FakeDriver
     from .glkvm import GLKVMDriver
+    from .ipmi import IpmiDriver
     from .pikvm import BliKVMDriver
     from .redfish import RedfishDriver
 
@@ -79,6 +80,12 @@ def _make_redfish(**conf: object) -> KVMDriver:
     return RedfishDriver(**conf)  # type: ignore[arg-type]
 
 
+def _make_ipmi(**conf: object) -> KVMDriver:
+    from .ipmi import IpmiDriver
+
+    return IpmiDriver(**conf)  # type: ignore[arg-type]
+
+
 _DRIVER_FACTORIES: dict[str, Callable[..., KVMDriver]] = {
     # PiKVM-family: one base (PiKVMDriver) with thin GLKVM/BliKVM subclasses for
     # the API-compatible forks.
@@ -87,6 +94,8 @@ _DRIVER_FACTORIES: dict[str, Callable[..., KVMDriver]] = {
     "blikvm": _make_blikvm,
     # One Redfish driver covers Dell iDRAC, HPE iLO, Supermicro, Lenovo XCC, OpenBMC.
     "redfish": _make_redfish,
+    # IPMI 2.0 for pre-Redfish BMCs (iDRAC6, older iLO) via ipmitool.
+    "ipmi": _make_ipmi,
     "fake": _make_fake,
 }
 
@@ -119,7 +128,7 @@ def make_driver(kind: str = "pikvm", **conf: object) -> KVMDriver:
 
 def make_driver_from_config(
     cfg: HostConfig, *, confirm: Callable[[str, str], bool] | None = None, dry_run: bool = False
-) -> KVMClient | FakeDriver | RedfishDriver:
+) -> KVMClient | FakeDriver | RedfishDriver | IpmiDriver:
     """Build the driver named by ``cfg.driver`` from a resolved ``HostConfig``.
 
     Shared by the CLI and the MCP server so a profile/env that pins
@@ -132,7 +141,7 @@ def make_driver_from_config(
     if kind == "fake":
         from .fake import FakeDriver
 
-        drv: KVMClient | FakeDriver | RedfishDriver = FakeDriver(
+        drv: KVMClient | FakeDriver | RedfishDriver | IpmiDriver = FakeDriver(
             host=cfg.host, confirm=confirm, dry_run=dry_run
         )
     elif kind in ("pikvm", "glkvm", "blikvm"):
@@ -146,10 +155,14 @@ def make_driver_from_config(
         from .redfish import RedfishDriver
 
         drv = RedfishDriver.from_config(cfg, confirm=confirm, dry_run=dry_run)
+    elif kind == "ipmi":
+        from .ipmi import IpmiDriver
+
+        drv = IpmiDriver.from_config(cfg, confirm=confirm, dry_run=dry_run)
     else:
         raise KVMPilotError(
             f"Driver {kind!r} does not support from-config construction here "
-            "(supported: pikvm, glkvm, blikvm, redfish, fake). Build it directly with "
+            "(supported: pikvm, glkvm, blikvm, redfish, ipmi, fake). Build it directly with "
             f"make_driver({kind!r}, ...) from the library."
         )
     # Attach the in-band SSH channel to the managed host's OS when the profile
@@ -190,6 +203,10 @@ def __getattr__(name: str) -> object:
         from .redfish import RedfishDriver
 
         return RedfishDriver
+    if name == "IpmiDriver":
+        from .ipmi import IpmiDriver
+
+        return IpmiDriver
     if name == "GLKVMDriver":
         from .glkvm import GLKVMDriver
 
@@ -224,6 +241,7 @@ __all__ = [
     "register_driver",
     "FakeDriver",
     "RedfishDriver",
+    "IpmiDriver",
     "GLKVMDriver",
     "BliKVMDriver",
 ]
