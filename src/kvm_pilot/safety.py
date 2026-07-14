@@ -65,6 +65,12 @@ DESTRUCTIVE_OPS: set[str] = {
     # pre-reboot state change worth gating, though not itself a power action.
     "redfish.set_boot_device",
     "ssh.set_boot_next",
+    # IPMI (ipmitool) driver — power + boot-device on pre-Redfish BMCs.
+    "ipmi.power_on",
+    "ipmi.power_off",
+    "ipmi.power_off_hard",
+    "ipmi.reset_hard",
+    "ipmi.set_boot_device",
     # HID input changes target state too: keystrokes and clicks land on a live
     # console (rm -rf is one type_text away). Mouse *moves* stay ungated.
     "hid.ctrl_alt_delete",
@@ -152,6 +158,11 @@ OP_EFFECT: dict[str, EffectClass] = {
     # a power/media action, so an actuator can't launder it as either.
     "redfish.set_boot_device": EffectClass.CONFIG_MUTATION,
     "ssh.set_boot_next": EffectClass.CONFIG_MUTATION,
+    "ipmi.power_on": EffectClass.POWER_SOFT,
+    "ipmi.power_off": EffectClass.POWER_SOFT,      # 'soft' = ACPI graceful
+    "ipmi.power_off_hard": EffectClass.POWER_HARD,
+    "ipmi.reset_hard": EffectClass.POWER_HARD,
+    "ipmi.set_boot_device": EffectClass.CONFIG_MUTATION,
     # HID input
     "hid.type_text": EffectClass.HID_INPUT,
     "hid.press_key": EffectClass.HID_INPUT,
