@@ -57,6 +57,11 @@ DESTRUCTIVE_OPS: set[str] = {
     "redfish.reset_hard",
     "redfish.virtual_media_insert",
     "redfish.virtual_media_eject",
+    # Changing the boot device (Redfish BootSourceOverride, or an in-band
+    # efibootmgr BootNext) alters what the host boots on its next reset — a
+    # pre-reboot state change worth gating, though not itself a power action.
+    "redfish.set_boot_device",
+    "ssh.set_boot_next",
     # HID input changes target state too: keystrokes and clicks land on a live
     # console (rm -rf is one type_text away). Mouse *moves* stay ungated.
     "hid.ctrl_alt_delete",
@@ -138,6 +143,11 @@ OP_EFFECT: dict[str, EffectClass] = {
     "redfish.reset_hard": EffectClass.POWER_HARD,
     "redfish.virtual_media_insert": EffectClass.MEDIA,
     "redfish.virtual_media_eject": EffectClass.MEDIA,
+    # Boot-device override (Redfish BootSourceOverride / in-band efibootmgr
+    # BootNext): changes what the host boots next reset — a config mutation, not
+    # a power/media action, so an actuator can't launder it as either.
+    "redfish.set_boot_device": EffectClass.CONFIG_MUTATION,
+    "ssh.set_boot_next": EffectClass.CONFIG_MUTATION,
     # HID input
     "hid.type_text": EffectClass.HID_INPUT,
     "hid.press_key": EffectClass.HID_INPUT,

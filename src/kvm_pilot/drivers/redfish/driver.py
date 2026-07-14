@@ -152,6 +152,20 @@ def _log_within_lookback(created: object, cutoff: float | None) -> bool:
     return ts >= cutoff
 
 
+# Normalized boot-device token -> Redfish BootSourceOverrideTarget (DSP0268).
+# Aliases (dvd/disk/setup/diags) fold onto the canonical tokens.
+_BOOT_TARGET_MAP = {
+    "pxe": "Pxe", "cd": "Cd", "dvd": "Cd", "hdd": "Hdd", "disk": "Hdd",
+    "usb": "Usb", "bios": "BiosSetup", "setup": "BiosSetup",
+    "diag": "Diags", "diags": "Diags", "none": "None",
+}
+# Redfish target -> normalized token, for reporting.
+_BOOT_TARGET_REVERSE = {
+    "Pxe": "pxe", "Cd": "cd", "Hdd": "hdd", "Usb": "usb",
+    "BiosSetup": "bios", "Diags": "diag", "None": "none",
+}
+
+
 class RedfishDriver(PowerMixin, CapabilityMixin):
     """A Redfish BMC driver. See module docstring for the capability scope."""
 
@@ -616,6 +630,98 @@ class RedfishDriver(PowerMixin, CapabilityMixin):
             # as off would tell a wait loop the host is down mid-transition.
             return PHASE_POWER_OFF if sysd.get("PowerState") == "Off" else PHASE_UNKNOWN
         return _BOOT_PROGRESS_MAP.get(str(last), PHASE_UNKNOWN)
+
+    # -- BootConfig (BootSourceOverride) ---------------------------------
+
+    def _boot(self) -> dict:
+        """The current ``ComputerSystem.Boot`` object, re-read fresh.
+
+        The override is operator-set config that may have changed out-of-band, so
+        it is never cached. Resolving it also populates ``_system_uri`` for PATCH.
+        """
+        return self._system_fresh().get("Boot") or {}
+
+    def get_boot_options(self) -> dict:
+        """Report the current boot override (normalized + raw)."""
+        boot = self._boot()
+        enabled = boot.get("BootSourceOverrideEnabled", "Disabled")
+        raw_target = boot.get("BootSourceOverrideTarget", "None")
+        allowable_raw = boot.get("BootSourceOverrideTarget@Redfish.AllowableValues") or []
+        return {
+            "enabled": enabled,               # Disabled | Once | Continuous
+            "once": enabled == "Once",
+            "persistent": enabled == "Continuous",
+            "target": _BOOT_TARGET_REVERSE.get(
+                raw_target, raw_target.lower() if isinstance(raw_target, str) else raw_target
+            ),
+            "target_raw": raw_target,
+            "mode": boot.get("BootSourceOverrideMode"),   # UEFI | Legacy | None (not exposed)
+            "mode_settable": "BootSourceOverrideMode" in boot,
+            "allowable": sorted(
+                {_BOOT_TARGET_REVERSE.get(t, t.lower()) for t in allowable_raw if isinstance(t, str)}
+            ),
+            "allowable_raw": list(allowable_raw),
+        }
+
+    def set_boot_device(self, device: str, *, once: bool = True, uefi: bool = True) -> dict:
+        """Set the next-boot (``once``) or persistent boot device via BootSourceOverride.
+
+        ``device`` is a normalized token (``pxe|cd|hdd|usb|bios|diag|none``);
+        ``none`` clears the override. Feature-detects the BMC's advertised targets
+        and its support for ``BootSourceOverrideMode`` (older iLO4/iDRAC7 omit it),
+        so a target the box rejects fails fast with a clear error instead of an
+        opaque 400. Returns the resulting :meth:`get_boot_options`.
+        """
+        key = str(device).strip().lower()
+        if key not in _BOOT_TARGET_MAP:
+            choices = sorted({"pxe", "cd", "hdd", "usb", "bios", "diag", "none"})
+            raise KVMPilotError(f"unknown boot device {device!r}; choose one of {choices}")
+        target = _BOOT_TARGET_MAP[key]
+        boot = self._boot()
+        allowable = boot.get("BootSourceOverrideTarget@Redfish.AllowableValues")
+        # "None" always clears; other targets must be advertised (if the BMC says).
+        if target != "None" and allowable and target not in allowable:
+            raise CapabilityError(
+                f"{self.host} does not allow boot target {target!r}; advertises {list(allowable)}"
+            )
+        enabled = "Disabled" if target == "None" else ("Once" if once else "Continuous")
+        patch: dict[str, Any] = {
+            "Boot": {
+                "BootSourceOverrideEnabled": enabled,
+                "BootSourceOverrideTarget": target,
+            }
+        }
+        # Set mode only where the target exposes it — PATCHing a mode the BMC
+        # doesn't model 400s or is silently dropped (iLO4/iDRAC7).
+        mode_exposed = "BootSourceOverrideMode" in boot
+        if mode_exposed and target != "None":
+            patch["Boot"]["BootSourceOverrideMode"] = "UEFI" if uefi else "Legacy"
+
+        desc = (
+            f"Set next boot -> {key} ({'once' if once else 'persistent'}"
+            f"{', UEFI' if mode_exposed and uefi else ''}) on {self.host} [{self._system_uri}]"
+        )
+        if not self.safety.guard("redfish.set_boot_device", desc):
+            return self.get_boot_options()  # dry-run: gated and skipped
+
+        assert self._system_uri is not None
+        try:
+            resp = self._http.request("PATCH", self._system_uri, json_body=patch)
+        except KVMPilotError as exc:
+            # Some BMCs reject the mode property specifically (PropertyNotWritable
+            # / 400). Retry once without it — the override target still applies.
+            if (
+                mode_exposed
+                and exc.status_code == 400
+                and "BootSourceOverrideMode" in patch["Boot"]
+            ):
+                logger.info("%s rejected BootSourceOverrideMode; retrying without it", self.host)
+                del patch["Boot"]["BootSourceOverrideMode"]
+                resp = self._http.request("PATCH", self._system_uri, json_body=patch)
+            else:
+                raise
+        self._handle_async(resp)
+        return self.get_boot_options()
 
     # -- Logs ------------------------------------------------------------
 

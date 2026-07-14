@@ -51,7 +51,7 @@ if TYPE_CHECKING:
     # capability-partial (a BMC — strong on structured state, but no keyboard or
     # screen), so capability-specific subcommands gate on supports() before
     # dispatch instead of AttributeError-ing deep in a handler.
-    from .drivers.base import BootProgress, FirmwareUpdate, Logs, Sensors
+    from .drivers.base import BootConfig, BootProgress, FirmwareUpdate, Logs, Sensors
     from .drivers.fake import FakeDriver
     from .drivers.redfish import RedfishDriver
 
@@ -331,6 +331,20 @@ def cmd_snapshot(args) -> int:
     kvm = _rich_client(args, Capability.VIDEO)
     out = kvm.snapshot_save(args.output)
     print(f"Saved {out}")
+    return 0
+
+
+def cmd_boot_device(args) -> int:
+    bc = cast("BootConfig", _client(args, Capability.BOOT_CONFIG))
+    if args.device is None:
+        if not args.show:
+            print("boot-device: give a device (pxe|cd|hdd|usb|bios|diag|none) or --show",
+                  file=sys.stderr)
+            return 2
+        print(json.dumps(bc.get_boot_options(), indent=2))
+        return 0
+    result = bc.set_boot_device(args.device, once=not args.persistent, uefi=not args.legacy)
+    print(json.dumps(result, indent=2))
     return 0
 
 
@@ -1342,6 +1356,22 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("action", choices=["on", "off", "off-hard", "reset"])
     _add_common(p)
     p.set_defaults(func=cmd_power, _preflight=True)
+
+    p = sub.add_parser(
+        "boot-device",
+        help="Set the next-boot device (Redfish BootSourceOverride); --show to read",
+    )
+    p.add_argument(
+        "device", nargs="?",
+        choices=["pxe", "cd", "hdd", "usb", "bios", "diag", "none"],
+        help="Boot device for the next reset (omit with --show; 'none' clears the override)",
+    )
+    p.add_argument("--show", action="store_true", help="Show the current boot override and exit")
+    p.add_argument("--persistent", action="store_true",
+                   help="Persist across reboots (default: one-time, cleared after next boot)")
+    p.add_argument("--legacy", action="store_true", help="Legacy BIOS boot mode (default: UEFI)")
+    _add_common(p)
+    p.set_defaults(func=cmd_boot_device, _preflight=True)
 
     p = sub.add_parser("power-cycle", help="Hard power cycle (off-hard -> on)")
     _add_common(p)
