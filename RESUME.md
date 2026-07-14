@@ -4,11 +4,31 @@
 > the end of every session (`.claude/skills/checkpoint/`). Standing project rules
 > live in [CLAUDE.md](CLAUDE.md); this file is only **where we are right now**.
 
-**Last updated:** 2026-07-14 · `main @ 556b7ae` · **v0.1.0b6 released to PyPI**; IPMI driver + ipmi_sim cross-check landed on `main` **post-b6 (unreleased)**; `ipmisim` test VM now on the LAN via DHCP (`10.0.1.152`)
+**Last updated:** 2026-07-14 · `main @ 1f93285` · **v0.1.0b7 releasing to PyPI** (IPMI driver + SOL + ipmi_sim cross-check); R710 iDRAC6 validated live end-to-end; `ipmisim` test VM on the LAN via DHCP (`10.0.1.152`)
 
 ## Current state
-The **remote boot-control + Wake-on-LAN epic (#200) shipped as v0.1.0b6**, and an
-**IPMI driver (#62)** landed after it — the pre-Redfish BMC path for the R710.
+**v0.1.0b7 is the IPMI beta** (release commit `1f93285` pushed; GitHub Release →
+Trusted-Publishing → PyPI — confirm the run went green). It builds on the
+boot-control + WoL epic (#200) that shipped as v0.1.0b6.
+
+- **v0.1.0b7 (releasing 2026-07-14) — the IPMI line:**
+  - **IPMI driver (#62/#206)** — `--driver ipmi` via `ipmitool -I lanplus` (pw via
+    `IPMI_PASSWORD` env). Power / SystemInfo / BootConfig / Sensors / Logs.
+  - **IPMI SOL serial console (#208)** — `SerialConsole` (`serial_read`/`serial_write`
+    over a PTY-backed `sol activate`) + `kvm-pilot console` interactive command
+    (exit `~.`). Gated `ipmi.serial_console` (HID_INPUT). Text-only.
+  - **ipmi_sim cross-check (#207)** — `tests/integration/test_ipmi_external.py` vs an
+    independent OpenIPMI BMC (6/6).
+  - **Two real-hardware fixes (#62)** — `get_info` model from `Board Product` (Dell
+    iDRAC6 puts `localhost` in `Product Name`); healthcheck now labels `ipmi@` not
+    `pikvm@`.
+  - **LIVE-VALIDATED on a real Dell iDRAC6 (R710), creds root/moody @ 10.0.1.169:**
+    power off/on/reset (verified flips), boot round-trips, 105 sensors, SEL, info
+    (14/0); SOL captured the full BIOS boot; **F11 over SOL opened the BIOS Boot
+    Manager** (bidirectional drive proven). Redfish confirmed absent (as expected).
+
+### Older: v0.1.0b6 (released 2026-07-14, PRs #203/#204/#205)
+The **remote boot-control + Wake-on-LAN epic (#200)**:
 
 - **v0.1.0b6 (released 2026-07-14, PRs #203/#204/#205):**
   - **Wake-on-LAN (#199)** — `wol.py` magic-packet core (hardware-validated: woke a
@@ -23,27 +43,20 @@ The **remote boot-control + Wake-on-LAN epic (#200) shipped as v0.1.0b6**, and a
     `BootSourceOverrideEnabled=Continuous`).
   - **In-band boot control (#150)** — `boot-device --via ssh` sets one-time UEFI
     `BootNext` via `efibootmgr` over the SSH channel (gated `ssh.set_boot_next`).
-- **POST-b6 on `main`, NOT yet released** (next beta bundles these):
-  - **IPMI driver (#206 · `6f01ce7`)** — `drivers/ipmi.py` shells out to
-    `ipmitool -I lanplus` (password via `IPMI_PASSWORD` env, never argv). Power /
-    SystemInfo / BootConfig / Sensors / Logs → `power`/`boot-device`/`sensors`/
-    `logs` work with no new CLI/MCP code. 34 hardware-free tests. IPMI completeness
-    now ≈ Redfish minus VirtualMedia. **This is the R710/iDRAC6 (no-Redfish) path.**
-  - **ipmi_sim cross-check (#207 · `02a5e73`)** — `tests/integration/test_ipmi_external.py`
-    + env-gated `ipmi_bmc` fixture. Ran **6/6 green** against an independent
-    OpenIPMI `ipmi_sim` BMC (answers as MontaVista, not the Dell fixtures) on a
-    Fedora VM stood up on the homelab SNO cluster. Stock-sim limits documented in
-    `docs/decisions.md`. CI all-green; merged.
-- CHANGELOG has **no `[Unreleased]` section yet** for #206/#207 — add one before the
-  next release.
 
 ## Next steps
-- **Real-BMC validation (#29) — the big owed item, planned for tonight.**
-  Runbook: [`docs/hardware-test-plan-ilo-idrac.md`](docs/hardware-test-plan-ilo-idrac.md).
-  - **DL380 G9 = iLO4** (HAS Redfish, quirky) → full Redfish boot-device + power test.
-  - **R710 = iDRAC6** (NO Redfish, predates it) → expect clean 404, use the new
-    **IPMI** driver (`--driver ipmi`; iDRAC default `root`/`calvin`).
-  - Blocked on the operator providing iLO/iDRAC IPs + creds.
+- **Verify the v0.1.0b7 release landed on PyPI** (`pip index versions kvm-pilot` /
+  the project page) once the GitHub Release + release.yml finish.
+- **DL380 G9 = iLO4 (#29) — the remaining hardware target.** HAS Redfish (quirky) →
+  `--driver redfish`; full boot-device + power test. Runbook:
+  [`docs/hardware-test-plan-ilo-idrac.md`](docs/hardware-test-plan-ilo-idrac.md).
+  Needs the iLO IP + creds from the operator. The R710/iDRAC6 IPMI path is DONE.
+- **Record Hardware-Compatibility evidence** for the iDRAC6/R710 (support-matrix
+  honesty rule) — power/boot/sensors/logs/info + SOL all exercised live.
+- **Deferred IPMI**: `Watchdog` (#13/#28); Redfish SOL (`SerialConsole` for
+  RedfishDriver, #28). Optional: a clean SOL screen-renderer (VT100) for capture.
+- Other open: OCR #202, router epic #181 remainder, #157 (EDID), #148 (.mcpb),
+  #163 (ProxyJump), Reflexes #123–#117 (post-GA).
 - **Next beta release**: bump `__about__.py`, move #206/#207 into a dated CHANGELOG
   section, `gh release create` (Trusted-Publishing → PyPI). Human call.
 - **Doc debt (found by this checkpoint)**: `boot-device` and `wake` shipped in b6
@@ -63,6 +76,16 @@ The **remote boot-control + Wake-on-LAN epic (#200) shipped as v0.1.0b6**, and a
   `sudo ipmi_sim -c /etc/ipmi/lan.conf -f /etc/ipmi/ipmisim1.emu -n` (binds
   `localhost:9001`, `ipmiusr`/`test` — to hit it over the LAN, change lan.conf
   `addr` to `0.0.0.0`/the LAN IP + open the guest firewall).
+- **Dell R710 (iDRAC6 @ `10.0.1.169`, root/moody) — TESTED, left ON.** Full IPMI
+  suite run against it (power off→on→reset, boot round-trips, sensors, SEL, info +
+  SOL + F11). BIOS **Serial Communication set to "Console Redirection via COM2"**
+  (operator changed it — that's what made SOL show text; COM2 = `ttyS1` for the OS).
+  No OS/boot media installed → it sits at the BIOS "No boot device available" prompt
+  (Legacy boot mode). Boot device left at `none`. Reach IPMI from the LAN VM:
+  `IPMI_PASSWORD=moody ipmitool -I lanplus -H 10.0.1.169 -U root -E …` or
+  `kvm-pilot … --driver ipmi --host 10.0.1.169 --user root`. (The VM's `/home/fedora/kp`
+  clone has b7 `ipmi.py`/`health.py` overlaid; `pip install -U --pre kvm-pilot` there
+  once b7 is on PyPI to get the released code + the `console` command.)
 - **Cluster networking changed to give the VM its LAN IP (additive, reversible):**
   installed the **Kubernetes NMState Operator** (`openshift-nmstate`), added NNCP
   **`ovn-lan-bridge-mapping`** (OVN `bridge-mappings: lan→br-ex`, `Available`), and
