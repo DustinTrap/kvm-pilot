@@ -114,3 +114,40 @@ def test_cli_boot_progress_reports_phase(emu, capsys):
     rc = main(_argv(emu, "boot-progress"))
     assert rc == 0
     assert "os_running" in capsys.readouterr().out
+
+
+# -- boot-device (BootSourceOverride) via the CLI --------------------------
+
+def _boot_patches(emu) -> list[dict]:
+    from redfish_emulator import SYS
+    return [b["Boot"] for p, b in emu.state.patches if p == SYS and "Boot" in b]
+
+
+def test_cli_boot_device_pxe_once(emu, capsys):
+    rc = main(_argv(emu, "boot-device", "pxe", "--yes"))
+    assert rc == 0
+    assert emu.state.boot_override_enabled == "Once"
+    assert emu.state.boot_override_target == "Pxe"
+    assert '"target": "pxe"' in capsys.readouterr().out
+
+
+def test_cli_boot_device_persistent_cd(emu):
+    rc = main(_argv(emu, "boot-device", "cd", "--persistent", "--yes"))
+    assert rc == 0
+    assert emu.state.boot_override_enabled == "Continuous"
+    assert emu.state.boot_override_target == "Cd"
+
+
+def test_cli_boot_device_none_clears(emu):
+    emu.state.boot_override_enabled = "Once"
+    emu.state.boot_override_target = "Pxe"
+    rc = main(_argv(emu, "boot-device", "none", "--yes"))
+    assert rc == 0
+    assert emu.state.boot_override_enabled == "Disabled"
+
+
+def test_cli_boot_device_show_is_read_only(emu, capsys):
+    rc = main(_argv(emu, "boot-device", "--show", "--yes"))
+    assert rc == 0
+    assert _boot_patches(emu) == []          # read-only: no PATCH
+    assert '"enabled": "Disabled"' in capsys.readouterr().out

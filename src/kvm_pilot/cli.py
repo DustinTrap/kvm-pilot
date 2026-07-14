@@ -43,7 +43,7 @@ from .drivers import make_driver_from_config
 from .drivers.base import Capability
 from .errors import CapabilityError, KVMPilotError, SafetyError
 from .firmware_registry import UPSTREAM_REPO
-from .safety import allow_all, interactive_confirm
+from .safety import SafetyPolicy, allow_all, interactive_confirm
 
 if TYPE_CHECKING:
     # Drivers the CLI can construct. KVMClient (PiKVM family) and FakeDriver expose
@@ -51,7 +51,7 @@ if TYPE_CHECKING:
     # capability-partial (a BMC — strong on structured state, but no keyboard or
     # screen), so capability-specific subcommands gate on supports() before
     # dispatch instead of AttributeError-ing deep in a handler.
-    from .drivers.base import BootProgress, FirmwareUpdate, Logs, Sensors
+    from .drivers.base import BootConfig, BootProgress, FirmwareUpdate, Logs, Sensors
     from .drivers.fake import FakeDriver
     from .drivers.redfish import RedfishDriver
 
@@ -331,6 +331,108 @@ def cmd_snapshot(args) -> int:
     kvm = _rich_client(args, Capability.VIDEO)
     out = kvm.snapshot_save(args.output)
     print(f"Saved {out}")
+    return 0
+
+
+def cmd_wake(args) -> int:
+    from . import wol
+
+    cfg = _resolve_cfg(args)
+    mac = getattr(args, "mac", None) or cfg.mac
+    if not mac:
+        print("wake: no MAC — pass --mac AA:BB:CC:DD:EE:FF or set 'mac' in the profile",
+              file=sys.stderr)
+        return 2
+    broadcast = getattr(args, "broadcast", None) or cfg.wol_broadcast
+    count = getattr(args, "count", 3)
+    confirm = allow_all if getattr(args, "yes", False) else interactive_confirm
+    policy = SafetyPolicy(dry_run=getattr(args, "dry_run", False), confirm=confirm)
+    desc = f"Wake-on-LAN magic packet -> {mac} (broadcast {broadcast})"
+    if not policy.guard("wol.wake", desc):
+        print(f"wake: DRY-RUN — would send a WoL magic packet to {mac} via {broadcast}")
+        return 0
+    try:
+        wol.send_magic_packet(mac, broadcast=broadcast, count=count)
+    except ValueError as exc:
+        print(f"wake: {exc}", file=sys.stderr)
+        return 2
+    print(f"wake: sent WoL magic packet x{count} to {mac} (broadcast {broadcast})")
+    return 0
+
+
+def cmd_boot_device(args) -> int:
+    if getattr(args, "via", "auto") == "ssh":
+        return _boot_device_via_ssh(args)
+    bc = cast("BootConfig", _client(args, Capability.BOOT_CONFIG))
+    if args.device is None:
+        if not args.show:
+            print("boot-device: give a device (pxe|cd|hdd|usb|bios|diag|none) or --show",
+                  file=sys.stderr)
+            return 2
+        print(json.dumps(bc.get_boot_options(), indent=2))
+        return 0
+    result = bc.set_boot_device(args.device, once=not args.persistent, uefi=not args.legacy)
+    print(json.dumps(result, indent=2))
+    return 0
+
+
+def _boot_device_via_ssh(args) -> int:
+    """boot-device over the in-band SSH channel via efibootmgr BootNext (#150).
+
+    Single-gate design: the efibootmgr READ is harmless and runs on a
+    pre-consented channel; only the state-changing SET is gated, once, as
+    ``ssh.set_boot_next`` — so the flow never double-prompts through the
+    per-command ``ssh.exec`` gate. efibootmgr needs root, so commands are
+    ``sudo``-prefixed (passwordless sudo or a tty required on the target).
+    """
+    from . import efiboot
+    from .ssh import SSHChannel
+
+    cfg = _resolve_cfg(args)
+    ch = SSHChannel.from_config(cfg, confirm=allow_all, dry_run=False)
+    read = ch.ssh_exec("sudo efibootmgr")
+    if not read["ok"]:
+        print(f"boot-device (ssh): efibootmgr read failed: "
+              f"{read.get('stderr') or read.get('returncode')}", file=sys.stderr)
+        return 1
+    parsed = efiboot.parse_efibootmgr(read["stdout"])
+    if args.device is None:
+        if not args.show:
+            print("boot-device: give a device (pxe|cd|hdd|usb) or --show", file=sys.stderr)
+            return 2
+        print(json.dumps({"via": "ssh", "current": parsed["current"],
+                          "order": parsed["order"], "entries": parsed["entries"]}, indent=2))
+        return 0
+    if args.persistent:
+        print("boot-device (ssh): --persistent isn't supported over SSH yet; "
+              "efibootmgr BootNext is one-time only", file=sys.stderr)
+        return 2
+    try:
+        entry = efiboot.match_boot_entry(parsed["entries"], args.device)
+    except ValueError as exc:
+        print(f"boot-device (ssh): {exc}", file=sys.stderr)
+        return 2
+    if entry is None:
+        print(f"boot-device (ssh): no '{args.device}' boot entry found. Available:",
+              file=sys.stderr)
+        for bid in sorted(parsed["entries"]):
+            print(f"  Boot{bid}: {parsed['entries'][bid]}", file=sys.stderr)
+        return 2
+    confirm = allow_all if getattr(args, "yes", False) else interactive_confirm
+    policy = SafetyPolicy(dry_run=getattr(args, "dry_run", False), confirm=confirm)
+    cmd = f"sudo {efiboot.set_boot_next_command(entry)}"
+    desc = f"Set next boot -> {args.device} (BootNext {entry}) on {ch.target}"
+    if not policy.guard("ssh.set_boot_next", desc):
+        print(json.dumps({"via": "ssh", "dry_run": True, "device": args.device,
+                          "entry": entry, "command": cmd}, indent=2))
+        return 0
+    res = ch.ssh_exec(cmd)
+    if not res["ok"]:
+        print(f"boot-device (ssh): set BootNext failed: "
+              f"{res.get('stderr') or res.get('returncode')}", file=sys.stderr)
+        return 1
+    print(json.dumps({"via": "ssh", "device": args.device, "entry": entry,
+                      "boot_next": entry, "once": True}, indent=2))
     return 0
 
 
@@ -1342,6 +1444,34 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("action", choices=["on", "off", "off-hard", "reset"])
     _add_common(p)
     p.set_defaults(func=cmd_power, _preflight=True)
+
+    p = sub.add_parser(
+        "wake", help="Send a Wake-on-LAN magic packet to power the host on (#199)")
+    p.add_argument("--mac", help="Target NIC MAC (default: the profile's 'mac')")
+    p.add_argument("--broadcast",
+                   help="Broadcast address (default: profile 'wol_broadcast' or 255.255.255.255)")
+    p.add_argument("--count", type=int, default=3, help="Copies of the packet to send (default 3)")
+    _add_common(p)
+    p.set_defaults(func=cmd_wake)
+
+    p = sub.add_parser(
+        "boot-device",
+        help="Set the next-boot device (Redfish BootSourceOverride); --show to read",
+    )
+    p.add_argument(
+        "device", nargs="?",
+        choices=["pxe", "cd", "hdd", "usb", "bios", "diag", "none"],
+        help="Boot device for the next reset (omit with --show; 'none' clears the override)",
+    )
+    p.add_argument("--show", action="store_true", help="Show the current boot override and exit")
+    p.add_argument("--persistent", action="store_true",
+                   help="Persist across reboots (default: one-time, cleared after next boot)")
+    p.add_argument("--legacy", action="store_true", help="Legacy BIOS boot mode (default: UEFI)")
+    p.add_argument("--via", choices=["auto", "redfish", "ssh"], default="auto",
+                   help="Control path: 'redfish'/'auto' = BMC BootSourceOverride; "
+                        "'ssh' = in-band efibootmgr BootNext on the host OS (#150)")
+    _add_common(p)
+    p.set_defaults(func=cmd_boot_device, _preflight=True)
 
     p = sub.add_parser("power-cycle", help="Hard power cycle (off-hard -> on)")
     _add_common(p)

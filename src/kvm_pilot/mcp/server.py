@@ -86,7 +86,15 @@ if TYPE_CHECKING:
     # ``_driver(capability=…)`` guarantees the driver supports the capability at
     # runtime; narrow to the owning protocol for the capability-specific calls
     # (mirrors the ``cast`` pattern in cli.py).
-    from kvm_pilot.drivers.base import HID, Logs, Power, SystemInfo, Video, VirtualMedia
+    from kvm_pilot.drivers.base import (
+        HID,
+        BootConfig,
+        Logs,
+        Power,
+        SystemInfo,
+        Video,
+        VirtualMedia,
+    )
 
 mcp = FastMCP("kvm-pilot")
 _log = logging.getLogger("kvm_pilot.mcp")
@@ -798,6 +806,97 @@ def power(
             "verified": verified, "observed": observed, "note": note,
             "detail": f"power {action}: requested on host '{cfg.host}' ({cfg.driver})",
         }
+
+
+@mcp.tool(annotations=_READ)
+def boot_options(profile: str | None = None) -> dict:
+    """Show the host's current boot override (Redfish BootSourceOverride) — read-only.
+
+    Reports ``enabled`` (Disabled/Once/Continuous), the normalized ``target``, the
+    ``mode`` (UEFI/Legacy, or null if the BMC doesn't expose it), and the
+    ``allowable`` targets the BMC advertises — so an actuator knows what
+    ``set_boot_device`` values this box will accept before trying one.
+    """
+    with _driver(profile, confirm=deny_all, capability=Capability.BOOT_CONFIG) as (cfg, kvm):
+        return {**_provenance(cfg), "boot": cast("BootConfig", kvm).get_boot_options()}
+
+
+@mcp.tool(annotations=_DESTRUCTIVE)
+def set_boot_device(
+    device: Literal["pxe", "cd", "hdd", "usb", "bios", "diag", "none"],
+    once: bool = True,
+    uefi: bool = True,
+    confirm: bool = False,
+    profile: str | None = None,
+) -> dict:
+    """Set the next-boot (or persistent) boot device via BootSourceOverride. CONFIG MUTATION.
+
+    Disabled unless the operator enabled config mutations in the server's own
+    environment (see the co-located README.md). ``confirm=true`` is required.
+    ``none`` clears the override; ``once=false`` makes it persistent; ``uefi=false``
+    selects legacy BIOS mode where the target exposes it. A target the BMC doesn't
+    advertise fails fast (call ``boot_options`` first to see ``allowable``).
+    """
+    if not _env_flag("KVM_PILOT_MCP_ALLOW_CONFIG"):
+        # As with power: the gate is opened by the human operator out of band, so
+        # no copy-pasteable variable is surfaced to the agent.
+        raise ToolError(
+            "boot-device control is disabled on this server. Only the human operator "
+            "can enable it, by setting the config-mutation enable environment variable "
+            "(documented in the server's README.md) in the MCP server's own environment "
+            "before starting it. It cannot be enabled from within an agent session."
+        )
+    if not confirm:
+        raise ToolError(f"set_boot_device {device!r} was not confirmed")
+    with _driver(
+        profile, confirm=allow_all, capability=Capability.BOOT_CONFIG, enforce_health=True
+    ) as (cfg, kvm):
+        result = cast("BootConfig", kvm).set_boot_device(device, once=once, uefi=uefi)
+        return {
+            **_provenance(cfg), "requested": device, "once": once, "uefi": uefi,
+            "dry_run": _dry_run(), "boot": result,
+        }
+
+
+@mcp.tool(annotations=_DESTRUCTIVE)
+def wake(
+    mac: str | None = None,
+    broadcast: str | None = None,
+    count: int = 3,
+    confirm: bool = False,
+    profile: str | None = None,
+) -> dict:
+    """Send a Wake-on-LAN magic packet to power the host on. POWER (soft).
+
+    Disabled unless the operator enabled power control (the power-enable env var,
+    see the co-located README.md) in the server's own environment. ``confirm=true``
+    is required. ``mac`` defaults to the profile's ``mac``; ``broadcast`` to its
+    ``wol_broadcast``. No KVM driver is contacted — WoL is a broadcast sent from
+    the server's own host onto the target's L2 segment.
+    """
+    if not _env_flag("KVM_PILOT_MCP_ALLOW_POWER"):
+        raise ToolError(
+            "power control is disabled on this server. Only the human operator can "
+            "enable it, by setting the power-enable environment variable (documented "
+            "in the server's README.md) in the MCP server's own environment before "
+            "starting it. It cannot be enabled from within an agent session."
+        )
+    if not confirm:
+        raise ToolError("wake was not confirmed")
+    cfg = resolve_host(profile or os.environ.get("KVM_PILOT_PROFILE"))
+    target = mac or cfg.mac
+    if not target:
+        raise ToolError("no MAC — pass mac=, or set 'mac' in the host profile")
+    bc = broadcast or cfg.wol_broadcast
+    from kvm_pilot import wol
+
+    if _dry_run():
+        return {**_provenance(cfg), "requested_mac": target, "broadcast": bc, "dry_run": True}
+    wol.send_magic_packet(target, broadcast=bc, count=count)
+    return {
+        **_provenance(cfg), "requested_mac": target, "broadcast": bc,
+        "count": count, "dry_run": False,
+    }
 
 
 # -- HID act tools (issue #61): see act.py for the two-guarantee model --------

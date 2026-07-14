@@ -30,6 +30,7 @@ class Capability(StrEnum):
     HID = "hid"
     VIDEO = "video"
     VIRTUAL_MEDIA = "virtual_media"
+    BOOT_CONFIG = "boot_config"
     GPIO = "gpio"
     EVENTS = "events"
     # Sensing capabilities — cheaper-than-vision signals. A driver that has any
@@ -91,6 +92,22 @@ class VirtualMedia(Protocol):
     def mount_iso(self, source: str, image_name: str | None = None, cdrom: bool = True) -> str: ...
     def msd_connect(self) -> None: ...
     def msd_disconnect(self) -> None: ...
+
+
+@runtime_checkable
+class BootConfig(Protocol):
+    """Choose what the host boots on its next (or every) reset.
+
+    Unifies the Redfish ``Boot.BootSourceOverride*`` path (a BMC) and the in-band
+    ``efibootmgr`` ``BootNext`` path (a running OS over SSH). ``device`` is a
+    normalized token — ``pxe | cd | hdd | usb | bios | diag | none`` — that each
+    implementation maps to its native vocabulary. ``once`` selects a one-time
+    override (cleared after the next boot) vs. a persistent one; ``uefi`` selects
+    UEFI vs. legacy/BIOS boot mode where the target exposes the choice.
+    """
+
+    def get_boot_options(self) -> dict: ...
+    def set_boot_device(self, device: str, *, once: bool = True, uefi: bool = True) -> dict: ...
 
 
 @runtime_checkable
@@ -220,6 +237,7 @@ CAPABILITY_PROTOCOLS: dict[Capability, type] = {
     Capability.HID: HID,
     Capability.VIDEO: Video,
     Capability.VIRTUAL_MEDIA: VirtualMedia,
+    Capability.BOOT_CONFIG: BootConfig,
     Capability.GPIO: GPIO,
     Capability.EVENTS: Events,
     Capability.LOGS: Logs,
@@ -307,6 +325,7 @@ __all__ = [
     "HID",
     "Video",
     "VirtualMedia",
+    "BootConfig",
     "GPIO",
     "Events",
     "Logs",

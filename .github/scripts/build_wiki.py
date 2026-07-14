@@ -44,6 +44,8 @@ PAGES: list[tuple[str, str, str | None]] = [
     ("docs/decisions.md", "decisions.md", "Design decisions"),
     ("docs/reflexes.md", "reflexes.md", "Reflexes (RFC)"),
     ("docs/redfish.md", "redfish.md", "Redfish reference"),
+    ("docs/hardware-test-plan-ilo-idrac.md", "hardware-test-plan-ilo-idrac.md",
+     "Hardware test plan: iLO / iDRAC"),
     ("docs/firmware-registry.md", "firmware-registry.md", "Firmware registry"),
     ("docs/firmware-update.md", "firmware-update.md", "Remote firmware update"),
     ("docs/unattended-install.md", "unattended-install.md", "Unattended Linux installs"),

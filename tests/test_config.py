@@ -207,3 +207,31 @@ def test_default_config_path_ends_with_kvm_pilot_config(monkeypatch):
     monkeypatch.delenv("KVM_PILOT_CONFIG", raising=False)
     p = cfg._default_config_path()
     assert p.name == "config.toml" and p.parent.name == "kvm-pilot"
+
+
+def test_wol_mac_and_broadcast_precedence(monkeypatch, tmp_path):
+    none = tmp_path / "none.toml"
+    # default
+    cfg = resolve_host(host="h", config_path=none)
+    assert cfg.mac is None
+    assert cfg.wol_broadcast == "255.255.255.255"
+    # arg wins
+    cfg = resolve_host(host="h", mac="5c:60:ba:bb:cf:63",
+                       wol_broadcast="10.0.1.255", config_path=none)
+    assert cfg.mac == "5c:60:ba:bb:cf:63"
+    assert cfg.wol_broadcast == "10.0.1.255"
+    # env
+    monkeypatch.setenv("KVM_PILOT_MAC", "aa:bb:cc:dd:ee:ff")
+    assert resolve_host(host="h", config_path=none).mac == "aa:bb:cc:dd:ee:ff"
+
+
+def test_wol_mac_from_profile(tmp_path):
+    cfg_file = tmp_path / "c.toml"
+    cfg_file.write_text(
+        '[hosts.box]\nhost = "10.0.1.16"\n'
+        'mac = "5c:60:ba:bb:cf:63"\nwol_broadcast = "10.0.1.255"\n'
+    )
+    cfg = resolve_host(profile="box", config_path=cfg_file)
+    assert cfg.host == "10.0.1.16"
+    assert cfg.mac == "5c:60:ba:bb:cf:63"
+    assert cfg.wol_broadcast == "10.0.1.255"

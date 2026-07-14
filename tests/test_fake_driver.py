@@ -23,6 +23,7 @@ def test_capabilities_match_pikvm_plus_boot_progress():
         Capability.EVENTS,
         Capability.LOGS,
         Capability.BOOT_PROGRESS,  # FakeDriver is the first BootProgress implementer
+        Capability.BOOT_CONFIG,
     }
     assert caps == expected
 

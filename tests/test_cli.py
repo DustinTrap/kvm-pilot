@@ -829,3 +829,119 @@ def test_firmware_update_plan_steers_to_web_console(monkeypatch, capsys):
     assert cli_mod.main(["firmware-update", "--host", "h"]) == 0
     out = capsys.readouterr().out
     assert "web console" in out
+
+
+def test_wake_sends_magic_packet(monkeypatch, capsys):
+    import kvm_pilot.wol as wol_mod
+    sent = {}
+    monkeypatch.setattr(
+        wol_mod, "send_magic_packet",
+        lambda mac, **kw: sent.update(mac=mac, **kw) or b"",
+    )
+    rc = main(["wake", "--mac", "5c:60:ba:bb:cf:63", "--host", "fake", "--yes"])
+    assert rc == 0
+    assert sent["mac"] == "5c:60:ba:bb:cf:63"
+    assert sent["broadcast"] == "255.255.255.255"
+    assert "sent WoL" in capsys.readouterr().out
+
+
+def test_wake_broadcast_flag(monkeypatch):
+    import kvm_pilot.wol as wol_mod
+    sent = {}
+    monkeypatch.setattr(
+        wol_mod, "send_magic_packet",
+        lambda mac, **kw: sent.update(mac=mac, **kw) or b"",
+    )
+    rc = main(["wake", "--mac", "aa:bb:cc:dd:ee:ff", "--broadcast", "10.0.1.255",
+               "--host", "fake", "--yes"])
+    assert rc == 0
+    assert sent["broadcast"] == "10.0.1.255"
+
+
+def test_wake_dry_run_does_not_send(monkeypatch):
+    import kvm_pilot.wol as wol_mod
+    called = []
+    monkeypatch.setattr(wol_mod, "send_magic_packet", lambda *a, **k: called.append(1))
+    rc = main(["wake", "--mac", "5c:60:ba:bb:cf:63", "--host", "fake", "--dry-run"])
+    assert rc == 0
+    assert called == []
+
+
+def test_wake_requires_mac(capsys):
+    rc = main(["wake", "--host", "fake"])
+    assert rc == 2
+    assert "no MAC" in capsys.readouterr().err
+
+
+# -- boot-device --via ssh (efibootmgr BootNext, #150) ----------------------
+
+_EFI_FIXTURE = (
+    "BootCurrent: 0005\nBootOrder: 0005,0001,0003,0004\n"
+    "Boot0001* SAMSUNG NVMe\tNVMe(0x1)\n"
+    "Boot0003* IPV4 Network Intel I219-LM\tMAC(5c60babbcf63)/IPv4\n"
+    "Boot0004* USB\tUSB(0x1)\n"
+    "Boot0005* redhat\tHD(1)/shimx64.efi\n"
+)
+
+
+def _patch_ssh(monkeypatch, calls, *, read_stdout=_EFI_FIXTURE, set_ok=True):
+    from kvm_pilot import ssh as ssh_mod
+
+    class FakeCh:
+        target = "dtrapani@10.0.1.16"
+
+        def ssh_exec(self, command, **kw):
+            calls.append(command)
+            if "efibootmgr -n" in command:
+                return {"command": command, "returncode": 0 if set_ok else 1,
+                        "stdout": "", "stderr": "" if set_ok else "denied",
+                        "ok": set_ok, "dry_run": False}
+            return {"command": command, "returncode": 0, "stdout": read_stdout,
+                    "stderr": "", "ok": True, "dry_run": False}
+
+    monkeypatch.setattr(ssh_mod.SSHChannel, "from_config", lambda cfg, **kw: FakeCh())
+
+
+def test_boot_device_via_ssh_sets_bootnext_pxe(monkeypatch, capsys):
+    calls: list = []
+    _patch_ssh(monkeypatch, calls)
+    rc = main(["boot-device", "pxe", "--via", "ssh", "--host", "10.0.1.16", "--yes"])
+    assert rc == 0
+    assert any("efibootmgr -n 0003" in c for c in calls)   # IPV4 network entry
+    assert '"entry": "0003"' in capsys.readouterr().out
+
+
+def test_boot_device_via_ssh_show(monkeypatch, capsys):
+    calls: list = []
+    _patch_ssh(monkeypatch, calls)
+    rc = main(["boot-device", "--via", "ssh", "--show", "--host", "10.0.1.16"])
+    assert rc == 0
+    assert not any("efibootmgr -n" in c for c in calls)     # read-only, no set
+    assert '"current": "0005"' in capsys.readouterr().out
+
+
+def test_boot_device_via_ssh_no_match_lists_entries(monkeypatch, capsys):
+    calls: list = []
+    _patch_ssh(monkeypatch, calls)  # fixture has no CD entry
+    rc = main(["boot-device", "cd", "--via", "ssh", "--host", "10.0.1.16", "--yes"])
+    assert rc == 2
+    assert not any("efibootmgr -n" in c for c in calls)
+    assert "no 'cd' boot entry" in capsys.readouterr().err
+
+
+def test_boot_device_via_ssh_dry_run(monkeypatch, capsys):
+    calls: list = []
+    _patch_ssh(monkeypatch, calls)
+    rc = main(["boot-device", "hdd", "--via", "ssh", "--host", "10.0.1.16", "--dry-run"])
+    assert rc == 0
+    assert not any("efibootmgr -n" in c for c in calls)     # dry-run: no set issued
+    assert '"dry_run": true' in capsys.readouterr().out
+
+
+def test_boot_device_via_ssh_persistent_unsupported(monkeypatch, capsys):
+    calls: list = []
+    _patch_ssh(monkeypatch, calls)
+    rc = main(["boot-device", "pxe", "--via", "ssh", "--persistent",
+               "--host", "10.0.1.16", "--yes"])
+    assert rc == 2
+    assert "persistent" in capsys.readouterr().err.lower()
