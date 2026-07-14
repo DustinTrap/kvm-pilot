@@ -829,3 +829,45 @@ def test_firmware_update_plan_steers_to_web_console(monkeypatch, capsys):
     assert cli_mod.main(["firmware-update", "--host", "h"]) == 0
     out = capsys.readouterr().out
     assert "web console" in out
+
+
+def test_wake_sends_magic_packet(monkeypatch, capsys):
+    import kvm_pilot.wol as wol_mod
+    sent = {}
+    monkeypatch.setattr(
+        wol_mod, "send_magic_packet",
+        lambda mac, **kw: sent.update(mac=mac, **kw) or b"",
+    )
+    rc = main(["wake", "--mac", "5c:60:ba:bb:cf:63", "--host", "fake", "--yes"])
+    assert rc == 0
+    assert sent["mac"] == "5c:60:ba:bb:cf:63"
+    assert sent["broadcast"] == "255.255.255.255"
+    assert "sent WoL" in capsys.readouterr().out
+
+
+def test_wake_broadcast_flag(monkeypatch):
+    import kvm_pilot.wol as wol_mod
+    sent = {}
+    monkeypatch.setattr(
+        wol_mod, "send_magic_packet",
+        lambda mac, **kw: sent.update(mac=mac, **kw) or b"",
+    )
+    rc = main(["wake", "--mac", "aa:bb:cc:dd:ee:ff", "--broadcast", "10.0.1.255",
+               "--host", "fake", "--yes"])
+    assert rc == 0
+    assert sent["broadcast"] == "10.0.1.255"
+
+
+def test_wake_dry_run_does_not_send(monkeypatch):
+    import kvm_pilot.wol as wol_mod
+    called = []
+    monkeypatch.setattr(wol_mod, "send_magic_packet", lambda *a, **k: called.append(1))
+    rc = main(["wake", "--mac", "5c:60:ba:bb:cf:63", "--host", "fake", "--dry-run"])
+    assert rc == 0
+    assert called == []
+
+
+def test_wake_requires_mac(capsys):
+    rc = main(["wake", "--host", "fake"])
+    assert rc == 2
+    assert "no MAC" in capsys.readouterr().err

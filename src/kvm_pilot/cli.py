@@ -43,7 +43,7 @@ from .drivers import make_driver_from_config
 from .drivers.base import Capability
 from .errors import CapabilityError, KVMPilotError, SafetyError
 from .firmware_registry import UPSTREAM_REPO
-from .safety import allow_all, interactive_confirm
+from .safety import SafetyPolicy, allow_all, interactive_confirm
 
 if TYPE_CHECKING:
     # Drivers the CLI can construct. KVMClient (PiKVM family) and FakeDriver expose
@@ -331,6 +331,32 @@ def cmd_snapshot(args) -> int:
     kvm = _rich_client(args, Capability.VIDEO)
     out = kvm.snapshot_save(args.output)
     print(f"Saved {out}")
+    return 0
+
+
+def cmd_wake(args) -> int:
+    from . import wol
+
+    cfg = _resolve_cfg(args)
+    mac = getattr(args, "mac", None) or cfg.mac
+    if not mac:
+        print("wake: no MAC — pass --mac AA:BB:CC:DD:EE:FF or set 'mac' in the profile",
+              file=sys.stderr)
+        return 2
+    broadcast = getattr(args, "broadcast", None) or cfg.wol_broadcast
+    count = getattr(args, "count", 3)
+    confirm = allow_all if getattr(args, "yes", False) else interactive_confirm
+    policy = SafetyPolicy(dry_run=getattr(args, "dry_run", False), confirm=confirm)
+    desc = f"Wake-on-LAN magic packet -> {mac} (broadcast {broadcast})"
+    if not policy.guard("wol.wake", desc):
+        print(f"wake: DRY-RUN — would send a WoL magic packet to {mac} via {broadcast}")
+        return 0
+    try:
+        wol.send_magic_packet(mac, broadcast=broadcast, count=count)
+    except ValueError as exc:
+        print(f"wake: {exc}", file=sys.stderr)
+        return 2
+    print(f"wake: sent WoL magic packet x{count} to {mac} (broadcast {broadcast})")
     return 0
 
 
@@ -1356,6 +1382,15 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("action", choices=["on", "off", "off-hard", "reset"])
     _add_common(p)
     p.set_defaults(func=cmd_power, _preflight=True)
+
+    p = sub.add_parser(
+        "wake", help="Send a Wake-on-LAN magic packet to power the host on (#199)")
+    p.add_argument("--mac", help="Target NIC MAC (default: the profile's 'mac')")
+    p.add_argument("--broadcast",
+                   help="Broadcast address (default: profile 'wol_broadcast' or 255.255.255.255)")
+    p.add_argument("--count", type=int, default=3, help="Copies of the packet to send (default 3)")
+    _add_common(p)
+    p.set_defaults(func=cmd_wake)
 
     p = sub.add_parser(
         "boot-device",
