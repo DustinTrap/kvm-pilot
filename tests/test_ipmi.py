@@ -1,0 +1,272 @@
+"""IpmiDriver tests (#62) — hardware-free.
+
+Exercises the ipmitool wrapper end-to-end with a fake ``subprocess`` (no real
+ipmitool / BMC): command construction, output parsing against captured
+``ipmitool`` output shapes, capability detection, and safety gating.
+"""
+
+from __future__ import annotations
+
+import types
+
+import pytest
+
+from kvm_pilot.drivers import ipmi as ipmi_mod
+from kvm_pilot.drivers import make_driver, make_driver_from_config
+from kvm_pilot.drivers.base import BootConfig, Capability, Logs, Power, Sensors, SystemInfo
+from kvm_pilot.drivers.ipmi import IpmiDriver
+from kvm_pilot.errors import CapabilityError, KVMPilotError, SafetyError
+from kvm_pilot.safety import deny_all
+
+# --- captured ipmitool output shapes ---------------------------------------
+POWER_ON = "Chassis Power is on\n"
+POWER_OFF = "Chassis Power is off\n"
+POWER_CONTROL = "Chassis Power Control: Up/On\n"
+CHASSIS_STATUS = (
+    "System Power         : on\n"
+    "Power Overload       : false\n"
+    "Last Power Event     : command\n"
+)
+FRU = (
+    "FRU Device Description : Builtin FRU Device (ID 0)\n"
+    " Board Mfg             : DELL\n"
+    " Product Manufacturer  : DELL\n"
+    " Product Name          : PowerEdge R710\n"
+    " Product Serial        : ABC12345\n"
+)
+MC_INFO = (
+    "Device ID                 : 32\n"
+    "Firmware Revision         : 1.85\n"
+    "Manufacturer Name         : DELL\n"
+)
+BOOT_PXE_ONCE_EFI = (
+    "Boot parameter 5 is valid/unlocked\n"
+    " Boot Flags :\n"
+    "   - Boot Flag Valid\n"
+    "   - Options apply to only next boot\n"
+    "   - BIOS EFI boot\n"
+    "   - Boot Device Selector : Force Boot from Network - PXE\n"
+)
+BOOT_DISK_PERSIST_LEGACY = (
+    " Boot Flags :\n"
+    "   - Options apply to all future boots\n"
+    "   - BIOS PC Compatible (legacy) boot\n"
+    "   - Boot Device Selector : Force Boot from default Hard-Drive\n"
+)
+SDR = (
+    "CPU1 Temp        | 04h | ok  | 3.1 | 45 degrees C\n"
+    "FAN1 RPM         | 30h | ok  | 7.1 | 4200 RPM\n"
+    "Voltage 12V      | 60h | ok  | 7.2 | 12.10 Volts\n"
+)
+SEL = (
+    "   1 | 07/13/2026 | 10:00:00 | Power Unit #0x01 | Power off/down | Asserted\n"
+    "   2 | 07/13/2026 | 10:05:00 | System Boot Initiated | Initiated by power up\n"
+)
+
+# ordered (needle-in-joined-argv, output); first match wins — specific first.
+_OUTPUTS = [
+    ("chassis power status", POWER_ON),
+    ("chassis power", POWER_CONTROL),      # on/off/soft/reset/cycle
+    ("chassis bootparam get 5", BOOT_PXE_ONCE_EFI),
+    ("chassis bootdev", "Set Boot Device to pxe\n"),
+    ("chassis status", CHASSIS_STATUS),
+    ("fru print", FRU),
+    ("mc info", MC_INFO),
+    ("sdr elist", SDR),
+    ("sel list", SEL),
+]
+
+
+@pytest.fixture()
+def ipmi(monkeypatch):
+    """An IpmiDriver whose ipmitool is faked; returns (driver, calls)."""
+    calls: list[list[str]] = []
+    outputs = list(_OUTPUTS)
+
+    def fake_run(argv, **kw):
+        calls.append(argv)
+        joined = " ".join(argv)
+        for needle, out in outputs:
+            if needle in joined:
+                return types.SimpleNamespace(returncode=0, stdout=out, stderr="")
+        return types.SimpleNamespace(returncode=1, stdout="", stderr="unknown command")
+
+    monkeypatch.setattr(ipmi_mod.shutil, "which", lambda _n: "/usr/bin/ipmitool")
+    monkeypatch.setattr(ipmi_mod.subprocess, "run", fake_run)
+    drv = IpmiDriver("10.0.1.99", "root", "calvin", confirm=lambda *a: True)
+    drv._outputs = outputs  # let tests tweak responses
+    return drv, calls
+
+
+class TestCapabilities:
+    def test_ipmi_capability_set(self, ipmi):
+        drv, _ = ipmi
+        caps = drv.capabilities()
+        assert caps == {
+            Capability.SYSTEM_INFO, Capability.POWER, Capability.BOOT_CONFIG,
+            Capability.SENSORS, Capability.LOGS,
+        }
+        for absent in (Capability.HID, Capability.VIDEO, Capability.VIRTUAL_MEDIA,
+                       Capability.GPIO, Capability.EVENTS):
+            assert absent not in caps
+
+    def test_satisfies_protocols(self, ipmi):
+        drv, _ = ipmi
+        assert isinstance(drv, Power | SystemInfo | Sensors | Logs | BootConfig)
+
+
+class TestCommandConstruction:
+    def test_base_argv_uses_env_password_not_argv(self, ipmi):
+        drv, calls = ipmi
+        drv.power_on()
+        argv = calls[-1]
+        assert argv[:1] == ["/usr/bin/ipmitool"] or argv[0] == "ipmitool"
+        assert "-I" in argv and "lanplus" in argv
+        assert "-H" in argv and "10.0.1.99" in argv
+        assert "-E" in argv                    # password via IPMI_PASSWORD env
+        assert "calvin" not in argv            # never in the process argv
+
+    def test_cipher_and_port_flags(self, monkeypatch):
+        calls: list[list[str]] = []
+        monkeypatch.setattr(ipmi_mod.shutil, "which", lambda _n: "ipmitool")
+        monkeypatch.setattr(ipmi_mod.subprocess, "run",
+                            lambda argv, **kw: calls.append(argv) or
+                            types.SimpleNamespace(returncode=0, stdout="Chassis Power is on\n", stderr=""))
+        drv = IpmiDriver("h", "u", "p", cipher=17, port=6230, confirm=lambda *a: True)
+        drv.is_powered_on()
+        assert "-C" in calls[-1] and "17" in calls[-1]
+        assert "-p" in calls[-1] and "6230" in calls[-1]
+
+
+class TestPower:
+    def test_is_powered_on(self, ipmi):
+        drv, _ = ipmi
+        assert drv.is_powered_on() is True
+
+    def test_is_powered_off(self, ipmi):
+        drv, _ = ipmi
+        drv._outputs[0] = ("chassis power status", POWER_OFF)
+        assert drv.is_powered_on() is False
+
+    @pytest.mark.parametrize(
+        "method,verb",
+        [("power_on", "on"), ("power_off", "soft"),
+         ("power_off_hard", "off"), ("reset_hard", "reset")],
+    )
+    def test_power_verbs(self, ipmi, method, verb):
+        drv, calls = ipmi
+        getattr(drv, method)()
+        assert calls[-1][-3:] == ["chassis", "power", verb]
+
+    def test_dry_run_sends_nothing(self, monkeypatch):
+        calls: list[list[str]] = []
+        monkeypatch.setattr(ipmi_mod.shutil, "which", lambda _n: "ipmitool")
+        monkeypatch.setattr(ipmi_mod.subprocess, "run",
+                            lambda argv, **kw: calls.append(argv))
+        drv = IpmiDriver("h", "u", "p", dry_run=True)
+        drv.power_on()
+        assert calls == []                     # gated + skipped
+
+    def test_denied_confirm_raises(self, monkeypatch):
+        monkeypatch.setattr(ipmi_mod.shutil, "which", lambda _n: "ipmitool")
+        monkeypatch.setattr(ipmi_mod.subprocess, "run", lambda *a, **k: pytest.fail("ran"))
+        drv = IpmiDriver("h", "u", "p", confirm=deny_all)
+        with pytest.raises(SafetyError):
+            drv.power_on()
+
+
+class TestSystemInfo:
+    def test_get_info_parses_fru_and_mc(self, ipmi):
+        drv, _ = ipmi
+        info = drv.get_info()
+        assert info["manufacturer"] == "DELL"
+        assert info["model"] == "PowerEdge R710"
+        assert info["serial_number"] == "ABC12345"
+        assert info["power_state"] == "on"
+        assert info["bmc_version"] == "1.85"
+
+
+class TestBootConfig:
+    def test_get_boot_options_pxe_once_efi(self, ipmi):
+        drv, _ = ipmi
+        o = drv.get_boot_options()
+        assert o["target"] == "pxe"
+        assert o["once"] is True and o["persistent"] is False
+        assert o["mode"] == "UEFI"
+
+    def test_get_boot_options_disk_persistent_legacy(self, ipmi):
+        drv, _ = ipmi
+        drv._outputs[2] = ("chassis bootparam get 5", BOOT_DISK_PERSIST_LEGACY)
+        o = drv.get_boot_options()
+        assert o["target"] == "hdd"
+        assert o["persistent"] is True
+        assert o["mode"] == "Legacy"
+
+    def test_set_pxe_once_efi(self, ipmi):
+        drv, calls = ipmi
+        drv.set_boot_device("pxe", once=True, uefi=True)
+        setcall = next(c for c in calls if "bootdev" in c)
+        assert setcall[-2:] == ["pxe", "options=efiboot"]
+
+    def test_set_hdd_persistent_legacy(self, ipmi):
+        drv, calls = ipmi
+        drv.set_boot_device("hdd", once=False, uefi=False)
+        setcall = next(c for c in calls if "bootdev" in c)
+        assert setcall[-2:] == ["disk", "options=persistent"]
+
+    def test_set_none_clears(self, ipmi):
+        drv, calls = ipmi
+        drv.set_boot_device("none")
+        setcall = next(c for c in calls if "bootdev" in c)
+        assert setcall[-1] == "none"           # no options for a clear
+
+    def test_usb_rejected(self, ipmi):
+        drv, calls = ipmi
+        with pytest.raises(KVMPilotError):
+            drv.set_boot_device("usb")          # IPMI has no usb bootdev
+        assert not any("bootdev" in c for c in calls)
+
+
+class TestSensorsAndLogs:
+    def test_read_sensors(self, ipmi):
+        drv, _ = ipmi
+        s = drv.read_sensors()
+        assert s["count"] == 3
+        names = {r["name"] for r in s["sensors"]}
+        assert "CPU1 Temp" in names and "FAN1 RPM" in names
+
+    def test_get_logs_returns_sel(self, ipmi):
+        drv, _ = ipmi
+        assert "Power off/down" in drv.get_logs()
+
+    def test_get_logs_follow_unsupported(self, ipmi):
+        drv, _ = ipmi
+        with pytest.raises(CapabilityError):
+            drv.get_logs(follow=True)
+
+
+class TestErrorsAndRegistry:
+    def test_ipmitool_missing_raises_capability_error(self, monkeypatch):
+        monkeypatch.setattr(ipmi_mod.shutil, "which", lambda _n: None)
+        drv = IpmiDriver("h", "u", "p", confirm=lambda *a: True)
+        with pytest.raises(CapabilityError):
+            drv.is_powered_on()
+
+    def test_nonzero_exit_raises(self, monkeypatch):
+        monkeypatch.setattr(ipmi_mod.shutil, "which", lambda _n: "ipmitool")
+        monkeypatch.setattr(ipmi_mod.subprocess, "run",
+                            lambda *a, **k: types.SimpleNamespace(
+                                returncode=1, stdout="", stderr="Unable to establish LAN session"))
+        drv = IpmiDriver("h", "u", "p", confirm=lambda *a: True)
+        with pytest.raises(KVMPilotError):
+            drv.is_powered_on()
+
+    def test_make_driver_ipmi(self):
+        assert isinstance(make_driver("ipmi", host="h"), IpmiDriver)
+
+    def test_make_driver_from_config(self):
+        from kvm_pilot.config import HostConfig
+        cfg = HostConfig(host="h", driver="ipmi", user="root", passwd="calvin", ipmi_cipher=17)
+        drv = make_driver_from_config(cfg)
+        assert isinstance(drv, IpmiDriver)
+        assert drv._cipher == 17
