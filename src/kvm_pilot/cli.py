@@ -438,8 +438,33 @@ def _boot_device_via_ssh(args) -> int:
 
 def cmd_power(args) -> int:
     kvm = _client(args, Capability.POWER)
+    if args.action == "on":
+        try:
+            kvm.power_on()
+        except CapabilityError as exc:
+            # No wired ATX/GPIO power path (common on GL units: ATX enabled=false):
+            # fall back to a Wake-on-LAN magic packet if the profile carries the
+            # host's MAC. WoL reaches the NIC directly, bypassing the KVM's
+            # missing power channel — the #199 out-of-band power-on path.
+            cfg = _resolve_cfg(args)
+            if not cfg.mac:
+                raise CapabilityError(
+                    f"{exc} Set 'mac' in the host profile (or run `kvm-pilot wake`) "
+                    "to enable a Wake-on-LAN power-on fallback."
+                ) from exc
+            from . import wol
+            # The power-on was already consented (the driver's atx.power_on gate
+            # passed before it raised), so don't re-prompt — just log the fallback.
+            SafetyPolicy(confirm=allow_all).guard(
+                "wol.wake", f"WoL power-on fallback -> {cfg.mac} on {cfg.host}")
+            wol.send_magic_packet(cfg.mac, broadcast=cfg.wol_broadcast, count=3)
+            print(f"power on: ATX unavailable on {cfg.host}; sent Wake-on-LAN to "
+                  f"{cfg.mac} (broadcast {cfg.wol_broadcast}) as the out-of-band "
+                  "power-on path")
+            return 0
+        print("power on: requested")
+        return 0
     action = {
-        "on": kvm.power_on,
         "off": kvm.power_off,
         "off-hard": kvm.power_off_hard,
         "reset": kvm.reset_hard,
