@@ -884,7 +884,7 @@ _EFI_FIXTURE = (
 )
 
 
-def _patch_ssh(monkeypatch, calls, *, read_stdout=_EFI_FIXTURE, set_ok=True):
+def _patch_ssh(monkeypatch, calls, *, read_stdout=_EFI_FIXTURE, read_ok=True, set_ok=True):
     from kvm_pilot import ssh as ssh_mod
 
     class FakeCh:
@@ -894,10 +894,12 @@ def _patch_ssh(monkeypatch, calls, *, read_stdout=_EFI_FIXTURE, set_ok=True):
             calls.append(command)
             if "efibootmgr -n" in command:
                 return {"command": command, "returncode": 0 if set_ok else 1,
-                        "stdout": "", "stderr": "" if set_ok else "denied",
+                        "stdout": "", "stderr": "" if set_ok else "Operation not permitted",
                         "ok": set_ok, "dry_run": False}
-            return {"command": command, "returncode": 0, "stdout": read_stdout,
-                    "stderr": "", "ok": True, "dry_run": False}
+            return {"command": command, "returncode": 0 if read_ok else 1,
+                    "stdout": read_stdout if read_ok else "",
+                    "stderr": "" if read_ok else "EFI variables are not supported",
+                    "ok": read_ok, "dry_run": False}
 
     monkeypatch.setattr(ssh_mod.SSHChannel, "from_config", lambda cfg, **kw: FakeCh())
 
@@ -945,3 +947,35 @@ def test_boot_device_via_ssh_persistent_unsupported(monkeypatch, capsys):
                "--host", "10.0.1.16", "--yes"])
     assert rc == 2
     assert "persistent" in capsys.readouterr().err.lower()
+
+
+def test_boot_device_via_ssh_read_failure(monkeypatch, capsys):
+    calls: list = []
+    _patch_ssh(monkeypatch, calls, read_ok=False)
+    rc = main(["boot-device", "pxe", "--via", "ssh", "--host", "10.0.1.16", "--yes"])
+    assert rc == 1
+    assert not any("efibootmgr -n" in c for c in calls)  # never reached the set
+    assert "efibootmgr read failed" in capsys.readouterr().err
+
+
+def test_boot_device_via_ssh_set_failure(monkeypatch, capsys):
+    calls: list = []
+    _patch_ssh(monkeypatch, calls, set_ok=False)
+    rc = main(["boot-device", "hdd", "--via", "ssh", "--host", "10.0.1.16", "--yes"])
+    assert rc == 1
+    assert any("efibootmgr -n 0005" in c for c in calls)  # attempted the set
+    assert "set BootNext failed" in capsys.readouterr().err
+
+
+def test_boot_device_via_ssh_bios_unsupported(monkeypatch, capsys):
+    calls: list = []
+    _patch_ssh(monkeypatch, calls)
+    rc = main(["boot-device", "bios", "--via", "ssh", "--host", "10.0.1.16", "--yes"])
+    assert rc == 2  # bios/diag/none aren't efibootmgr device tokens
+    assert not any("efibootmgr -n" in c for c in calls)
+
+
+def test_wake_rejects_bad_mac(capsys):
+    rc = main(["wake", "--mac", "not-a-mac", "--host", "fake", "--yes"])
+    assert rc == 2
+    assert "invalid MAC" in capsys.readouterr().err

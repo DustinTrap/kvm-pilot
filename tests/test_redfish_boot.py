@@ -163,3 +163,38 @@ def test_restricted_allowable_reported_normalized(emu):
     emu.state.boot_allowable = ["None", "Pxe", "Hdd"]
     opts = make(emu).get_boot_options()
     assert opts["allowable"] == ["hdd", "none", "pxe"]
+
+
+# -- error / edge paths ----------------------------------------------------
+
+def test_set_boot_device_async_task_failure_raises(emu):
+    emu.state.boot_patch_status = 202
+    emu.state.task_state = "Exception"          # a failed terminal TaskState
+    with pytest.raises(KVMPilotError):
+        make(emu).set_boot_device("pxe")
+
+
+def test_set_boot_device_non_mode_patch_failure_propagates(emu):
+    # A 500 (or any failure that is NOT the mode-property 400) must propagate,
+    # never be swallowed as the mode-retry case.
+    emu.state.boot_patch_fail_status = 500
+    with pytest.raises(KVMPilotError):
+        make(emu).set_boot_device("cd")
+
+
+def test_set_boot_device_survives_session_expiry(emu):
+    # BMC drops the session mid-flow (DSP0266 idle timeout); the transport
+    # re-authenticates once and the override still applies.
+    emu.state.expire_token_once = True
+    make(emu).set_boot_device("hdd")
+    assert emu.state.boot_override_target == "Hdd"
+
+
+def test_get_boot_options_when_no_boot_object(emu):
+    # A minimal BMC exposing no ComputerSystem.Boot: sane defaults, no mode.
+    emu.state.boot_absent = True
+    opts = make(emu).get_boot_options()
+    assert opts["enabled"] == "Disabled"
+    assert opts["target"] == "none"
+    assert opts["mode_settable"] is False
+    assert opts["allowable"] == []
