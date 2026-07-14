@@ -535,6 +535,38 @@ fleet-wide fault. Several non-obvious choices came out of measuring it live:
   run's volatile findings would report every live warning as a false
   "regression" after each upgrade.
 
+## IPMI driver cross-checked against OpenIPMI `ipmi_sim` (#62 / #28)
+
+Like the Redfish driver against sushy-tools, the IPMI driver
+(`tests/test_ipmi.py`, fake-ipmitool) is corroborated against a reference BMC we
+didn't write — OpenIPMI's `ipmi_sim` — in `tests/integration/test_ipmi_external.py`
+(marked `integration`, env-gated via the `ipmi_bmc` fixture; run live on the
+homelab OpenShift VM against Fedora's stock `/etc/ipmi/ipmisim1.emu`, since macOS
+has no ipmi_sim build). Independence is the point: the sim answers as *MontaVista*
+(mfr `0x1291`, fw `9.08`), not the Dell shapes our fixtures were captured from, so
+a `mc info`/chassis-status parser overfit to Dell would surface here. It didn't —
+6/6 green.
+
+- **Assert only what the reference sim models; document the rest.** Stock
+  `ipmi_sim` has known gaps (characterised live), so the integration test asserts
+  execution + parsing + feature-detect, not full state round-trips (which the
+  fake-ipmitool unit tests and real iLO/iDRAC hardware, #29, cover):
+  - **Power never toggles.** `chassis power on/off` is accepted but the reported
+    state is stuck at "off" — the sim binds chassis power to an external QEMU VM
+    (`startcmd`, `startnow false`) that isn't running. Consequently the
+    state-dependent verbs `reset`/`soft` are *rejected* ("Invalid data field") on
+    an off chassis, so only `power_off_hard`/`power_on` are exercised live.
+  - **No device SDRs** (`no-device-sdrs`, empty SDR repo) → `read_sensors()`
+    returns `count == 0`, so the test asserts the shape is readable, not a count.
+  - **Boot parameter 5 GET is unimplemented** → `get_boot_options()` degrades to
+    `target=None`/`enabled='Unknown'` yet still reports the static `allowable`
+    set and `mode_settable`, which is what the test checks (plus fast client-side
+    rejection of `usb`, which has no IPMI bootdev selector).
+- **The cosmetic "Unable to Get Channel Cipher Suites" line is not an error.**
+  `ipmi_sim` doesn't answer Get-Channel-Cipher-Suites, but the RMCP+ session still
+  establishes on the default cipher, so the driver's commands succeed. Tests parse
+  the real output lines and ignore that warning.
+
 ## Process
 
 Most structural choices came from adversarial review passes (find → verify →
