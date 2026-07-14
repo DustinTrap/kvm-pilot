@@ -25,6 +25,7 @@ support (`kvm-pilot capabilities` lists them, offline).
 | `sensors` | | sensors | Structured sensors (temps/fans/power/voltages) — BMC drivers. |
 | `logs` | | logs | Device/host event log; `--seek N` = seconds of lookback. |
 | `boot-progress` | | boot_progress | Structured boot phase (BMC BootProgress). |
+| `console` | ⚡ | serial_console | Attach an interactive serial console (IPMI SOL) to your terminal; exit with `~.` (tilde, period). Text-only — needs BIOS console redirection / a serial getty on the host (#208). |
 | `ssh-check` | | — (ssh_host) | Is the managed host's OS reachable over SSH (in-band)? |
 | `ssh-exec` | ⚡ | — (ssh_host) | Run a command on the managed host's OS over SSH (gated). |
 | `ssh-discover` | | — | Scan a CIDR for open SSH. RISKY/opt-in — your networks only. `--ssh-port`. |

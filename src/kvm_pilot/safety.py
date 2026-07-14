@@ -71,6 +71,7 @@ DESTRUCTIVE_OPS: set[str] = {
     "ipmi.power_off_hard",
     "ipmi.reset_hard",
     "ipmi.set_boot_device",
+    "ipmi.serial_console",
     # HID input changes target state too: keystrokes and clicks land on a live
     # console (rm -rf is one type_text away). Mouse *moves* stay ungated.
     "hid.ctrl_alt_delete",
@@ -163,6 +164,8 @@ OP_EFFECT: dict[str, EffectClass] = {
     "ipmi.power_off_hard": EffectClass.POWER_HARD,
     "ipmi.reset_hard": EffectClass.POWER_HARD,
     "ipmi.set_boot_device": EffectClass.CONFIG_MUTATION,
+    # Opening SOL can inject keystrokes into the running host — same risk as HID.
+    "ipmi.serial_console": EffectClass.HID_INPUT,
     # HID input
     "hid.type_text": EffectClass.HID_INPUT,
     "hid.press_key": EffectClass.HID_INPUT,

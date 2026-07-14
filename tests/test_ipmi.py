@@ -13,7 +13,15 @@ import pytest
 
 from kvm_pilot.drivers import ipmi as ipmi_mod
 from kvm_pilot.drivers import make_driver, make_driver_from_config
-from kvm_pilot.drivers.base import BootConfig, Capability, Logs, Power, Sensors, SystemInfo
+from kvm_pilot.drivers.base import (
+    BootConfig,
+    Capability,
+    Logs,
+    Power,
+    Sensors,
+    SerialConsole,
+    SystemInfo,
+)
 from kvm_pilot.drivers.ipmi import IpmiDriver
 from kvm_pilot.errors import CapabilityError, KVMPilotError, SafetyError
 from kvm_pilot.safety import deny_all
@@ -104,7 +112,7 @@ class TestCapabilities:
         caps = drv.capabilities()
         assert caps == {
             Capability.SYSTEM_INFO, Capability.POWER, Capability.BOOT_CONFIG,
-            Capability.SENSORS, Capability.LOGS,
+            Capability.SENSORS, Capability.LOGS, Capability.SERIAL_CONSOLE,
         }
         for absent in (Capability.HID, Capability.VIDEO, Capability.VIRTUAL_MEDIA,
                        Capability.GPIO, Capability.EVENTS):
@@ -112,7 +120,7 @@ class TestCapabilities:
 
     def test_satisfies_protocols(self, ipmi):
         drv, _ = ipmi
-        assert isinstance(drv, Power | SystemInfo | Sensors | Logs | BootConfig)
+        assert isinstance(drv, Power | SystemInfo | Sensors | Logs | BootConfig | SerialConsole)
 
 
 class TestCommandConstruction:
@@ -243,6 +251,115 @@ class TestSensorsAndLogs:
         drv, _ = ipmi
         with pytest.raises(CapabilityError):
             drv.get_logs(follow=True)
+
+
+class TestSerialConsole:
+    """SOL (serial-over-LAN) — PTY-backed ipmitool `sol activate`, faked (#208)."""
+
+    @pytest.fixture()
+    def sol(self, monkeypatch):
+        """A driver whose SOL PTY + ipmitool child are faked; returns
+        (driver, state) where state exposes popen argv, writes, and read queue."""
+        import types as _types
+
+        state = _types.SimpleNamespace(
+            argv=None, writes=[], read_q=[b"grub> ", b""], runs=[], master=7, terminated=False
+        )
+
+        def fake_run(argv, **kw):  # the read-only _run() path (sol deactivate, etc.)
+            state.runs.append(argv)
+            return _types.SimpleNamespace(returncode=0, stdout="", stderr="")
+
+        class FakeProc:
+            def __init__(self, argv, **kw):
+                state.argv = argv
+
+            def poll(self):
+                return None
+
+            def terminate(self):
+                state.terminated = True
+
+            def wait(self, timeout=None):
+                return 0
+
+            def kill(self):
+                state.terminated = True
+
+        import pty
+
+        monkeypatch.setattr(ipmi_mod.shutil, "which", lambda _n: "/usr/bin/ipmitool")
+        monkeypatch.setattr(ipmi_mod.subprocess, "run", fake_run)
+        monkeypatch.setattr(ipmi_mod.subprocess, "Popen", FakeProc)
+        monkeypatch.setattr(pty, "openpty", lambda: (state.master, 99))
+        monkeypatch.setattr(ipmi_mod.os, "close", lambda fd: None)
+        monkeypatch.setattr(ipmi_mod.os, "set_blocking", lambda fd, b: None)
+        monkeypatch.setattr(
+            ipmi_mod.os, "write", lambda fd, data: state.writes.append((fd, data)) or len(data)
+        )
+        monkeypatch.setattr(ipmi_mod.os, "read", lambda fd, n: state.read_q.pop(0) if state.read_q else b"")
+        monkeypatch.setattr(
+            ipmi_mod.select, "select",
+            lambda r, w, x, t: (r, [], []) if state.read_q else ([], [], []),
+        )
+        drv = IpmiDriver("10.0.1.99", "root", "calvin", confirm=lambda *a: True)
+        return drv, state
+
+    def test_capability_and_protocol(self, sol):
+        drv, _ = sol
+        assert Capability.SERIAL_CONSOLE in drv.capabilities()
+        assert isinstance(drv, SerialConsole)
+
+    def test_activate_builds_sol_argv_over_pty(self, sol):
+        drv, state = sol
+        drv.serial_write("x")
+        assert state.argv[-2:] == ["sol", "activate"]
+        assert "-E" in state.argv and "calvin" not in state.argv  # password via env
+        # single-session: a stale session is freed before activate
+        assert ["sol", "deactivate"] == state.runs[0][-2:]
+
+    def test_serial_write_sends_keystrokes_to_master(self, sol):
+        drv, state = sol
+        drv.serial_write("root\r")
+        assert state.writes[-1] == (state.master, b"root\r")
+
+    def test_serial_read_drains_console_output(self, sol):
+        drv, _ = sol
+        out = drv.serial_read(timeout=0.2)
+        assert "grub>" in out
+
+    def test_session_is_reused_not_reopened(self, sol):
+        drv, state = sol
+        drv.serial_write("a")
+        drv.serial_write("b")  # second write must NOT spawn a second sol activate
+        assert sum(1 for r in state.runs if r[-2:] == ["sol", "deactivate"]) == 1
+
+    def test_dry_run_opens_nothing(self, monkeypatch):
+        monkeypatch.setattr(ipmi_mod.shutil, "which", lambda _n: "ipmitool")
+        monkeypatch.setattr(ipmi_mod.subprocess, "Popen",
+                            lambda *a, **k: pytest.fail("opened SOL under dry-run"))
+        drv = IpmiDriver("h", "u", "p", dry_run=True)
+        assert drv.serial_read(timeout=0.1) == ""
+
+    def test_denied_confirm_raises(self, monkeypatch):
+        monkeypatch.setattr(ipmi_mod.shutil, "which", lambda _n: "ipmitool")
+        drv = IpmiDriver("h", "u", "p", confirm=deny_all)
+        with pytest.raises(SafetyError):
+            drv.serial_write("x")
+
+    def test_interactive_execs_ipmitool_sol_activate(self, sol):
+        drv, state = sol
+        rc = drv.serial_interactive()
+        assert rc == 0
+        assert state.runs[-1][-2:] == ["sol", "activate"]  # inherited-stdio subprocess.run
+
+    def test_close_tears_down_and_frees_channel(self, sol):
+        drv, state = sol
+        drv.serial_write("x")           # open
+        drv.serial_close()
+        assert state.terminated is True
+        assert state.runs[-1][-2:] == ["sol", "deactivate"]  # BMC channel freed
+        assert drv._sol is None and drv._sol_fd is None
 
 
 class TestErrorsAndRegistry:
