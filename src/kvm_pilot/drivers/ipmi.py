@@ -36,6 +36,14 @@ _BOOTDEV_MAP = {
     "pxe": "pxe", "hdd": "disk", "disk": "disk", "cd": "cdrom", "dvd": "cdrom",
     "bios": "bios", "setup": "bios", "diag": "diag", "none": "none",
 }
+# FRU string fields are frequently unset or filled with vendor placeholders; treat
+# these as "no value" so a junk field never masks a real one in a later fallback.
+_FRU_PLACEHOLDERS = {
+    "", "localhost", "unknown", "none", "n/a", "not specified", "not available",
+    "default string", "to be filled by o.e.m.", "system product name",
+    "system manufacturer", "system serial number", "0123456789",
+}
+
 # `bootparam get 5` "Boot Device Selector" phrase -> normalized token.
 _BOOT_SELECTOR_REVERSE = [
     ("no override", "none"),
@@ -149,11 +157,25 @@ class IpmiDriver(PowerMixin, CapabilityMixin):
             mc = _kv(self._run("mc", "info"))
         except KVMPilotError:
             mc = {}
+
+        def pick(*values: str | None) -> str | None:
+            # First value that isn't blank or a well-known placeholder. Dell's iDRAC
+            # sets FRU "Product Name" to the BMC hostname (e.g. "localhost"), so the
+            # server model lives in "Board Product" — hence Board Product is tried
+            # first for the model, and junk like localhost/"To be filled by O.E.M."
+            # is skipped so it never masks a real value in a later field.
+            for v in values:
+                if v and v.strip().lower() not in _FRU_PLACEHOLDERS:
+                    return v.strip()
+            return None
+
         info: dict[str, Any] = {
-            "manufacturer": fru.get("Product Manufacturer") or fru.get("Board Mfg")
-            or mc.get("Manufacturer Name"),
-            "model": fru.get("Product Name") or fru.get("Board Product"),
-            "serial_number": fru.get("Product Serial") or fru.get("Board Serial"),
+            "manufacturer": pick(fru.get("Product Manufacturer"), fru.get("Board Mfg"),
+                                 mc.get("Manufacturer Name")),
+            # Board Product = the server model on Dell/HPE; Product Name is often the
+            # iDRAC hostname ("localhost") — prefer the former, fall back to the latter.
+            "model": pick(fru.get("Board Product"), fru.get("Product Name")),
+            "serial_number": pick(fru.get("Product Serial"), fru.get("Board Serial")),
             "power_state": "on" if "on" in (chassis.get("System Power", "")).lower() else "off",
             "bmc_version": mc.get("Firmware Revision"),
             "bmc_manufacturer": mc.get("Manufacturer Name"),

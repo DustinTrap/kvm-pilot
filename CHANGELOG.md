@@ -19,11 +19,22 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Gated as `ipmi.serial_console` (HID_INPUT — it can inject keystrokes). Text-only;
   drives Linux/ESXi serial installers, not the Windows GUI installer.
 
+### Fixed
+- **IPMI `get_info` model (#62).** Dell iDRAC6 fills FRU `Product Name` with the
+  BMC hostname (e.g. `localhost`); the model now comes from `Board Product` with
+  vendor placeholders skipped, so a real R710 reports `PowerEdge R710` — not
+  `localhost`. (Found on real hardware.)
+- **Healthcheck driver label (#62).** `_driver_kind` omitted `ipmi`, so the IPMI
+  driver was mislabeled `pikvm@<host>` in health reports; it now reads `ipmi@…`.
+
 ### Testing
 - IPMI driver cross-checked against an independent OpenIPMI `ipmi_sim` BMC
   (`tests/integration/test_ipmi_external.py`, env-gated `ipmi_bmc` fixture) —
   the IPMI analogue of the sushy-tools Redfish cross-check. Stock-sim limits
   documented in `docs/decisions.md`.
+- IPMI driver + SOL live-validated end-to-end against a real Dell iDRAC6 (R710):
+  power/boot/sensors/SEL/info (14/0), SOL boot capture, and F11 keystroke drive
+  into the BIOS Boot Manager.
 
 ## [0.1.0b6] — 2026-07-14
 

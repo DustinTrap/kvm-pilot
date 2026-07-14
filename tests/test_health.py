@@ -224,6 +224,16 @@ def test_run_healthcheck_on_fake_is_all_ok():
     assert {r.id for r in rep.results} >= {"api-reachable", "recovery-path"}
 
 
+def test_driver_kind_labels_ipmi_not_pikvm():
+    # Regression for a real-hardware finding: healthcheck reported "pikvm@<idrac>"
+    # for the IPMI driver because _driver_kind's list omitted 'ipmi' and defaulted
+    # to pikvm. IpmiDriver must self-identify as 'ipmi'.
+    from kvm_pilot.drivers.ipmi import IpmiDriver
+    from kvm_pilot.health import _driver_kind
+
+    assert _driver_kind(IpmiDriver("h", "u", "p")) == "ipmi"
+
+
 def test_broken_check_does_not_crash_audit():
     def boom(_driver):
         raise RuntimeError("kaboom")
