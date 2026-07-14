@@ -41,6 +41,7 @@ def test_capabilities_are_the_bmc_complementary_set(emu):
     assert caps == {
         Capability.SYSTEM_INFO, Capability.POWER, Capability.BOOT_PROGRESS,
         Capability.SENSORS, Capability.LOGS, Capability.VIRTUAL_MEDIA,
+        Capability.BOOT_CONFIG,
     }
     # A BMC has no keyboard/mouse/screenshot/relay — these must be absent.
     for absent in (Capability.HID, Capability.VIDEO, Capability.GPIO,

@@ -100,6 +100,19 @@ class RedfishState:
         # If True, ServiceRoot advertises $expand and the Sensors collection
         # serves its members inline for a ?$expand request (one GET, no fan-out).
         self.sensors_expandable = False
+        # ComputerSystem.Boot (BootSourceOverride) state + quirk knobs.
+        self.boot_override_enabled = "Disabled"   # Disabled | Once | Continuous
+        self.boot_override_target = "None"        # None|Pxe|Cd|Hdd|Usb|BiosSetup|Diags
+        self.boot_override_mode = "UEFI"          # UEFI | Legacy
+        self.boot_allowable = ["None", "Pxe", "Cd", "Hdd", "Usb", "BiosSetup", "Diags"]
+        # boot_expose_mode=False models older iLO4/iDRAC7 with no
+        # BootSourceOverrideMode field; boot_patch_rejects_mode models a BMC that
+        # 400s a PATCH that includes a mode it won't accept (driver must retry
+        # without it). boot_patch_status: 200 (return resource) | 204 | 202 async.
+        self.boot_expose_mode = True
+        self.boot_patch_rejects_mode = False
+        self.boot_patch_status = 200
+        self.patches: list[tuple[str, dict]] = []
 
 
 class _Handler(BaseHTTPRequestHandler):
@@ -290,6 +303,13 @@ class _Handler(BaseHTTPRequestHandler):
     def _computer_system(self) -> dict:
         st = self._state
         reset: dict = {"target": RESET, "ResetType@Redfish.AllowableValues": st.reset_allowable}
+        boot: dict = {
+            "BootSourceOverrideEnabled": st.boot_override_enabled,
+            "BootSourceOverrideTarget": st.boot_override_target,
+            "BootSourceOverrideTarget@Redfish.AllowableValues": st.boot_allowable,
+        }
+        if st.boot_expose_mode:
+            boot["BootSourceOverrideMode"] = st.boot_override_mode
         return {
             "@odata.id": SYS,
             "@odata.type": "#ComputerSystem.v1_20_0.ComputerSystem",
@@ -298,6 +318,7 @@ class _Handler(BaseHTTPRequestHandler):
             "PowerState": st.power_state,
             "Status": {"Health": "OK", "State": "Enabled"},
             "BootProgress": {"LastState": st.boot_progress},
+            "Boot": boot,
             # DSP0268 associations — the driver resolves chassis/manager from
             # these, not by indexing the global collections.
             "Links": {"Chassis": [{"@odata.id": CHAS}], "ManagedBy": [{"@odata.id": MGR}]},
@@ -389,6 +410,47 @@ class _Handler(BaseHTTPRequestHandler):
             return
         # A real BMC 404s an unknown action target (a typo'd @odata.id/target).
         self._send({"error": {"message": "not found"}}, status=404)
+
+    def do_PATCH(self) -> None:
+        if self._pre():
+            return
+        path = self._path()
+        body = self._read_body()
+        st = self._state
+        st.patches.append((path, body))
+        if path != SYS:
+            self._send({"error": {"message": "not found"}}, status=404)
+            return
+        boot = body.get("Boot")
+        if not isinstance(boot, dict):
+            self._send({"error": {"message": "unsupported PATCH target"}}, status=400)
+            return
+        target = boot.get("BootSourceOverrideTarget")
+        if target is not None and target not in st.boot_allowable:
+            self._send({"error": {"@Message.ExtendedInfo": [
+                {"MessageId": "Base.1.0.PropertyValueNotInList",
+                 "Message": f"{target} is not one of the allowable values",
+                 "MessageArgs": [str(target), "BootSourceOverrideTarget"]}]}}, status=400)
+            return
+        if "BootSourceOverrideMode" in boot and st.boot_patch_rejects_mode:
+            self._send({"error": {"@Message.ExtendedInfo": [
+                {"MessageId": "Base.1.0.PropertyNotWritable",
+                 "Message": "BootSourceOverrideMode is not writable on this system",
+                 "MessageArgs": ["BootSourceOverrideMode"]}]}}, status=400)
+            return
+        # Apply the write.
+        if "BootSourceOverrideEnabled" in boot:
+            st.boot_override_enabled = boot["BootSourceOverrideEnabled"]
+        if target is not None:
+            st.boot_override_target = target
+        if "BootSourceOverrideMode" in boot and st.boot_expose_mode:
+            st.boot_override_mode = boot["BootSourceOverrideMode"]
+        if st.boot_patch_status == 202:
+            self._send(None, status=202, headers={"Location": TASK})
+        elif st.boot_patch_status == 204:
+            self._send(None, status=204)
+        else:
+            self._send(self._computer_system(), status=200)
 
     def do_DELETE(self) -> None:
         if self._pre():
