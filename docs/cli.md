@@ -31,6 +31,8 @@ support (`kvm-pilot capabilities` lists them, offline).
 | `ssh-bootstrap` | ⚡ | hid, video | Bootstrap SSH on an installer host over KVM HID, then hand off (#81). Plans by default; `--execute`, `--vt`, `--command` (repeatable), `--ip-region`. |
 | `power` | ⚡ | power | `on` / `off` / `off-hard` / `reset`. |
 | `power-cycle` | ⚡ | power | Hard power cycle (off-hard → on). |
+| `boot-device` | ⚡ | boot_config | Set what the host boots next (`pxe`/`cd`/`hdd`/`usb`/`bios`/`diag`/`none`) via Redfish `BootSourceOverride` or IPMI; `--once`/`--persistent`, `--legacy` (BIOS vs UEFI), `--show` (read current + allowable), `--via {auto,redfish,ssh}` (ssh sets a one-time UEFI `BootNext` via `efibootmgr`) (#28/#201/#150). |
+| `wake` | ⚡ | — (mac) | Send a Wake-on-LAN magic packet to the host's `mac` (from `--mac` or the profile); the OOB power-on path when the KVM has no wired ATX/GPIO (#199/#23). |
 | `type` | ⚡ | hid | Type text on the host console; `--slow` for finicky firmware. |
 | `key` | ⚡ | hid | Press a key (`Enter`, `F2`) or send a chord of kvmd key codes (`ControlLeft+AltLeft+F2`, #112). |
 | `mouse-move` | ⚡ | hid | Absolute mouse move; `--space percent` (default, 0.0–1.0, resolution-proof) \| `pixel` \| `raw` (#124). Percent coords apply the stored per-host calibration when present (#128) and say so. |

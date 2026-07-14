@@ -39,3 +39,6 @@ config.toml
 *.jpeg
 *.png
 !docs/**/*.png
+
+# uv lockfile (project is pip/venv-managed; uv.lock is a stray artifact from `uv run`)
+uv.lock

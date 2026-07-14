@@ -4,6 +4,22 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **IPMI driver (#62).** `--driver ipmi` shells out to `ipmitool -I lanplus`
+  (password via the `IPMI_PASSWORD` env, never argv). Implements Power /
+  SystemInfo / BootConfig / Sensors / Logs, so `power` / `boot-device` /
+  `sensors` / `logs` work with no new CLI/MCP code — the pre-Redfish BMC path
+  (e.g. Dell iDRAC6 / R710). 34 hardware-free tests. IPMI completeness is now
+  roughly Redfish minus VirtualMedia.
+
+### Testing
+- IPMI driver cross-checked against an independent OpenIPMI `ipmi_sim` BMC
+  (`tests/integration/test_ipmi_external.py`, env-gated `ipmi_bmc` fixture) —
+  the IPMI analogue of the sushy-tools Redfish cross-check. Stock-sim limits
+  documented in `docs/decisions.md`.
+
 ## [0.1.0b6] — 2026-07-14
 
 **Beta 6 — remote boot-control + Wake-on-LAN.** A cohesive set for driving what a
