@@ -393,7 +393,7 @@ The full command set (see [docs/cli.md](https://github.com/DustinTrap/kvm-pilot/
 for the reference table): `kvm-pilot info | capabilities | benchmark | route |
 host-exec | healthcheck | firmware-check | firmware-update | snapshot | sensors |
 logs | ssh-check | ssh-exec | ssh-discover | ssh-bootstrap | boot-progress |
-power | power-cycle | type | key | mouse-move | click | media-list | mount |
+power | power-cycle | boot-device | wake | type | key | mouse-move | click | media-list | mount |
 eject | keep-awake | recover-hid | appliance | paths | classify | watch |
 events | test-report`. Run
 `healthcheck` on first contact (see above); it also auto-runs ahead of destructive
