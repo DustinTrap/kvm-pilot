@@ -52,6 +52,23 @@ DBG="$(git diff HEAD 2>/dev/null | grep -nE '^\+' | grep -nE 'breakpoint\(\)|pdb
 echo "DEBUG_MARKERS_IN_DIFF: $( [ -n "$DBG" ] && echo "$DBG" | wc -l | tr -d ' ' || echo 0 )"
 [ -n "$DBG" ] && echo "$DBG" | sed 's/^/  /'
 
+# Secret literals in the working diff AND recent commits (added lines). Belated but
+# it catches a credential that was committed (even pushed) so the operator can ROTATE
+# it — nothing flagged the plaintext iDRAC password committed to RESUME.md this
+# session; only #209 + a manual grep did (v0.9.0). Tight patterns (assignment to a
+# LITERAL, not the mere word "password"); env refs / placeholders are excluded.
+# Assignment to a QUOTED literal (kills `passwd: str` type hints and `= passwd`
+# variable refs), the env-inline `IPMI_PASSWORD=<literal>` form, or a private key.
+SECRET_PAT='(password|passwd|secret|api[_-]?key|token)[[:space:]]*[:=][[:space:]]*["'"'"'][^"'"'"']{3,}|IPMI_PASSWORD=[A-Za-z0-9]|BEGIN [A-Z ]*PRIVATE KEY'
+# calvin = the universal Dell factory-default iDRAC password (docs/tests use it as
+# THE example); admin/password/changeme are stock placeholders — none is a per-box
+# secret to rotate, so they stay out of the way of a real leak.
+SECRET_EXCL='<pw>|<secret|placeholder|redact|example|BASE32SECRET|your[_-]|xxxx+|IPMI_PASSWORD env|KVM_PILOT_|\$\{|\$[A-Z]|os\.environ|"calvin"|"admin"|"password"|"changeme"|"test"'
+SECRETS="$( { git diff HEAD 2>/dev/null; git log -p -n 25 2>/dev/null; } \
+  | grep -E '^\+' | grep -EI "$SECRET_PAT" | grep -vEI "$SECRET_EXCL" | sort -u || true )"
+echo "SECRET_SCAN (working diff + last 25 commits): $( [ -n "$SECRETS" ] && echo "$(echo "$SECRETS" | wc -l | tr -d ' ') possible literal(s) — INSPECT + ROTATE if real" || echo "clean" )"
+[ -n "$SECRETS" ] && echo "$SECRETS" | head -8 | sed 's/^/  /'
+
 # ==================================================== C2 Tracking & release ===
 echo
 echo "## C2  Tracking & the release/resume pointer"
