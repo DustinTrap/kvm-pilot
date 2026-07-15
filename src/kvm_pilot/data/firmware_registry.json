@@ -52,6 +52,28 @@
           }
         }
       ]
+    },
+    {
+      "vendor": "dell",
+      "product": "PowerEdge R710",
+      "versions": [
+        {
+          "version": "iDRAC6 1.95",
+          "maturity": {
+            "level": "beta",
+            "capabilities": {
+              "boot_config": "beta",
+              "healthcheck": "beta",
+              "info": "beta",
+              "logs": "beta",
+              "power": "beta",
+              "power_state": "beta",
+              "sensors": "beta",
+              "serial_console": "beta"
+            }
+          }
+        }
+      ]
     }
   ]
 }

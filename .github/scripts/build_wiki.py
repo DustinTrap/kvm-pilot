@@ -85,10 +85,13 @@ HCL_REGISTRY = ROOT / "src" / "kvm_pilot" / "data" / "firmware_registry.json"
 HCL_PAGE = "Hardware-Compatibility.md"
 HCL_MIN_SAMPLES = 3  # a cell below this shows "insufficient data", not a verdict
 # capability -> is it destructive (safety-relevant verdict)? Column order preserved.
+# Covers the PiKVM/GLKVM set plus the BMC/IPMI capabilities (sensors, boot_config,
+# serial_console) so Redfish/IPMI devices are fully represented, not just partially.
 HCL_CAPS: list[tuple[str, bool]] = [
     ("info", False), ("snapshot", False), ("healthcheck", False),
-    ("logs", False), ("power_state", False),
-    ("virtual_media", True), ("power", True), ("firmware_update", True),
+    ("logs", False), ("sensors", False), ("power_state", False),
+    ("virtual_media", True), ("power", True), ("boot_config", True),
+    ("serial_console", True), ("firmware_update", True),
 ]
 
 
