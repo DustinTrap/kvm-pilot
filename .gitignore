@@ -42,3 +42,8 @@ config.toml
 
 # uv lockfile (project is pip/venv-managed; uv.lock is a stray artifact from `uv run`)
 uv.lock
+
+# Session resume pointer — LOCAL-ONLY since #209 (it carries internal fleet/opsec
+# state: LAN IPs, usernames, key-install status). Reverses the checkpoint v0.3.0
+# git-tracked decision; see .claude/skills/checkpoint/SKILL.md v0.8.0.
+RESUME.md

@@ -1,4 +1,4 @@
-# kvm-pilot MCP server (experimental)
+# kvm-pilot MCP server
 
 A local **stdio MCP server** that exposes a KVM device to MCP-capable agents
 (Claude Desktop, Claude Code, other agent hosts). It **ships in the wheel** —
@@ -28,7 +28,10 @@ client/driver code stays stdlib-only; `mcp` is imported only in this subpackage.
 | `wait_for_state` | `readOnlyHint` (open-world) | Block (bounded) until the screen reaches a named boot/run phase — the MCP twin of CLI `watch`. Validates the phase token up front, polls the cheap gates + server-side vision with backoff, emits MCP progress per poll, and returns the reached phase + confidence + a `frame_ref` to anchor a follow-up `mouse` click; a timeout comes back as a same-path `reached: false` result with the last observed state. `timeout` is capped server-side at 300 s — chain calls for longer waits. **Needs server-side vision for phases the cheap gates can't resolve**: with no vision key it fails fast pointing you at `classify_screen` polling (caller-side classification) instead of burning the timeout |
 | `ssh_reachable` | `readOnlyHint` | Is the **managed host's OS** reachable over SSH (in-band)? Targets the host *behind* the KVM (its own `ssh_host`), not the appliance — use it to prefer remote recovery before physical intervention. Pass `host=` to override the target at runtime (e.g. an install-time DHCP address the profile can't know); also surfaced as an `ssh-reachable` healthcheck when `ssh_host` is configured |
 | `list_virtual_media` | `readOnlyHint` | Inventory the KVM's virtual-media (MSD) storage: stored images (name/size/completeness), the selected drive image, and whether media is attached. **Check this before asking the operator to download or upload an ISO** — the image may already be on the device from an earlier job; on brands with a known host-visible gadget name it also returns `host_visible_as` — the device name the target's boot menu shows when the medium is truly presented (e.g. 'Glinet Optical Drive' on GLKVM, #78); its absence next to a generic CD/DVD entry means the media is not really inserted |
+| `boot_options` | `readOnlyHint` | Current boot-source override (target/enabled/mode) plus the device's **allowable** boot targets and whether the mode is settable — feature-detected from the BMC (Redfish `AllowableValues` / IPMI), never assumed. Read this before `set_boot_device` so you offer only targets the device accepts |
 | `power` | `destructiveHint` | `on` / `off` / `off-hard` / `reset` — **disabled unless the operator opts in** (`KVM_PILOT_MCP_ALLOW_POWER`) |
+| `wake` | `destructiveHint` | Send a Wake-on-LAN magic packet to the managed host (its wired NIC's MAC, from the profile or `mac=`) — the out-of-band power-on path when ATX isn't wired, and the first thing to try when a host stopped answering (suspended hosts wake in seconds). A state change, so it shares the power gate (`KVM_PILOT_MCP_ALLOW_POWER`) |
+| `set_boot_device` | `destructiveHint` | Boot-source override on Redfish/IPMI devices (`pxe`/`cd`/`hdd`/`usb`/`bios`/…, one-time by default or `persistent=true`, optional UEFI/legacy mode) — a **config mutation**, its own effect class: needs `KVM_PILOT_MCP_ALLOW_CONFIG` + approval. Check `boot_options` first for what this BMC accepts |
 | `type_text` | `destructiveHint` | Type text on the host console (HID keyboard) — needs `KVM_PILOT_MCP_ALLOW_HID` + per-invocation approval |
 | `press_key` | `destructiveHint` | Press one key (e.g. `Enter`, `F2`) — needs `KVM_PILOT_MCP_ALLOW_HID` + approval |
 | `send_shortcut` | `destructiveHint` | Send a key chord (e.g. `ControlLeft,AltLeft,F2`). Gated **by effect**: a reboot/power chord (Ctrl+Alt+Del, Magic SysRq) needs `ALLOW_POWER`; an ordinary session chord needs `ALLOW_HID` |
@@ -56,10 +59,10 @@ per-invocation approvals below apply regardless of annotation.
 
 | Profile | readOnly | destructive | idempotent | openWorld | Tools |
 |---|---|---|---|---|---|
-| read | ✅ | — | ✅ | — | `info` `healthcheck` `capabilities` `support_matrix` `power_state` `logs` `snapshot` `list_virtual_media` `ssh_reachable` `ssh_discover` `appliance_status` `access_paths` |
+| read | ✅ | — | ✅ | — | `info` `healthcheck` `capabilities` `support_matrix` `power_state` `boot_options` `logs` `snapshot` `list_virtual_media` `ssh_reachable` `ssh_discover` `appliance_status` `access_paths` |
 | read, open-world | ✅ | — | ✅ | ⚠️ | `classify_screen` — the *server-side vision backend* may be a cloud VLM (a local backend never leaves your network) |
 | read, open-world, timed | ✅ | — | — | ⚠️ | `wait_for_state` — same vision caveat, and a timed wait is not idempotent |
-| destructive | — | ⚠️ | — | — | `power` `type_text` `press_key` `send_shortcut` `ctrl_alt_delete` `mouse` `ssh_exec` `appliance_reboot` — not safely repeatable (a second reset reboots again) |
+| destructive | — | ⚠️ | — | — | `power` `wake` `set_boot_device` `type_text` `press_key` `send_shortcut` `ctrl_alt_delete` `mouse` `ssh_exec` `appliance_reboot` — not safely repeatable (a second reset reboots again) |
 | reversible write | — | — | ✅ | — | `eject` (undoable and convergent; still MEDIA-gated), `calibrate_mouse` (pointer moves only, re-run converges; still HID-gated) |
 | reversible write, open-world | — | — | ✅ | ⚠️ | `mount_iso` (may fetch an ISO by URL), `file_firmware_report` (files a GitHub issue; dedupes against existing ones, hence idempotent) — still gated by MEDIA / EXTERNAL_WRITE |
 
@@ -146,9 +149,10 @@ right interface (the skill's *Choosing an interface* matrix is the full guide):
   `file_firmware_report`, #190; the currency readout itself rides along in its
   result and in `healthcheck`.)
 - **MSD mode switching** → the **Python library**.
-- **Reboot the KVM appliance / restart `kvmd`** → **out-of-band SSH** to the
-  appliance. No kvm-pilot interface reboots the box; `power` acts on the
-  *managed host*, not the appliance.
+- **Restart `kvmd` / inspect `/etc/kvmd` on the appliance** → **out-of-band
+  SSH** to the appliance. (A full appliance reboot *does* have a tool now —
+  `appliance_reboot`, `ALLOW_APPLIANCE`-gated; `power` still acts on the
+  *managed host*, never the appliance.)
 - **View the screen when `snapshot` fails** (503, or a tiny frame while a signal
   is present — typically H.264 at the panel's native resolution) → the
   **WebRTC/Janus stream or the vendor web UI**.
@@ -231,6 +235,7 @@ kvm-pilot-mcp                    # start the stdio server (or: python -m kvm_pil
 | `KVM_PILOT_MCP_ALLOW_HID` | **Operator-only** opt-in enabling HID input (`type_text`, `press_key`, `mouse`, ordinary `send_shortcut`) |
 | `KVM_PILOT_MCP_ALLOW_MEDIA` | **Operator-only** opt-in enabling virtual media (`mount_iso`, `eject`) |
 | `KVM_PILOT_MCP_ALLOW_SSH` | **Operator-only** opt-in that enables the `ssh_exec` tool (`1`/`true`/`yes`) |
+| `KVM_PILOT_MCP_ALLOW_CONFIG` | **Operator-only** opt-in enabling boot-configuration mutation (`set_boot_device`) (`1`/`true`/`yes`) |
 | `KVM_PILOT_MCP_ALLOW_APPLIANCE` | **Operator-only** opt-in that enables `appliance_reboot` (rebooting the KVM appliance itself) (`1`/`true`/`yes`) |
 | `KVM_PILOT_MCP_ALLOW_EXTERNAL_WRITE` | **Operator-only** opt-in enabling writes to systems *outside* the managed device — currently `file_firmware_report` (files a GitHub issue via the `gh` CLI, which must be installed + authed in the server's environment) (#190) |
 | `KVM_PILOT_MCP_PROFILES` | **Fail-closed** allowlist of profile names the server may target (comma-separated). Unset = no allowlist; set-but-empty = allow nothing; a target not on the list is refused (never a fall-back to all configured hosts) |

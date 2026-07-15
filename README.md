@@ -16,17 +16,25 @@ Vision runs on Claude **or** any local OpenAI-compatible VLM (LM Studio, Ollama,
 vLLM, llama.cpp). Point it at a model on your own GPU and the screenshots never
 leave your network and cost nothing per frame.
 
-> **Status:** v0.1.0b2 — **beta, ready for broader testing.** The core
-> paths have graduated from mocked-only to live-verified: a fleet of GL-RM1PE
-> units has exercised `snapshot`/`healthcheck`/`logs`/`power_state`/
-> `virtual_media`/`info` across two firmware lines, and on V1.9.1 those
-> capabilities sit at **beta** maturity in the run ledger that ships in the
-> wheel — derived from real runs, never hand-edited. b2 hardens the paths that
-> can hurt: transports never re-fire a destructive request, MCP approvals are
-> signed single-use receipts with an audit trail, GLKVM snapshots work headless
-> at native resolution, and `kvm-pilot test-report` turns contributing evidence
-> into one command. The firmware registry still feeds itself: `firmware-check`
-> auto-files registry updates and devices report what they see.
+> **Status: beta — ready for broader testing.** (The exact version lives in the
+> [CHANGELOG](https://github.com/DustinTrap/kvm-pilot/blob/main/CHANGELOG.md);
+> install with `pip install --pre kvm-pilot`.) The core paths have graduated
+> from mocked-only to live-verified: a fleet of GL-RM1PE units has exercised
+> `snapshot`/`healthcheck`/`logs`/`power_state`/`virtual_media`/`info` across
+> two firmware lines — on V1.9.1 those capabilities sit at **beta** maturity in
+> the run ledger that ships in the wheel, derived from real runs, never
+> hand-edited — and a Dell iDRAC6 has exercised the IPMI driver live end-to-end
+> (power, boot-device, sensors, event log, SOL serial console). The paths that
+> can hurt are hardened: transports never re-fire a destructive request, MCP
+> approvals are signed single-use receipts with an audit trail, and every
+> destructive effect — power, HID, media, boot-config, appliance, SSH,
+> external writes — has its own operator opt-in gate. Recent betas added
+> remote boot-device control (Redfish, IPMI, and in-band `efibootmgr`),
+> Wake-on-LAN, an IPMI driver for BMCs that predate Redfish, a serial (SOL)
+> console, mouse auto-calibration, and headless native-resolution GLKVM
+> snapshots; `kvm-pilot test-report` turns contributing evidence into one
+> command, and the firmware registry feeds itself (`firmware-check` auto-files
+> registry updates).
 > **Now we need your hardware.** PiKVM, BliKVM, other GLKVM models, and Redfish
 > BMCs (iDRAC/iLO/OpenBMC) are the combos the matrix needs most — success *or*
 > failure, a
@@ -261,13 +269,15 @@ gating every destructive call, and the vision loop on devices that have pixels.
 
 | Device | Status |
 |--------|--------|
-| GL-RM1PE (Comet PoE) | Primary target — **exercised live**: read/`snapshot`/`healthcheck`/`logs` verified on firmware V1.5.1 release2 & V1.9.1 release1; remote flash a no-op ([#94](https://github.com/DustinTrap/kvm-pilot/issues/94)/[#95](https://github.com/DustinTrap/kvm-pilot/issues/95)); encoder wedges >1080p ([#107](https://github.com/DustinTrap/kvm-pilot/issues/107)) |
+| GL-RM1PE (Comet PoE) | Primary target — **exercised live**: read/`healthcheck`/`logs` verified on firmware V1.5.1 release2 & V1.9.1 release1; `snapshot` verified on V1.9.1 (on V1.5.1 it fails with a clear error — undecodable H.264 frame, [#107](https://github.com/DustinTrap/kvm-pilot/issues/107)/[#151](https://github.com/DustinTrap/kvm-pilot/issues/151)); remote flash a no-op ([#94](https://github.com/DustinTrap/kvm-pilot/issues/94)/[#95](https://github.com/DustinTrap/kvm-pilot/issues/95)); encoder wedges >1080p ([#107](https://github.com/DustinTrap/kvm-pilot/issues/107)) |
+| Dell iDRAC6 — IPMI (PowerEdge R710) | **Exercised live**: power / boot-device / sensors / event log (SEL) / SOL serial console all verified over `ipmitool` lanplus (fw 1.95) |
 | GL-RM1 (Comet) | Expected to work (same firmware family); untested |
 | PiKVM v3 / v4 | Expected to work (upstream API); untested |
 | BliKVM | Expected to work (PiKVM-compatible API); untested |
+| Redfish BMCs (iDRAC7+, iLO, OpenBMC) | Emulator-verified (in-repo emulator + DMTF sushy-tools in CI); live-BMC validation pending ([#29](https://github.com/DustinTrap/kvm-pilot/issues/29)) |
 
-Only the GL-RM1PE has been run live so far, and only on the read/snapshot
-paths — everything else is "expected to work" pending validation. The
+The GL-RM1PE (read/snapshot paths) and a Dell iDRAC6 over IPMI are the combos
+run live so far — everything else is "expected to work" pending validation. The
 [Hardware-Compatibility list](https://github.com/DustinTrap/kvm-pilot/wiki/Hardware-Compatibility)
 is the authoritative, per-capability record. ATX power control needs the
 ATX adapter wired to the target's front-panel header: on the GL Comet family

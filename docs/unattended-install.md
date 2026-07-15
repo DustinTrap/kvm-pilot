@@ -17,7 +17,7 @@ actuation hierarchy): only the bootloader edit has to ride the KVM.
 
 ## The pattern
 
-All the primitives below ship as of 0.1.0a8; see the [CLI reference](cli.md).
+All the primitives below ship in current releases; see the [CLI reference](cli.md).
 
 1. **Edit the boot entry over HID.** At the boot menu press `e` (GRUB) or
    `Tab` (syslinux/isolinux) — CLI `key`/`type`, or MCP
@@ -81,5 +81,5 @@ phase, edit GRUB, discover the IP, hand off — is deferred to the
 [Reflexes](reflexes.md) `unattended-install` playbook
 ([#122](https://github.com/DustinTrap/kvm-pilot/issues/122), epic #117). All
 required primitives (`send_shortcut`, `type_text`, `ssh-bootstrap`,
-`ssh_reachable(host=…)`) exist as of 0.1.0a8; until the playbook lands, agents
+`ssh_reachable(host=…)`) already ship; until the playbook lands, agents
 follow this page by hand (the bundled skill carries the compact version).
