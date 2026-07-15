@@ -1,0 +1,54 @@
+# Manually re-publish server.json to the MCP registry from main (#209).
+#
+# The release workflow's publish-mcp-registry job checks out the release TAG,
+# so a registry-metadata-only fix (e.g. the description) landed on main after
+# a release can't reach the registry without a new version. This dispatchable
+# workflow publishes main's server.json as-is, with the version synced to the
+# latest published release tag (registry versions must match a real PyPI
+# release — the registry entry points installers at that package version).
+#
+# First failure this covers: v0.1.0b8's new description exceeded the
+# registry's 100-char description limit and the tag-pinned job could not pick
+# up the shortened one.
+
+name: Registry publish (manual)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  id-token: write   # GitHub OIDC login for the io.github.* namespace
+  contents: read
+
+jobs:
+  publish-mcp-registry:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - name: Sync server.json version to the latest release tag
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="$(gh release list --repo "$GITHUB_REPOSITORY" --limit 1 --json tagName -q '.[0].tagName')"
+          V="${TAG#v}"
+          jq --arg v "$V" '.version = $v | .packages[].version = $v' server.json > server.json.tmp
+          mv server.json.tmp server.json
+          jq -r '"Publishing \(.name) \(.version)"' server.json
+      - name: Install mcp-publisher
+        run: |
+          set -euo pipefail
+          # Release assets use Go arch names (amd64/arm64), not uname's
+          # x86_64/aarch64 — map them or the download 404s (b3 post-mortem).
+          ARCH="$(uname -m)"
+          case "$ARCH" in x86_64) ARCH=amd64 ;; aarch64) ARCH=arm64 ;; esac
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/download/v1.8.0/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_${ARCH}.tar.gz" \
+            | tar xz mcp-publisher
+          ./mcp-publisher --version
+      - name: Publish to the MCP registry
+        run: |
+          set -euo pipefail
+          ./mcp-publisher login github-oidc
+          ./mcp-publisher publish
