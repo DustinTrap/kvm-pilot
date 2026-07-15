@@ -74,6 +74,8 @@ device-side (a leaked session can lock operators out of the BMC).
 
 ### Act tools: two guarantees per call (issue #61)
 
+![The approval lifecycle: an act call must pass the ALLOW_* effect gate, then per-invocation approval (a human elicitation, or confirm=true under a standing policy). Approval mints an HMAC-signed, single-use, expiring receipt bound to the exact tool, arguments and host; dispatch verifies and consumes it before touching the device. Expired, replayed or argument-drifted receipts fail closed and must be re-approved.](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/approval-lifecycle.svg)
+
 The act tools (`type_text`, `press_key`, `send_shortcut`, `ctrl_alt_delete`)
 require **two** things, not one:
 
@@ -195,6 +197,8 @@ The `power` gate is layered; no single layer is trusted on its own:
    start `READ_ONLY` (intake, status reports, support evidence) → graduate to
    `DRY_RUN` (rehearse destructive flows, calls logged not sent) → open
    `ALLOW_*` effect gates one at a time as the matrix verifies your hardware.
+
+   ![The trust ladder: READ_ONLY (see everything, touch nothing) → DRY_RUN (rehearse; destructive calls logged, never sent) → per-effect ALLOW_* opt-ins, each act still requiring per-call approval.](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/trust-ladder.svg)
 5. **Dry-run.** With `KVM_PILOT_MCP_DRY_RUN=1` every driver is built with
    `dry_run=True`: destructive commands are logged and *skipped*, and every
    tool result says it ran in dry-run mode. **Recommended default until your

@@ -1,0 +1,90 @@
+<svg viewBox="0 0 860 470" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="ttl dsc">
+  <title id="ttl">Two machines, two addresses</title>
+  <desc id="dsc">kvm-pilot talks to two different machines. The KVM appliance has its own IP and runs the kvmd REST API; kvm-pilot's REST calls, snapshots, and appliance tools land there. The managed host is a separate machine with a separate IP: it receives keystrokes and power through the appliance's HDMI, USB and ATX wiring, and — once its OS is up — its own SSH channel. The power tool acts on the host through the appliance; appliance_reboot acts on the appliance itself; ssh_exec targets the host's own address, never the KVM's.</desc>
+  <style>
+    text{font-family:var(--font-sans,ui-sans-serif,system-ui,sans-serif);}
+    .band{fill:#f1efe8;stroke:#d3d1c7;stroke-width:1;}
+    .purple{fill:#eeedfe;stroke:#534ab7;stroke-width:1.75;}
+    .card{fill:#fff;stroke:#b4b2a9;stroke-width:1.5;}
+    .green{fill:#eaf3de;stroke:#3b6d11;stroke-width:1.5;}
+    .h{fill:#2c2c2a;font-weight:500;font-size:18px;}
+    .sub{fill:#5f5e5a;font-weight:400;font-size:12px;}
+    .t{fill:#2c2c2a;font-weight:500;font-size:14px;}
+    .ts{fill:#5f5e5a;font-weight:400;font-size:11px;}
+    .tp{fill:#3c3489;font-weight:600;font-size:13px;}
+    .tg{fill:#27500a;font-weight:500;font-size:11px;}
+    .mono{fill:#5f5e5a;font-family:var(--font-mono,ui-monospace,monospace);font-weight:400;font-size:11px;}
+    .monop{fill:#534ab7;font-family:var(--font-mono,ui-monospace,monospace);font-weight:500;font-size:11.5px;}
+    .monoip{fill:#2c2c2a;font-family:var(--font-mono,ui-monospace,monospace);font-weight:600;font-size:12.5px;}
+    .lab{fill:#888780;font-weight:500;font-size:11px;}
+    .warn{fill:#791f1f;font-weight:600;font-size:12.5px;}
+    .cn{stroke:#888780;}
+    .cp{stroke:#534ab7;}
+    .cg{stroke:#3b6d11;}
+    .mkn{fill:#888780;}
+    .mkp{fill:#534ab7;}
+    .mkg{fill:#3b6d11;}
+    @media (prefers-color-scheme:dark){
+      .band{fill:#211f1b;stroke:#4a4641;}
+      .purple{fill:#3c3489;stroke:#afa9ec;}
+      .card{fill:#2a2723;stroke:#5f5e5a;}
+      .green{fill:#27500a;stroke:#97c459;}
+      .h{fill:#f1efe8;} .sub{fill:#b4b2a9;} .t{fill:#f1efe8;} .ts{fill:#b4b2a9;} .lab{fill:#908d85;}
+      .tp{fill:#cecbf6;} .tg{fill:#c0dd97;} .mono{fill:#b4b2a9;} .monop{fill:#afa9ec;} .monoip{fill:#f1efe8;}
+      .warn{fill:#f7c1c1;}
+      .cp{stroke:#afa9ec;} .cg{stroke:#97c459;} .mkp{fill:#afa9ec;} .mkg{fill:#97c459;}
+    }
+  </style>
+
+  <text x="30" y="34" class="h">kvm-pilot — two machines, two addresses</text>
+  <text x="30" y="54" class="sub">Almost every first-run confusion is this: the KVM appliance and the machine it controls are different computers with different IPs.</text>
+
+  <defs>
+    <marker id="an" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path class="mkn" d="M0,0 L6,3 L0,6 Z"/></marker>
+    <marker id="ap" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path class="mkp" d="M0,0 L6,3 L0,6 Z"/></marker>
+    <marker id="ag" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path class="mkg" d="M0,0 L6,3 L0,6 Z"/></marker>
+  </defs>
+
+  <!-- kvm-pilot / agent -->
+  <rect class="purple" x="330" y="74" width="200" height="52" rx="6"/>
+  <text x="430" y="97" class="tp" text-anchor="middle">agent + kvm-pilot</text>
+  <text x="430" y="114" class="ts" text-anchor="middle">MCP server · CLI · library</text>
+
+  <!-- appliance card -->
+  <rect class="card" x="60" y="180" width="330" height="180" rx="6"/>
+  <text x="80" y="208" class="t">The KVM appliance</text>
+  <text x="80" y="228" class="monoip">kvm.lan · 10.0.1.50</text>
+  <text x="80" y="250" class="ts">PiKVM / GLKVM / BliKVM box running kvmd.</text>
+  <text x="80" y="266" class="ts">Captures the host's video; injects its keyboard,</text>
+  <text x="80" y="282" class="ts">mouse and (with the ATX board) power.</text>
+  <text x="80" y="308" class="lab">tools that act ON this box:</text>
+  <text x="80" y="326" class="monop">appliance_status · appliance_reboot</text>
+  <text x="80" y="344" class="ts">plus appliance-SSH for kvmd / /etc/kvmd</text>
+
+  <!-- host card -->
+  <rect class="card" x="470" y="180" width="330" height="180" rx="6"/>
+  <text x="490" y="208" class="t">The managed host (target)</text>
+  <text x="490" y="228" class="monoip">server11.lan · 10.0.1.60</text>
+  <text x="490" y="250" class="ts">The machine being controlled — no agent on it.</text>
+  <text x="490" y="266" class="ts">Sees the appliance as a monitor, a USB keyboard</text>
+  <text x="490" y="282" class="ts">and (via ATX header) its front-panel buttons.</text>
+  <text x="490" y="308" class="lab">tools that act on THIS machine:</text>
+  <text x="490" y="326" class="monop">power · wake · type_text · mouse · mount_iso</text>
+  <text x="490" y="344" class="ts">ssh_exec / ssh_reachable use ITS address (ssh_host)</text>
+
+  <!-- arrows -->
+  <line x1="360" y1="126" x2="250" y2="176" class="cp" stroke-width="1.75" marker-end="url(#ap)"/>
+  <text x="222" y="146" class="lab">kvmd REST + WS · snapshot · HID · ATX</text>
+
+  <path d="M390,250 L466,250" fill="none" class="cn" stroke-width="1.75" marker-end="url(#an)"/>
+  <text x="428" y="240" class="lab" text-anchor="middle">HDMI · USB</text>
+  <text x="428" y="264" class="lab" text-anchor="middle">ATX wires</text>
+
+  <line x1="500" y1="126" x2="610" y2="176" class="cg" stroke-width="1.75" marker-end="url(#ag)"/>
+  <text x="655" y="146" class="tg" text-anchor="middle">in-band SSH once the OS is up</text>
+
+  <!-- footer warning band -->
+  <rect class="band" x="60" y="390" width="740" height="52" rx="6"/>
+  <text x="430" y="412" class="warn" text-anchor="middle">power reboots the HOST through the appliance — appliance_reboot reboots the APPLIANCE and drops KVM control ~60 s.</text>
+  <text x="430" y="430" class="ts" text-anchor="middle">Point profiles at the appliance's address; set ssh_host to the host's own address. Never assume they are the same machine.</text>
+</svg>
