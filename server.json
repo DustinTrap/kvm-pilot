@@ -1,7 +1,7 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-09-29/server.schema.json",
   "name": "io.github.DustinTrap/kvm-pilot",
-  "description": "AI-agent control of physical machines via IP-KVM, Redfish BMC, and SSH: gated, verified, audited.",
+  "description": "Smart hands for your AI agents: write-capable, multi-plane (KVM + BMC + SSH) MCP server for physical machines — gated, verified, audited.",
   "repository": {
     "url": "https://github.com/DustinTrap/kvm-pilot",
     "source": "github"

@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "kvm-pilot"
 dynamic = ["version"]
-description = "AI-driven bare-metal control for IP-KVMs (PiKVM, GL.iNet GLKVM, BliKVM) and Redfish BMCs (iDRAC, iLO, OpenBMC)"
+description = "Smart hands for your AI agents — write-capable, multi-plane (KVM + BMC + SSH) MCP server for bare-metal control: PiKVM/GLKVM/BliKVM, Redfish and IPMI BMCs (iDRAC, iLO, OpenBMC) — gated, verified, audited"
 readme = "README.md"
 requires-python = ">=3.11"
 license = "Apache-2.0"
