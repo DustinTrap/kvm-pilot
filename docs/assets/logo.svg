@@ -2,19 +2,26 @@
   <title id="ttl">kvm-pilot</title>
   <desc id="dsc">The kvm-pilot wordmark: a rounded terminal chip with a purple prompt glyph, followed by the name kvm-pilot in monospace type.</desc>
   <style>
+    /* The pill background makes each variant self-contained: an SVG's
+       prefers-color-scheme follows the VIEWER'S system, not the host page's
+       theme (a dark-system user on light-themed PyPI/GitHub would otherwise
+       get paper-coloured text on a white page). */
+    .bg{fill:#f7f5ef;stroke:#d3d1c7;stroke-width:1.5;}
     .chip{fill:#eeedfe;stroke:#534ab7;stroke-width:3;}
     .prompt{fill:#534ab7;font-family:var(--font-mono,ui-monospace,'SF Mono',Menlo,'DejaVu Sans Mono',monospace);font-weight:700;font-size:46px;}
     .word{fill:#2c2c2a;font-family:var(--font-mono,ui-monospace,'SF Mono',Menlo,'DejaVu Sans Mono',monospace);font-weight:600;font-size:58px;letter-spacing:-1px;}
     .cursor{fill:#534ab7;}
     @media (prefers-color-scheme:dark){
+      .bg{fill:#211f1b;stroke:#4a4641;}
       .chip{fill:#3c3489;stroke:#afa9ec;}
       .prompt{fill:#cecbf6;}
       .word{fill:#f1efe8;}
       .cursor{fill:#afa9ec;}
     }
   </style>
-  <rect class="chip" x="8" y="14" width="92" height="92" rx="20"/>
-  <text class="prompt" x="26" y="76">&gt;_</text>
-  <text class="word" x="128" y="80">kvm-pilot</text>
-  <rect class="cursor" x="452" y="42" width="26" height="44" rx="3" opacity="0.55"/>
+  <rect class="bg" x="2" y="2" width="636" height="116" rx="26"/>
+  <rect class="chip" x="20" y="14" width="92" height="92" rx="20"/>
+  <text class="prompt" x="38" y="76">&gt;_</text>
+  <text class="word" x="140" y="80">kvm-pilot</text>
+  <rect class="cursor" x="464" y="42" width="26" height="44" rx="3" opacity="0.55"/>
 </svg>
