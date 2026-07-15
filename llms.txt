@@ -1,0 +1,38 @@
+# kvm-pilot
+
+> Smart hands for your AI agents. A write-capable, multi-plane (KVM + BMC + SSH) MCP server for controlling physical machines — gated, verified, audited.
+
+kvm-pilot gives AI agents (and humans) hands on bare metal with no agent on the
+target: IP-KVM devices (PiKVM, GL.iNet GLKVM, BliKVM) for pixels/keyboard/power,
+Redfish and IPMI BMCs for structured state, boot control and serial consoles,
+and in-band SSH once an OS is up. A vision layer classifies KVM screenshots
+into boot phases (BIOS/GRUB/installer/login/crash) using Claude or any local
+OpenAI-compatible VLM. Every destructive effect is operator-gated and each act
+needs a per-call approval backed by a signed single-use receipt; per-device
+maturity is derived from a run ledger of real hardware evidence. Python >= 3.11;
+install with `pip install --pre kvm-pilot` (CLI `kvm-pilot`, MCP server
+`kvm-pilot-mcp`, bundled Claude skill — all in one wheel).
+
+## Docs
+
+- [README](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/README.md): overview, install, quickstart, sensing and safety model, compatibility
+- [Getting started (agents + MCP)](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/getting-started.md): enable the MCP server, trust ladder, credentials, first prompts
+- [Agent operating doctrine (bundled skill)](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/src/kvm_pilot/skill/SKILL.md): interface matrix, recovery order, reading failed snapshots, unattended installs
+- [MCP server reference](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/src/kvm_pilot/mcp/README.md): every tool with annotations, effect gates, approval/receipt lifecycle, env vars
+- [CLI reference](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/cli.md): every subcommand, required capability, gating
+- [Configuration](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/configuration.md): config file, profiles, every KVM_PILOT_* env var, precedence
+- [Driver features & maturity](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/driver-features.md): per-driver capability × reliability × testing matrix, derived maturity ladder
+- [Troubleshooting & FAQ](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/troubleshooting.md): GLKVM API 404, snapshot failures, approval cancel, dark-host recovery
+
+## Optional
+
+- [Architecture](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/architecture.md): driver-plugin design, capability protocols
+- [Redfish driver reference](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/redfish.md)
+- [Firmware registry](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/firmware-registry.md) and [remote firmware update](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/firmware-update.md)
+- [Unattended Linux installs](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/unattended-install.md)
+- [Hardware test plan (iLO/iDRAC)](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/hardware-test-plan-ilo-idrac.md)
+- [Design decisions](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/decisions.md)
+- [Security policy](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/SECURITY.md)
+- [Contributing](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/CONTRIBUTING.md)
+- [Changelog](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/CHANGELOG.md)
+- [Hardware-Compatibility list](https://github.com/DustinTrap/kvm-pilot/wiki/Hardware-Compatibility): what has actually been exercised live, per device + firmware + capability

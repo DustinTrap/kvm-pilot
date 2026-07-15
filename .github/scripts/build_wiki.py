@@ -41,6 +41,7 @@ PAGES: list[tuple[str, str, str | None]] = [
     ("docs/test-plan.md", "test-plan.md", "Test plan"),
     ("docs/cli.md", "cli.md", "CLI reference"),
     ("docs/configuration.md", "configuration.md", "Configuration"),
+    ("docs/troubleshooting.md", "troubleshooting.md", "Troubleshooting & FAQ"),
     ("docs/decisions.md", "decisions.md", "Design decisions"),
     ("docs/reflexes.md", "reflexes.md", "Reflexes (RFC)"),
     ("docs/redfish.md", "redfish.md", "Redfish reference"),
@@ -300,13 +301,22 @@ def build(out: Path) -> None:
         hcl_built = True
 
     # Sidebar navigation, in PAGES order (Home first, then the guides).
+    # Internal analysis narratives (title prefix "Analysis: ") are grouped
+    # under their own heading so the user-facing nav stays clean (#209).
     lines = ["### kvm-pilot docs", "", "- [[Home]]"]
+    analysis: list[str] = []
     for _, wiki_name, title in PAGES:
         if title is None:
             continue
-        lines.append(f"- [[{title}|{Path(wiki_name).stem}]]")
+        if title.startswith("Analysis: "):
+            short = title.removeprefix("Analysis: ")
+            analysis.append(f"- [[{short}|{Path(wiki_name).stem}]]")
+        else:
+            lines.append(f"- [[{title}|{Path(wiki_name).stem}]]")
     if hcl_built:
         lines.append(f"- [[Hardware compatibility|{Path(HCL_PAGE).stem}]]")
+    if analysis:
+        lines += ["", "#### Analysis (internal reports)", ""] + analysis
     (out / "_Sidebar.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     print(f"built {len(PAGES)} pages{' + HCL' if hcl_built else ''} + sidebar into {out}")

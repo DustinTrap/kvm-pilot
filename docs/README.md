@@ -10,7 +10,9 @@ on every push to `main` — edit the files here, never the wiki directly).
 
 - **New here? Drive a KVM from your agent** → [Getting started](getting-started.md)
 - **Overview, install, quickstart** → [README](https://github.com/DustinTrap/kvm-pilot/blob/main/README.md)
+- **Something's broken?** → [Troubleshooting & FAQ](troubleshooting.md)
 - **Release history** → [CHANGELOG](https://github.com/DustinTrap/kvm-pilot/blob/main/CHANGELOG.md)
+- **AI agents:** the repo root carries an [`llms.txt`](https://github.com/DustinTrap/kvm-pilot/blob/main/llms.txt) doc map (per [llmstxt.org](https://llmstxt.org/)).
 
 ## Guides
 
@@ -18,6 +20,7 @@ on every push to `main` — edit the files here, never the wiki directly).
 - [Driver features](driver-features.md) — the complete per-driver capability list with per-feature reliability + testing level (honest maturity; points at the support-matrix source of truth) ([#171](https://github.com/DustinTrap/kvm-pilot/issues/171)).
 - [CLI reference](cli.md) — every `kvm-pilot` subcommand: capability required, destructive gating, key flags.
 - [Configuration](configuration.md) — the config file, every `KVM_PILOT_*` env var, and precedence.
+- [Troubleshooting & FAQ](troubleshooting.md) — symptom-first fixes: GLKVM API 404, snapshot failures, approval cancel, dark-host recovery, mouse calibration, SOL noise.
 - [Design decisions](decisions.md) — the "looks wrong but is intentional" record, newest first.
 - [Hardware reliability test plan](test-plan.md) — the reusable full-fleet sweep procedure: exercise every CLI + MCP function across device states, cross-check each result against independent ground truth to catch false reports, and feed the support matrix ([#172](https://github.com/DustinTrap/kvm-pilot/issues/172)).
 - [Hardware test plan: iLO / iDRAC](hardware-test-plan-ilo-idrac.md) — quick-execute runbook to validate the Redfish driver (boot-device + power) against an HPE DL380 G9 (iLO4) and a Dell R710 (iDRAC6, no-Redfish → IPMI) ([#200](https://github.com/DustinTrap/kvm-pilot/issues/200)/[#29](https://github.com/DustinTrap/kvm-pilot/issues/29)).
