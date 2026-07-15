@@ -111,7 +111,8 @@ For the GL RM1/RM1PE this is **`risk: high`**, because:
 4. Prefer `--image` with a file from the vendor's stable channel over the online path.
 5. Have the U-Boot recovery kit ready (laptop + Ethernet + the reset procedure above).
 6. After the flash + reboot: if `/api/*` now 404s, re-enable the API in
-   `/etc/kvmd/nginx-kvmd.conf`, restart kvmd, and **re-run `kvm-pilot healthcheck`**.
+   `/etc/kvmd/nginx-kvmd.conf`, restart kvmd, and **re-run `kvm-pilot healthcheck`**
+   (details: [troubleshooting](troubleshooting.md#every-api-call-returns-404-glkvm)).
 
 ## Sources
 

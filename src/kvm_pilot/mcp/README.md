@@ -110,23 +110,18 @@ trail; receipts are per-process, a server restart voids them).
 
 #### Troubleshooting: act tools denied with `approval cancel` / `denied by approver` (#149)
 
-**Symptom:** every act tool returns `approved: false` with `approver: null` and
-`denied_reason: "approval cancel"` (or `"denied by approver"` / `"approval
-decline"` after a mis-click or explicit no), while the read-only tools
-(`snapshot`, `info`, `logs`) keep working — it looks like the host is ignoring
-input. **Cause:** the client killed the approval prompt, not the device: chat
-clients tie a pending elicitation to the conversational turn, so sending a new
-chat message cancels the in-flight approval. The action never reached the
-target. The denial result names this in its `remediation` field. **Fix:** answer
-the approval prompt before sending another message — `approval cancel` is benign
-and retryable. If per-call approvals keep failing in that client, the operator
-can set `KVM_PILOT_MCP_ELICIT=off` in the server env and reconnect: the `ALLOW_*`
-effect gate plus per-call `confirm=true` then become the standing authorization.
-**Trade-off:** that disables per-call human approval — an operator decision, not
-a default. The remedy names this escape hatch only after **≥2 consecutive**
-client-side kills on the same host (a one-off mis-click shouldn't advertise a
-security trade-off). (A duration-scoped standing approval that would remove the
-per-keystroke re-prompt without giving up human sign-off is a follow-up to #72.)
+**Symptom:** act tools return `approved: false`, `approver: null`, and
+`denied_reason: "approval cancel"` (or `"denied by approver"`), while
+read-only tools keep working. **Cause:** the chat client cancelled the pending
+approval prompt — sending a new message kills the in-flight elicitation; the
+action never reached the target, and the result's `remediation` field says so.
+**Fix:** answer the prompt before typing the next message; if a client keeps
+killing approvals, the operator may set `KVM_PILOT_MCP_ELICIT=off` (trade-off:
+no per-call human approval — the remedy advertises this escape hatch only
+after ≥2 consecutive client-side kills). Full narrative:
+[Troubleshooting & FAQ](https://github.com/DustinTrap/kvm-pilot/blob/main/docs/troubleshooting.md#act-tools-denied-approval-cancel--denied-by-approver).
+(A duration-scoped standing approval that would remove the per-keystroke
+re-prompt without giving up human sign-off is a follow-up to #72.)
 
 ### Which tools work with which driver
 

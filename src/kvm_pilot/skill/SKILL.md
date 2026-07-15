@@ -128,6 +128,10 @@ Prefer remote recovery, in this order:
   (is its OS answering on the network?), not "verify visually" alone — visual
   checks are exactly what fails on a black screen.
 
+Symptom-first fixes for these and more (GLKVM API 404, approval cancel,
+dark-host recovery):
+[Troubleshooting & FAQ](https://github.com/DustinTrap/kvm-pilot/blob/main/docs/troubleshooting.md).
+
 ### Enabling the MCP server
 
 **The tools it exposes**, all named `mcp__kvm-pilot__<tool>`:
