@@ -4,7 +4,7 @@
 > the end of every session (`.claude/skills/checkpoint/`). Standing project rules
 > live in [CLAUDE.md](CLAUDE.md); this file is only **where we are right now**.
 
-**Last updated:** 2026-07-14 · `main @ 1f93285` · **v0.1.0b7 releasing to PyPI** (IPMI driver + SOL + ipmi_sim cross-check); R710 iDRAC6 validated live end-to-end; `ipmisim` test VM on the LAN via DHCP (`10.0.1.152`)
+**Last updated:** 2026-07-15 · `main @ 41dbb53` · **v0.1.0b7 LIVE on PyPI** (IPMI driver + SOL + ipmi_sim cross-check); R710 iDRAC6 validated live end-to-end + recorded in the Hardware-Compatibility matrix; `ipmisim` test VM on the LAN via DHCP (`10.0.1.152`)
 
 ## Current state
 **v0.1.0b7 is the IPMI beta** (release commit `1f93285` pushed; GitHub Release →
@@ -45,14 +45,12 @@ The **remote boot-control + Wake-on-LAN epic (#200)**:
     `BootNext` via `efibootmgr` over the SSH channel (gated `ssh.set_boot_next`).
 
 ## Next steps
-- **Verify the v0.1.0b7 release landed on PyPI** (`pip index versions kvm-pilot` /
-  the project page) once the GitHub Release + release.yml finish.
 - **DL380 G9 = iLO4 (#29) — the remaining hardware target.** HAS Redfish (quirky) →
   `--driver redfish`; full boot-device + power test. Runbook:
   [`docs/hardware-test-plan-ilo-idrac.md`](docs/hardware-test-plan-ilo-idrac.md).
-  Needs the iLO IP + creds from the operator. The R710/iDRAC6 IPMI path is DONE.
-- **Record Hardware-Compatibility evidence** for the iDRAC6/R710 (support-matrix
-  honesty rule) — power/boot/sensors/logs/info + SOL all exercised live.
+  Needs the iLO IP + creds from the operator. The R710/iDRAC6 IPMI path is DONE
+  and recorded in the support ledger (`dell / PowerEdge R710 / iDRAC6 1.95` → beta;
+  wiki HCL page regenerated). b7 is live on PyPI.
 - **Deferred IPMI**: `Watchdog` (#13/#28); Redfish SOL (`SerialConsole` for
   RedfishDriver, #28). Optional: a clean SOL screen-renderer (VT100) for capture.
 - Other open: OCR #202, router epic #181 remainder, #157 (EDID), #148 (.mcpb),
