@@ -1,0 +1,9 @@
+<svg viewBox="0 0 128 128" width="128" height="128" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="ttl">
+  <title id="ttl">kvm-pilot</title>
+  <style>
+    .bg{fill:#534ab7;}
+    .glyph{fill:#f1efe8;font-family:ui-monospace,'SF Mono',Menlo,'DejaVu Sans Mono',monospace;font-weight:700;font-size:64px;}
+  </style>
+  <rect class="bg" x="0" y="0" width="128" height="128" rx="28"/>
+  <text class="glyph" x="22" y="86">&gt;_</text>
+</svg>
