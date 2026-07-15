@@ -4,6 +4,72 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.0b8] — 2026-07-14
+
+**Beta 8 — the docs, visuals & brand overhaul (#209).** No runtime code
+changes; this release exists so the refreshed README (the PyPI page), the
+corrected claims, and the new brand reach every published surface.
+
+### Added
+- **Brand assets** (`docs/assets/`): the `>_ kvm-pilot` terminal-prompt
+  wordmark (SVG, dark-mode aware), favicon, and a 1280×640 social card, all in
+  the docs' house palette.
+- **Live demo GIF** in the README — a real, unedited GLKVM run (honest
+  preflight, headless snapshot waking the on-demand encoder, gated dry-run
+  power-cycle, and the captured boot console), recorded with the committed
+  `docs/assets/demo.tape`.
+- **Five house-style diagrams** for the hardest concepts: the MCP trust
+  ladder, the two-machines (appliance vs managed host) picture, the snapshot
+  pipeline and its failure exits, the evidence→maturity ledger, and the
+  approval/signed-receipt lifecycle — embedded in getting-started,
+  driver-features, and the MCP README.
+- **`docs/troubleshooting.md`** — the canonical symptom-first page (GLKVM API
+  404, snapshot failures, `approval cancel`, dark-host WoL-first recovery,
+  mouse calibration, iDRAC6 SOL-on-COM2, `--pre` install) + FAQ; on the wiki
+  sidebar.
+- **Root `llms.txt`** (llmstxt.org) — an agent-discoverable doc map.
+- **Docs guard tests** (`tests/test_docs_guards.py`): README version literals
+  must match `__about__.py` (the guard regex handles the `v` prefix that let
+  "v0.1.0b2" ship stale on the b5 PyPI page), and SKILL.md's tool list must
+  two-way match the registered MCP tool surface.
+
+### Changed
+- **One tagline everywhere** — README, PyPI description, `server.json`, and
+  the GitHub About now all say: *Smart hands for your AI agents — write-capable,
+  multi-plane (KVM + BMC + SSH) MCP server: gated, verified, audited.*
+- **README restructured**: logo + badge row, quickstart with the copy-paste
+  `claude mcp add` (READ_ONLY first rung) above the fold, a
+  tool-surface-by-plane table, a version-agnostic status block, and the GLKVM
+  API warning demoted to a setup note pointing at troubleshooting.
+- **SKILL.md tool list** now covers all 29 MCP tools (was missing
+  `wait_for_state`, `boot_options`, `appliance_status`, `access_paths`,
+  `calibrate_mouse`, `set_boot_device`, `wake`, `appliance_reboot`); the
+  "nothing in kvm-pilot reboots the appliance" claims were corrected in
+  SKILL.md and the MCP README (stale since `appliance_reboot` shipped).
+- **MCP README** gains the missing `boot_options` / `set_boot_device` / `wake`
+  rows, the `KVM_PILOT_MCP_ALLOW_CONFIG` env entry, and drops "(experimental)"
+  from its title.
+- **architecture.md** rewritten to the present tense (the driver split, the
+  `BootConfig` protocol, and the Redfish/IPMI drivers have long landed); the
+  capability matrix gains a boot-device row.
+- The wiki sidebar groups the internal analysis narratives under their own
+  heading.
+
+### Fixed
+- **Honesty fix:** the README compatibility table claimed `snapshot` was
+  verified on RM1PE firmware V1.5.1 — it fails there with an undecodable
+  H.264 frame (#107/#151) and is verified on V1.9.1 only. Same correction in
+  CLAUDE.md; a live-verified Dell iDRAC6 (IPMI) row was added.
+- The registry-name casing in this changelog's b3 entry
+  (`io.github.dustintrap` → `io.github.DustinTrap`, matching the live
+  listing).
+
+### Removed
+- `RESUME.md` is no longer tracked in the repo (local-only, gitignored) — the
+  committed copy published internal fleet details (#209). The checkpoint
+  skill's contract was updated to match.
+- The orphaned `docs/mcp-tools.svg`.
+
 ## [0.1.0b7] — 2026-07-14
 
 **Beta 7 — IPMI.** A full IPMI 2.0 driver for pre-Redfish BMCs (Dell iDRAC6, older
