@@ -60,17 +60,18 @@ remote before physical**, below).
 | Contribute firmware currency to the registry (file the report) | **MCP `file_firmware_report`** or CLI `firmware-check` (auto-files) | Files a GitHub issue via the `gh` CLI when the registry is behind — an external write: MCP needs `KVM_PILOT_MCP_ALLOW_EXTERNAL_WRITE` + approval; `dry_run=true` previews (#190). |
 | MSD mode switching | **Python library only** | Not in MCP or CLI. |
 | Change **host** power (on/off/cycle/reset) | **MCP `power`** (gated) or CLI `power` / `power-cycle` | Destructive — confirm each step. MCP `power` is operator-enabled + per-call approval. |
-| Reboot the **KVM appliance** / restart `kvmd` / inspect `/etc/kvmd` | **SSH to the appliance** | No kvm-pilot interface does this — out-of-band only. |
+| Reboot the **KVM appliance** (clear a wedged encoder) | **MCP `appliance_reboot`** (gated `KVM_PILOT_MCP_ALLOW_APPLIANCE` + confirm) or SSH to the appliance | Drops KVM control ~60 s; target power untouched — never automate it. Restarting just `kvmd` or inspecting `/etc/kvmd` is still SSH-to-the-appliance only. |
 | Check if the **target host** is reachable / run commands on it once its OS is up | **MCP `ssh_reachable` / `ssh_exec`**, or CLI `ssh-check` / `ssh-exec` (in-band) | Prefer SSH over KVM keystrokes once the OS is up. Configure the target's IP/host/FQDN via `ssh_host` (≠ the KVM's address); `ssh_exec` is gated (operator opt-in `KVM_PILOT_MCP_ALLOW_SSH`). See "Recovery order" below. |
 | Bootstrap SSH during an install (set up the cheap channel over the expensive one) | **CLI `ssh-bootstrap`** | Once an installer is up, switches to a text console, reads the DHCP IP off the screen, starts `sshd`, and hands off to SSH. **Plans by default** — pass `--execute` to run it; add a `--command` that installs a key/password for a usable channel. Guided/conservative (aborts if the console can't be confirmed); not an MCP tool. |
 | View the screen when `snapshot` fails | **WebRTC/Janus stream or the vendor web UI** | The only way to see a unit that streams H.264 at its native resolution. |
 
 **Host vs. appliance — keep these straight.** The `power` tool/CLI acts on the
 **managed host** (the machine the KVM controls). Rebooting the **KVM appliance
-itself** — e.g. to clear a stuck video encoder — is **out-of-band**: SSH into the
-*appliance* and `reboot`, or restart `kvmd`. Nothing in kvm-pilot reboots the
-appliance. And the appliance's address is **not** the managed host's address —
-they are separate machines with separate IPs.
+itself** — e.g. to clear a stuck video encoder — is a separate, separately-gated
+act: MCP `appliance_reboot` (`KVM_PILOT_MCP_ALLOW_APPLIANCE` + confirm) or SSH
+into the *appliance* and `reboot`; restarting just `kvmd` remains SSH-only. And
+the appliance's address is **not** the managed host's address — they are
+separate machines with separate IPs.
 
 **Recovery order — remote before physical.** When the host is wedged or its screen
 is black and you can't power-cycle it through the KVM (`recovery-path` is CRITICAL
@@ -135,19 +136,33 @@ Prefer remote recovery, in this order:
   before trusting a capability that matters), `healthcheck`, `logs`,
   `snapshot` (model-visible JPEG), `classify_screen` (boot/run phase — uses a
   server-side vision backend if configured, else falls back to caller-side
-  classification), `ssh_reachable`, `list_virtual_media` (MSD storage
-  inventory — check it before requesting an ISO download/upload), and
-  `ssh_discover` (CIDR scan — RISKY/opt-in, needs `confirm=true`, user-owned
-  networks only)
+  classification), `wait_for_state` (bounded server-side wait for a phase,
+  ≤ 300 s per call), `boot_options` (current boot-source override + the
+  device's allowable targets), `ssh_reachable`, `list_virtual_media` (MSD
+  storage inventory — check it before requesting an ISO download/upload),
+  `appliance_status` (the KVM appliance's own OS diagnostics over
+  appliance-SSH), `access_paths` (which independent recovery paths are live —
+  the lockout-exposure view), and `ssh_discover` (CIDR scan — RISKY/opt-in,
+  needs `confirm=true`, user-owned networks only)
 - **Destructive act tools** — each needs the operator to opt the tool's *effect*
   in via an env flag **and** a per-invocation approval (a human elicitation, or
   `confirm=true` under a standing policy):
   - `power` — on/off/cycle/reset (`KVM_PILOT_MCP_ALLOW_POWER`)
+  - `wake` — Wake-on-LAN magic packet to the managed host, the out-of-band
+    power-on path when ATX isn't wired (`ALLOW_POWER`)
   - `type_text` / `press_key` / `send_shortcut` / `mouse` — HID input
     (`KVM_PILOT_MCP_ALLOW_HID`); a reboot chord in `send_shortcut` needs `ALLOW_POWER`
+  - `calibrate_mouse` — measure & store this host's pointer correction
+    (pointer moves only, ~10-30 s on a static screen; `ALLOW_HID`, one
+    approval for the whole run)
   - `ctrl_alt_delete` — a reboot, so it needs `ALLOW_POWER` (not the HID gate)
   - `mount_iso` / `eject` — virtual media (`KVM_PILOT_MCP_ALLOW_MEDIA`)
+  - `set_boot_device` — boot-source override (pxe/cd/hdd/usb/bios…, one-time
+    or persistent) on Redfish/IPMI devices (`KVM_PILOT_MCP_ALLOW_CONFIG`)
   - `ssh_exec` — run a command over SSH (`KVM_PILOT_MCP_ALLOW_SSH`)
+  - `appliance_reboot` — reboot the **KVM appliance itself** to clear a wedged
+    encoder; target power untouched, drops KVM control ~60 s
+    (`KVM_PILOT_MCP_ALLOW_APPLIANCE`)
   - `file_firmware_report` — file the firmware-registry report as a GitHub
     issue (`KVM_PILOT_MCP_ALLOW_EXTERNAL_WRITE`; an external write, not a
     device op)
@@ -383,9 +398,9 @@ country) or destined for a different keyboard layout than the operator's laptop.
 
 The CLI covers the **full surface** and is the only interface for
 `firmware-check`/`firmware-update`, `events`, and `ssh-bootstrap`
-(see the interface matrix above — `watch` now has an MCP twin,
-`wait_for_state`; keyboard/mouse/media DO have MCP act tools
-since 0.1.0a8). Use the MCP server for the visual loop (`snapshot`/`classify`)
+(see the interface matrix above — `watch` has an MCP twin,
+`wait_for_state`, and keyboard/mouse/media/boot-config all have MCP act
+tools). Use the MCP server for the visual loop (`snapshot`/`classify`)
 and the gated act/power tools inside an agent session; use the CLI for
 everything else and for one-off checks when no MCP host is in the loop.
 
@@ -393,7 +408,7 @@ The full command set (see [docs/cli.md](https://github.com/DustinTrap/kvm-pilot/
 for the reference table): `kvm-pilot info | capabilities | benchmark | route |
 host-exec | healthcheck | firmware-check | firmware-update | snapshot | sensors |
 logs | ssh-check | ssh-exec | ssh-discover | ssh-bootstrap | boot-progress |
-power | power-cycle | boot-device | wake | console | type | key | mouse-move | click | media-list | mount |
+power | power-cycle | boot-device | wake | console | type | key | mouse-move | click | calibrate-mouse | media-list | mount |
 eject | keep-awake | recover-hid | appliance | paths | classify | watch |
 events | test-report`. Run
 `healthcheck` on first contact (see above); it also auto-runs ahead of destructive

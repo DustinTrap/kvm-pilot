@@ -1,8 +1,10 @@
 # kvm-pilot architecture
 
-> **Status: early alpha.** This describes the target design and tracks the
-> incremental refactor toward it. **Step 1 (the capability protocols) has
-> landed**; the remaining steps are tracked in the architecture epic.
+> **Status: landed, still growing.** This started as the target design; the
+> refactor has caught up with it — the capability protocols (Step 1), the driver
+> registry + PiKVM family split (Step 3), and concrete Fake / Redfish / IPMI
+> drivers (Step 4) are all in place. Step 2 (transport/auth split) and Step 5
+> (entry-point plugins) are the remaining steps, tracked in the architecture epic.
 
 `kvm-pilot` is built around a **driver-plugin** model so support can grow to
 many KVM / BMC devices without reworking the core. The library API, CLI, safety
@@ -22,10 +24,12 @@ grounding, portability rules, open questions) and [`decisions.md`](decisions.md)
 - **Driver interface (the plugin seam)** — a set of small capability protocols.
 - **Registry** — `make_driver(kind)` plus entry-point discovery and host
   autodetection (later step).
-- **Drivers** — concrete implementations: the PiKVM family today; Redfish,
-  JetKVM, etc. later; a `FakeDriver` for tests.
+- **Drivers** — concrete implementations: the PiKVM family (`PiKVMDriver`,
+  `GLKVMDriver`, `BliKVMDriver`), `RedfishDriver`, `IpmiDriver`, and a
+  `FakeDriver` for tests; JetKVM etc. later.
 - **Transport** — generic HTTP (urllib + retry + secret redaction), with room
-  for WebSocket/JSON-RPC and IPMI transports.
+  for WebSocket/JSON-RPC transports; the IPMI driver channels through the
+  system `ipmitool` binary (subprocess) rather than an in-process transport.
 - **Cross-cutting & shared** — `SafetyPolicy`, config, the error hierarchy, and
   the (already pluggable) vision backends, implemented once for every driver.
 
@@ -33,10 +37,11 @@ grounding, portability rules, open questions) and [`decisions.md`](decisions.md)
 
 Rather than one monolithic interface, each feature area is a small,
 `@runtime_checkable` `Protocol` in [`kvm_pilot.drivers.base`](../src/kvm_pilot/drivers/base.py):
-`SystemInfo`, `Power`, `HID`, `Video`, `VirtualMedia`, `GPIO`, `Events`, plus the
+`SystemInfo`, `Power`, `HID`, `Video`, `VirtualMedia`, `GPIO`, `Events`, the
 sensing protocols `Logs`, `BootProgress`, `Sensors`, `SerialConsole`, and
 `Watchdog` (the cheaper-than-vision signals — see the sensing model in the
-README). A driver implements only the ones it has and reports them via
+README), plus the config protocol `BootConfig` (boot-source override — one-time
+or persistent, #201). A driver implements only the ones it has and reports them via
 `capabilities()`. Support is detected **structurally** — drivers never
 hand-maintain a list:
 
@@ -63,6 +68,7 @@ than assumed:
 | Boot progress | ❌ (vision) | ✅ structured enum | ❌ (vision) | ⚠️ POST codes |
 | Sensors (temp/fan/watts) | ⚠️ Prometheus | ✅ | ⚠️ DC power | ✅ SDR/DCMI |
 | Serial console (text) | ❌ unless wired | ✅ SOL | ❌ | ✅ SOL |
+| Boot device control | ❌ (HID into firmware menus) | ✅ BootSourceOverride | ❌ | ✅ `chassis bootdev` |
 | Watchdog | ❌ | ⚠️ | ❌ | ✅ |
 
 `ScreenAnalyzer` already depends only on `Video` (it calls `snapshot_base64()`),
@@ -79,20 +85,27 @@ for JetKVM, optional IPMI) slot in without touching driver code.
 
 ## Driver registry & families
 
-`make_driver(kind, **conf)` mirrors the vision layer's `make_backend` and is
-**already in place** — it resolves `pikvm`/`glkvm`/`blikvm` (the API-compatible
-`KVMClient` today) and `fake` (the in-process `FakeDriver`), and `register_driver()`
-lets a third party add a kind at runtime. The plan is for drivers to also register
-via a `kvm_pilot.drivers` **entry-point group**, so a driver can ship as a separate
-pip package without forking the core. A dedicated `PiKVMDriver` will hold the shared
-kvmd logic; `GLKVMDriver` / `BliKVMDriver` subclass it and override only the deltas.
-The second device driver — **Redfish** (`make_driver("redfish")`,
-[`drivers/redfish/`](../src/kvm_pilot/drivers/redfish/)) — **has landed**: one DMTF-standard
+`make_driver(kind, **conf)` mirrors the vision layer's `make_backend` — it
+resolves `pikvm`/`glkvm`/`blikvm` (the PiKVM family), `redfish`, `ipmi`, and
+`fake` (the in-process `FakeDriver`), and `register_driver()` lets a third party
+add a kind at runtime. The plan is for drivers to also register via a
+`kvm_pilot.drivers` **entry-point group**, so a driver can ship as a separate
+pip package without forking the core. `PiKVMDriver` holds the shared kvmd logic;
+`GLKVMDriver` / `BliKVMDriver` subclass it and override only the deltas (Step 3
+below).
+The **Redfish** driver (`make_driver("redfish")`,
+[`drivers/redfish/`](../src/kvm_pilot/drivers/redfish/)) is one DMTF-standard
 stdlib client covering iDRAC, iLO, Supermicro, Lenovo XCC, and OpenBMC. It is portable
 by *navigating hypermedia* — it follows `@odata.id` links and reads
 `@Redfish.ActionInfo`/`AllowableValues` rather than hard-coding vendor ids or version
 strings — and is session-auth-first (`X-Auth-Token`, `DELETE` on logout) with HTTP
 Basic optional, reflecting the vendor shift away from Basic auth.
+The **IPMI** driver (`make_driver("ipmi")`,
+[`drivers/ipmi.py`](../src/kvm_pilot/drivers/ipmi.py), #62) covers BMCs that
+predate Redfish (e.g. Dell iDRAC6): it shells out to the system `ipmitool`
+(`-I lanplus`, password via env — never argv) and implements `Power`,
+`SystemInfo`, `BootConfig`, `Sensors`, `Logs` (SEL), and `SerialConsole`
+(SOL over a PTY — the `kvm-pilot console` CLI).
 
 ## Safety
 
@@ -100,9 +113,10 @@ There is one `SafetyPolicy` / `DESTRUCTIVE_OPS` for the whole project. Op
 identifiers today are device-namespaced after the kvmd API (`atx.power_off_hard`,
 `msd.connect`, `gpio.switch`), and `FakeDriver` reuses those same ids verbatim;
 every driver funnels destructive calls through the same `guard()`, so safety
-semantics can't drift between devices. (A later step may rename them to
-driver-agnostic, capability-namespaced ids — e.g. `power.off_hard` — once a
-second device family lands.)
+semantics can't drift between devices. (Each family namespaces its own op ids
+today — `redfish.set_boot_device`, `ipmi.serial_console`, `ssh.set_boot_next`;
+a later step may rename them to driver-agnostic, capability-namespaced ids —
+e.g. `power.off_hard`.)
 
 ## Migration
 
@@ -120,9 +134,11 @@ second device family lands.)
       "API disabled" 404 (→ `ApiDisabledError`), tracks per-firmware quirks, and
       carries GL's proprietary `/api/upgrade/*` flash layer.
       (Moving `PiKVMDriver` out of `client.py` into `drivers/pikvm/` is deferred.)
-- [x] **Step 4 — drivers.** Two concrete non-PiKVM drivers have landed:
+- [x] **Step 4 — drivers.** Three concrete non-PiKVM drivers have landed:
       `FakeDriver` ([`drivers/fake.py`](../src/kvm_pilot/drivers/fake.py)) — in-process,
-      no hardware (#2) — and `RedfishDriver`
+      no hardware (#2) — `IpmiDriver` ([`drivers/ipmi.py`](../src/kvm_pilot/drivers/ipmi.py),
+      #62 — pre-Redfish BMCs over `ipmitool`, live-validated on a Dell iDRAC6/R710
+      including SOL) — and `RedfishDriver`
       ([`drivers/redfish/`](../src/kvm_pilot/drivers/redfish/)), one stdlib client for
       Dell iDRAC / HPE iLO / Supermicro / Lenovo XCC / OpenBMC. Redfish proves the
       capability seam: it advertises a *complementary* set
@@ -137,5 +153,6 @@ second device family lands.)
 - [ ] **Step 5** — entry-point plugins + a "writing a driver" guide; per-driver deps as extras.
 
 The zero-dependency stdlib core is preserved: the HTTP transport stays on
-urllib, and any heavier per-driver dependency ships as an optional extra (e.g.
-`kvm-pilot[ipmi]`).
+urllib, and a heavier per-driver dependency would ship as an optional extra —
+the IPMI driver avoided needing one by shelling out to the system `ipmitool`
+binary instead of pulling a Python IPMI stack.

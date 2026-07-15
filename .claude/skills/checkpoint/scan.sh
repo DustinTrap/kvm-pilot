@@ -73,27 +73,27 @@ if [ -n "$REL" ] && [ "$REL" = "v${VER}" ]; then
 elif [ -n "$REL" ]; then
   echo "RELEASE_STATE: version ${VER} vs latest release ${REL} — differs (unreleased bump or newer tag)"
 fi
-# Resume pointer is the in-repo RESUME.md (git-tracked, committed). Flag likely-stale
-# when work landed after RESUME.md was last touched — a hint, not a verdict. (v0.3.0)
+# Resume pointer is RESUME.md — LOCAL-ONLY and untracked since #209 (it carries
+# internal fleet/opsec state that must not publish; gitignored — reverses v0.3.0's
+# git-tracked decision). Staleness is judged by file mtime vs commits, not git
+# history. (v0.8.0)
 if [ ! -f RESUME.md ]; then
-  echo "RESUME.md: MISSING — the in-repo resume pointer does not exist; create it (mandatory handoff)"
+  echo "RESUME.md: MISSING — the local resume pointer does not exist; create it (mandatory handoff; gitignored, never committed)"
 else
-  R_SHA="$(git log -1 --format='%h' -- RESUME.md 2>/dev/null)"
-  if [ -z "$R_SHA" ]; then
-    echo "RESUME_UNCOMMITTED: present but NEVER COMMITTED — commit it so the pointer is durable"
-  else
-    echo "RESUME.md: last committed $(git log -1 --format='%cs' -- RESUME.md 2>/dev/null) ($R_SHA)"
-    NEWER="$(git rev-list --count "${R_SHA}..HEAD" 2>/dev/null || echo 0)"
-    [ "${NEWER:-0}" -gt 0 ] && echo "RESUME_LIKELY_STALE: $NEWER commit(s) landed after RESUME.md's last commit — refresh it (hint)"
-    # Stamp-lag: the internal "@ <sha>" stamp can trail the file's own history if a commit
-    # updated RESUME.md without bumping the stamp — reads "fresh" to the checks above but lies. (v0.6.0)
-    STAMP_SHA="$(grep -m1 'Last updated' RESUME.md | grep -oE '[0-9a-f]{7,40}' | head -1)"
-    if [ -n "$STAMP_SHA" ] && git cat-file -e "$STAMP_SHA" 2>/dev/null; then
-      LAG="$(git rev-list --count "${STAMP_SHA}..${R_SHA}" 2>/dev/null || echo 0)"
-      [ "${LAG:-0}" -ge 2 ] && echo "RESUME_STAMP_STALE: stamp @ $STAMP_SHA is $LAG commits behind RESUME.md's own last commit ($R_SHA) — a commit updated the file without re-stamping; bump 'Last updated' to HEAD"
-    fi
-    # --porcelain shows untracked (??) too, so this catches working-tree edits.
-    [ -n "$(git status --porcelain -- RESUME.md 2>/dev/null)" ] && echo "RESUME_UNCOMMITTED: edited since its last commit — commit it"
+  if git ls-files --error-unmatch RESUME.md >/dev/null 2>&1; then
+    echo "RESUME_TRACKED: RESUME.md is git-tracked but must be LOCAL-ONLY (#209) — run: git rm --cached RESUME.md"
+  fi
+  R_EPOCH="$(stat -f %m RESUME.md 2>/dev/null || stat -c %Y RESUME.md 2>/dev/null || echo 0)"
+  R_DATE="$(date -r "$R_EPOCH" '+%Y-%m-%d %H:%M' 2>/dev/null || date -d "@$R_EPOCH" '+%Y-%m-%d %H:%M' 2>/dev/null || echo '?')"
+  echo "RESUME.md: last written $R_DATE (local file, untracked by design)"
+  NEWER="$(git log --oneline --since="@${R_EPOCH}" 2>/dev/null | wc -l | tr -d ' ')"
+  [ "${NEWER:-0}" -gt 0 ] && echo "RESUME_LIKELY_STALE: $NEWER commit(s) landed after RESUME.md was last written — refresh it (hint)"
+  # Stamp-lag: the internal "@ <sha>" stamp should sit near HEAD; a big lag means the
+  # body was refreshed without re-stamping, or not refreshed at all. (v0.6.0/v0.8.0)
+  STAMP_SHA="$(grep -m1 'Last updated' RESUME.md | grep -oE '[0-9a-f]{7,40}' | head -1)"
+  if [ -n "$STAMP_SHA" ] && git cat-file -e "$STAMP_SHA" 2>/dev/null; then
+    LAG="$(git rev-list --count "${STAMP_SHA}..HEAD" 2>/dev/null || echo 0)"
+    [ "${LAG:-0}" -ge 2 ] && echo "RESUME_STAMP_STALE: stamp @ $STAMP_SHA is $LAG commits behind HEAD — refresh RESUME.md and bump 'Last updated'"
   fi
 fi
 echo "RECENT COMMITS (agent: pick out THIS session's):"

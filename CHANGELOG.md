@@ -169,7 +169,7 @@ analysis (#194).
   documented trust ladder is now READ_ONLY → DRY_RUN → per-effect `ALLOW_*`,
   and the getting-started guide starts new users on the first rung.
 - **Official MCP registry listing** (#197) — `server.json` at the repo root
-  names the server `io.github.dustintrap/kvm-pilot`; the release workflow
+  names the server `io.github.DustinTrap/kvm-pilot`; the release workflow
   gains a best-effort `publish-mcp-registry` job (GitHub OIDC, runs after the
   PyPI publish, version-synced to the release tag) and the README carries the
   `mcp-name:` ownership marker the registry validates against PyPI. The

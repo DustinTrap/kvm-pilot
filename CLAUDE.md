@@ -2,10 +2,13 @@
 
 Guidance for AI agents (and humans) working in this repo.
 
-> **Starting a session? Read [RESUME.md](RESUME.md) first** — the current working
-> state, what's in flight, and next steps. It's refreshed by `/checkpoint`
-> (`.claude/skills/checkpoint/`) at the end of each session. This file is the
-> standing doctrine; `RESUME.md` is where we are right now.
+> **Starting a session? Read `RESUME.md` first, if present** — the current working
+> state, what's in flight, and next steps. It is a **local, untracked scratch file**
+> (gitignored since #209: it carries fleet/opsec details that must not publish; a
+> fresh clone won't have one — fall back to open issues + the CHANGELOG). It's
+> refreshed by `/checkpoint` (`.claude/skills/checkpoint/`) at the end of each
+> session, and never committed. This file is the standing doctrine; `RESUME.md`
+> is where we are right now.
 
 ## What this is
 `kvm-pilot` — a stdlib-only Python client + CLI for IP-KVM devices (PiKVM, the
@@ -15,11 +18,13 @@ classifies a KVM screenshot into a boot/run phase. **Beta** (current version:
 validation is tracked **per device + firmware + capability** in the support
 matrix (#96) and the community
 [Hardware-Compatibility list](https://github.com/DustinTrap/kvm-pilot/wiki/Hardware-Compatibility) —
-that page is the source of truth for what has actually been exercised. As of
-2026-07-03 a GL-RM1PE has been run live (read/`snapshot`/`healthcheck`/`logs`
-paths on firmware V1.5.1 release2 and V1.9.1 release1; the remote firmware-flash
-is a known no-op there, #94/#95), but **most device+capability combos remain
-unverified / mock-only** — be honest about that in any docs or messaging: don't
+that page is the source of truth for what has actually been exercised. GL-RM1PE
+units have been run live (read/`healthcheck`/`logs` on firmware V1.5.1 release2
+and V1.9.1 release1; `snapshot` verified on V1.9.1 only — on V1.5.1 it fails with
+an undecodable H.264 frame, #107/#151; the remote firmware-flash is a known no-op
+there, #94/#95), and a Dell iDRAC6 has exercised the IPMI driver live end-to-end
+(power/boot-device/sensors/SEL/SOL, 2026-07-14), but **most device+capability
+combos remain unverified / mock-only** — be honest about that in any docs or messaging: don't
 claim a feature is "tested" or "beta" beyond what the matrix shows; point readers
 to it for current truth.
 
