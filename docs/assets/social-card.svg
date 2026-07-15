@@ -1,0 +1,46 @@
+<svg viewBox="0 0 1280 640" width="1280" height="640" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="ttl dsc">
+  <title id="ttl">kvm-pilot — smart hands for your AI agents</title>
+  <desc id="dsc">Social preview card: the kvm-pilot terminal-chip logo and wordmark, the tagline "Smart hands for your AI agents.", and the subtitle describing the write-capable multi-plane MCP server — gated, verified, audited.</desc>
+  <style>
+    text{font-family:ui-sans-serif,system-ui,sans-serif;}
+    .mono{font-family:ui-monospace,'SF Mono',Menlo,'DejaVu Sans Mono',monospace;}
+    .bg{fill:#f1efe8;}
+    .frame{fill:#ffffff;stroke:#d3d1c7;stroke-width:2;}
+    .bar{fill:#e7e4d9;stroke:#d3d1c7;stroke-width:1;}
+    .dot{fill:#d3d1c7;}
+    .chip{fill:#eeedfe;stroke:#534ab7;stroke-width:4;}
+    .prompt{fill:#534ab7;font-weight:700;font-size:64px;}
+    .word{fill:#2c2c2a;font-weight:600;font-size:84px;letter-spacing:-2px;}
+    .cursor{fill:#534ab7;opacity:0.55;}
+    .tag{fill:#2c2c2a;font-weight:600;font-size:44px;}
+    .sub{fill:#5f5e5a;font-weight:400;font-size:26px;}
+    .pip{fill:#534ab7;font-weight:500;font-size:24px;}
+    .url{fill:#888780;font-weight:400;font-size:22px;}
+    .triad{fill:#3b6d11;font-weight:500;font-size:26px;}
+  </style>
+
+  <rect class="bg" x="0" y="0" width="1280" height="640"/>
+
+  <!-- terminal window frame -->
+  <rect class="frame" x="80" y="64" width="1120" height="512" rx="18"/>
+  <rect class="bar" x="80" y="64" width="1120" height="52" rx="18"/>
+  <rect class="bar" x="80" y="90" width="1120" height="26"/>
+  <circle class="dot" cx="116" cy="90" r="8"/>
+  <circle class="dot" cx="144" cy="90" r="8"/>
+  <circle class="dot" cx="172" cy="90" r="8"/>
+
+  <!-- logo lockup -->
+  <rect class="chip" x="140" y="170" width="124" height="124" rx="26"/>
+  <text class="prompt mono" x="163" y="254">&gt;_</text>
+  <text class="word mono" x="300" y="262">kvm-pilot</text>
+  <rect class="cursor" x="772" y="204" width="34" height="62" rx="4"/>
+
+  <!-- tagline + subtitle -->
+  <text class="tag" x="142" y="384">Smart hands for your AI agents.</text>
+  <text class="sub" x="142" y="432">Write-capable, multi-plane (KVM + BMC + SSH) MCP server</text>
+  <text class="triad" x="142" y="470">gated, verified, audited</text>
+
+  <!-- footer -->
+  <text class="pip mono" x="142" y="536">pip install --pre kvm-pilot</text>
+  <text class="url mono" x="700" y="536">github.com/DustinTrap/kvm-pilot</text>
+</svg>
