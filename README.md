@@ -42,6 +42,12 @@ firmware, the bootloader, and an OS install.
 
 ![kvm-pilot reads a screenshot from the KVM, a vision backend (Claude or a local VLM) classifies the boot phase, and kvm-pilot drives keyboard and power back through the KVM — a closed loop with no agent on the target machine.](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/how-it-works.svg)
 
+A real, unedited run against a GLKVM on the home fleet — an honest preflight,
+a headless snapshot (watch it wake the on-demand encoder), a **gated** dry-run
+power-cycle, and the boot console the agent actually saw:
+
+![Live terminal demo: kvm-pilot snapshot runs an honest preflight (worst: CRITICAL, no out-of-band recovery path), wakes the GL on-demand encoder over WebSocket, and saves screen.jpg; kvm-pilot power-cycle --dry-run logs and skips both destructive ATX operations; the final frames show the captured Linux boot console.](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/assets/demo.gif)
+
 ## Quickstart
 
 One install gives you the whole product — the **`kvm-pilot` CLI**, the
