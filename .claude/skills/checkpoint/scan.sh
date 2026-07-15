@@ -129,16 +129,21 @@ if grep -qE '^## \[Unreleased\]' CHANGELOG.md 2>/dev/null; then
   [ -z "$BODY" ] && echo "CHANGELOG_UNRELEASED: EMPTY" || echo "CHANGELOG_UNRELEASED: has content"
 else
   # No [Unreleased] section is fine right after a release, but becomes a lie once
-  # feature commits land on main without one — the old check only fired around a
-  # release event and stayed silent (v0.7.0: this session merged the IPMI driver
-  # #206 + ipmi_sim cross-check #207 post-b6 with no [Unreleased] entry, caught by
-  # hand). If src/docs commits exist since the latest tag, the CHANGELOG omits them.
-  if [ -n "${LOCAL_TAG:-}" ] && git rev-parse "${LOCAL_TAG}" >/dev/null 2>&1; then
-    NSINCE=$(git rev-list --count --no-merges "${LOCAL_TAG}..HEAD" -- src/ docs/ 2>/dev/null || echo 0)
-    if [ "${NSINCE:-0}" -gt 0 ]; then
-      echo "CHANGELOG_UNRELEASED_MISSING: ${NSINCE} src/docs commit(s) since ${LOCAL_TAG} but no [Unreleased] section"
+  # CODE lands on main without the CHANGELOG being touched to record it. Anchor on
+  # the last commit that edited CHANGELOG.md — NOT the local tag: right after a
+  # release the local tag trails the just-published one, so a tag-based window
+  # counted already-released commits as unrecorded (v0.8.0 false positive: post-b7
+  # it flagged the 7 b7 commits already in the dated [0.1.0b7] section). "Any
+  # src/kvm_pilot/*.py changed since CHANGELOG was last edited" fires for the real
+  # merge-without-release case (v0.7.0: IPMI code landed post-b6, CHANGELOG untouched)
+  # and stays quiet when the release commit dated the section for that same code.
+  CL_COMMIT=$(git log -1 --format=%H -- CHANGELOG.md 2>/dev/null)
+  if [ -n "$CL_COMMIT" ]; then
+    CODE_SINCE_CL=$(git diff --name-only "${CL_COMMIT}" HEAD -- src/kvm_pilot 2>/dev/null | grep -cE '\.py$')
+    if [ "${CODE_SINCE_CL:-0}" -gt 0 ]; then
+      echo "CHANGELOG_UNRELEASED_MISSING: ${CODE_SINCE_CL} src/kvm_pilot *.py file(s) changed since CHANGELOG.md was last edited (${CL_COMMIT:0:7}) but no [Unreleased] section"
     else
-      echo "CHANGELOG_UNRELEASED: (no section; no unreleased src/docs commits — ok)"
+      echo "CHANGELOG_UNRELEASED: (no section; no code changed since CHANGELOG last edited — ok)"
     fi
   fi
 fi
