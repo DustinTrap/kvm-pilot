@@ -45,6 +45,8 @@ claude mcp add kvm-pilot -s user \
   sent), then open the per-effect `KVM_PILOT_MCP_ALLOW_*` gates one at a time
   (see the [MCP server README](https://github.com/DustinTrap/kvm-pilot/blob/main/src/kvm_pilot/mcp/README.md)).
 
+![The trust ladder: rung one READ_ONLY — only read tools are registered and every effect gate is force-closed; rung two DRY_RUN — act tools appear but destructive calls are logged, never sent; rung three per-effect ALLOW_* flags — power, HID, media, boot-config, SSH, appliance and external writes each opted in individually, with per-call approval on top.](trust-ladder.svg)
+
 **Then restart your agent session.** MCP servers load at session start, so on
 Claude Code you must **exit your current session and start a new one** for the
 tools to appear. On relaunch you may get a prompt asking you to **activate the
@@ -92,9 +94,12 @@ This trips up almost every first run. There are **two machines**:
   *separate* host with its own IP, OS, and SSH.
 
 `kvm-pilot` acts on the **connected server** through the KVM (power, screen,
-keyboard). Rebooting the **KVM appliance itself** is a different, out-of-band
-action (SSH to the appliance). So phrase prompts about *the server behind the
-KVM*, e.g. "on `10.0.1.11`'s connected server," to avoid ambiguity.
+keyboard). Rebooting the **KVM appliance itself** is a different, separately
+gated action (the `appliance_reboot` tool, or SSH to the appliance). So phrase
+prompts about *the server behind the KVM*, e.g. "on `10.0.1.11`'s connected
+server," to avoid ambiguity.
+
+![Two machines: the KVM appliance has its own IP, runs kvmd, and receives kvm-pilot's REST calls and the appliance tools; the managed host is a separate machine with its own IP that receives keystrokes and power through the appliance's HDMI, USB and ATX wiring — and, once its OS is up, its own in-band SSH channel.](two-machines.svg)
 
 ## 5. Try it — sample prompts
 

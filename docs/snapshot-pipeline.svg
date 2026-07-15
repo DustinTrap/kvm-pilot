@@ -1,0 +1,102 @@
+<svg viewBox="0 0 860 480" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="ttl dsc">
+  <title id="ttl">The snapshot pipeline — and why it sometimes fails</title>
+  <desc id="dsc">A left-to-right pipeline: a snapshot call reaches a GLKVM whose video encoder is on-demand and idle when nobody is watching; kvm-pilot connects a WebSocket video client to wake the encoder (about 1.5 seconds), receives a JPEG frame plus the live signal state, and classification proceeds. Three failure exits: a 503 with no video client on a headless unit is the encoder being asleep, not a wedge; H.264 at the panel's native resolution yields a tiny undecodable frame — use the WebRTC stream or web UI; a black frame while hdmi_signal is true means the host display is asleep — wake it with a keystroke, don't trust the pixels.</desc>
+  <style>
+    text{font-family:var(--font-sans,ui-sans-serif,system-ui,sans-serif);}
+    .band{fill:#f1efe8;stroke:#d3d1c7;stroke-width:1;}
+    .card{fill:#fff;stroke:#b4b2a9;stroke-width:1.5;}
+    .purple{fill:#eeedfe;stroke:#534ab7;stroke-width:1.75;}
+    .green{fill:#eaf3de;stroke:#3b6d11;stroke-width:1.5;}
+    .red{fill:#fcebeb;stroke:#a32d2d;stroke-width:1.5;}
+    .h{fill:#2c2c2a;font-weight:500;font-size:18px;}
+    .sub{fill:#5f5e5a;font-weight:400;font-size:12px;}
+    .t{fill:#2c2c2a;font-weight:500;font-size:12.5px;}
+    .ts{fill:#5f5e5a;font-weight:400;font-size:11px;}
+    .tp{fill:#3c3489;font-weight:600;font-size:12.5px;}
+    .tg{fill:#27500a;font-weight:600;font-size:12.5px;}
+    .tr{fill:#791f1f;font-weight:600;font-size:12px;}
+    .trs{fill:#791f1f;font-weight:400;font-size:11px;}
+    .mono{fill:#5f5e5a;font-family:var(--font-mono,ui-monospace,monospace);font-weight:400;font-size:10.5px;}
+    .lab{fill:#888780;font-weight:500;font-size:11px;}
+    .cn{stroke:#888780;}
+    .cr{stroke:#a32d2d;stroke-dasharray:5,3;}
+    .mkn{fill:#888780;}
+    .mkr{fill:#a32d2d;}
+    @media (prefers-color-scheme:dark){
+      .band{fill:#211f1b;stroke:#4a4641;}
+      .card{fill:#2a2723;stroke:#5f5e5a;}
+      .purple{fill:#3c3489;stroke:#afa9ec;}
+      .green{fill:#27500a;stroke:#97c459;}
+      .red{fill:#791f1f;stroke:#f09595;}
+      .h{fill:#f1efe8;} .sub{fill:#b4b2a9;} .t{fill:#f1efe8;} .ts{fill:#b4b2a9;} .lab{fill:#908d85;}
+      .tp{fill:#cecbf6;} .tg{fill:#c0dd97;} .tr{fill:#f7c1c1;} .trs{fill:#f7c1c1;} .mono{fill:#b4b2a9;}
+      .cr{stroke:#f09595;} .mkr{fill:#f09595;}
+    }
+  </style>
+
+  <text x="30" y="34" class="h">kvm-pilot — the snapshot pipeline (GLKVM)</text>
+  <text x="30" y="54" class="sub">The GL encoder is on-demand: it only runs while a video client is connected. A failed snapshot usually means "nobody is watching."</text>
+
+  <defs>
+    <marker id="an" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path class="mkn" d="M0,0 L6,3 L0,6 Z"/></marker>
+    <marker id="ar" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path class="mkr" d="M0,0 L6,3 L0,6 Z"/></marker>
+  </defs>
+
+  <!-- happy path -->
+  <rect class="purple" x="30" y="86" width="150" height="58" rx="6"/>
+  <text x="105" y="111" class="tp" text-anchor="middle">snapshot</text>
+  <text x="105" y="128" class="ts" text-anchor="middle">MCP tool · CLI</text>
+
+  <line x1="180" y1="115" x2="216" y2="115" class="cn" stroke-width="1.5" marker-end="url(#an)"/>
+
+  <rect class="card" x="220" y="86" width="170" height="58" rx="6"/>
+  <text x="305" y="106" class="t" text-anchor="middle">encoder idle?</text>
+  <text x="305" y="122" class="ts" text-anchor="middle">streamer runs only while</text>
+  <text x="305" y="136" class="ts" text-anchor="middle">a video client is connected</text>
+
+  <line x1="390" y1="115" x2="426" y2="115" class="cn" stroke-width="1.5" marker-end="url(#an)"/>
+
+  <rect class="card" x="430" y="86" width="180" height="58" rx="6"/>
+  <text x="520" y="106" class="t" text-anchor="middle">wake the streamer</text>
+  <text x="520" y="122" class="ts" text-anchor="middle">kvm-pilot connects /api/ws</text>
+  <text x="520" y="136" class="ts" text-anchor="middle">as a video client (~1.5 s)</text>
+
+  <line x1="610" y1="115" x2="646" y2="115" class="cn" stroke-width="1.5" marker-end="url(#an)"/>
+
+  <rect class="green" x="650" y="86" width="180" height="58" rx="6"/>
+  <text x="740" y="106" class="tg" text-anchor="middle">JPEG + signal state</text>
+  <text x="740" y="122" class="ts" text-anchor="middle">hdmi_signal · resolution · fps</text>
+  <text x="740" y="136" class="ts" text-anchor="middle">→ classify_screen / vision</text>
+
+  <!-- failure exits band -->
+  <text x="30" y="196" class="lab">the three ways it "fails" — and what each one actually means</text>
+
+  <rect class="red" x="30" y="210" width="255" height="110" rx="6"/>
+  <text x="46" y="234" class="tr">503, headless unit</text>
+  <text x="46" y="254" class="ts">No video client connected, so the</text>
+  <text x="46" y="269" class="ts">on-demand encoder is asleep. Not a</text>
+  <text x="46" y="284" class="ts">wedge — the WS wake above clears it.</text>
+  <text x="46" y="306" class="mono">healthcheck names a TRUE wedge</text>
+
+  <rect class="red" x="303" y="210" width="255" height="110" rx="6"/>
+  <text x="319" y="234" class="tr">tiny / undecodable frame</text>
+  <text x="319" y="254" class="ts">H.264 at the panel's native resolution</text>
+  <text x="319" y="269" class="ts">can't produce a JPEG still (#107/#151).</text>
+  <text x="319" y="284" class="ts">View live via WebRTC / the web UI, or</text>
+  <text x="319" y="299" class="ts">drop the capture resolution.</text>
+
+  <rect class="red" x="576" y="210" width="255" height="110" rx="6"/>
+  <text x="592" y="234" class="tr">black frame, signal present</text>
+  <text x="592" y="254" class="ts">hdmi_signal: true + black pixels =</text>
+  <text x="592" y="269" class="ts">the host display is asleep (DPMS).</text>
+  <text x="592" y="284" class="ts">Send a harmless keystroke to wake it;</text>
+  <text x="592" y="299" class="ts">don't classify a sleeping screen.</text>
+
+  <!-- honesty band -->
+  <rect class="band" x="30" y="350" width="800" height="100" rx="6"/>
+  <text x="46" y="376" class="t">Trust the metadata, not just the pixels</text>
+  <text x="46" y="398" class="ts">Every snapshot result carries the live signal block — hdmi_signal is the authoritative "is there a picture" flag — plus</text>
+  <text x="46" y="414" class="mono">unchanged_since_last_snapshot</text>
+  <text x="232" y="414" class="ts">— byte-identical pixels across an expected screen change mean stale/cached frames.</text>
+  <text x="46" y="436" class="ts">Cross-check with logs (it names a stuck encoder a screenshot can't) before acting on what you see.</text>
+</svg>

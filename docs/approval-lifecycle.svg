@@ -1,0 +1,115 @@
+<svg viewBox="0 0 860 500" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="ttl dsc">
+  <title id="ttl">The approval and signed-receipt lifecycle</title>
+  <desc id="dsc">A left-to-right flow for every destructive MCP call. First gate: is the effect enabled by its ALLOW flag? No means fail closed. Second gate: per-invocation approval — a human elicitation prompt, or confirm=true under a standing policy; a cancelled or denied prompt returns a typed result with a remediation hint, and the action never reached the device. Approval mints a signed single-use receipt (HMAC, bound to the exact tool, arguments and host, with a short TTL). Dispatch verifies and consumes the receipt before touching the device, and the audit log records the chain. Expired, replayed, or mismatched receipts fail closed and must be re-approved.</desc>
+  <style>
+    text{font-family:var(--font-sans,ui-sans-serif,system-ui,sans-serif);}
+    .band{fill:#f1efe8;stroke:#d3d1c7;stroke-width:1;}
+    .card{fill:#fff;stroke:#b4b2a9;stroke-width:1.5;}
+    .dia{fill:#f1efe8;stroke:#b4b2a9;stroke-width:1.5;}
+    .purple{fill:#eeedfe;stroke:#534ab7;stroke-width:1.75;}
+    .green{fill:#eaf3de;stroke:#3b6d11;stroke-width:1.75;}
+    .red{fill:#fcebeb;stroke:#a32d2d;stroke-width:1.5;}
+    .h{fill:#2c2c2a;font-weight:500;font-size:18px;}
+    .sub{fill:#5f5e5a;font-weight:400;font-size:12px;}
+    .t{fill:#2c2c2a;font-weight:500;font-size:12.5px;}
+    .ts{fill:#5f5e5a;font-weight:400;font-size:11px;}
+    .tp{fill:#3c3489;font-weight:600;font-size:12.5px;}
+    .tps{fill:#534ab7;font-weight:400;font-size:11px;}
+    .tg{fill:#27500a;font-weight:600;font-size:12.5px;}
+    .tr{fill:#791f1f;font-weight:600;font-size:12px;}
+    .diat{fill:#2c2c2a;font-family:var(--font-mono,ui-monospace,monospace);font-weight:500;font-size:10.5px;}
+    .mono{fill:#5f5e5a;font-family:var(--font-mono,ui-monospace,monospace);font-weight:400;font-size:10.5px;}
+    .edge{fill:#5f5e5a;font-weight:500;font-size:11px;}
+    .edger{fill:#791f1f;font-weight:500;font-size:11px;}
+    .lab{fill:#888780;font-weight:500;font-size:11px;}
+    .cn{stroke:#888780;}
+    .cr{stroke:#a32d2d;}
+    .mkn{fill:#888780;}
+    .mkr{fill:#a32d2d;}
+    @media (prefers-color-scheme:dark){
+      .band{fill:#211f1b;stroke:#4a4641;}
+      .card{fill:#2a2723;stroke:#5f5e5a;}
+      .dia{fill:#2a2723;stroke:#5f5e5a;}
+      .purple{fill:#3c3489;stroke:#afa9ec;}
+      .green{fill:#27500a;stroke:#97c459;}
+      .red{fill:#791f1f;stroke:#f09595;}
+      .h{fill:#f1efe8;} .sub{fill:#b4b2a9;} .t{fill:#f1efe8;} .ts{fill:#b4b2a9;} .lab{fill:#908d85;}
+      .tp{fill:#cecbf6;} .tps{fill:#afa9ec;} .tg{fill:#c0dd97;} .tr{fill:#f7c1c1;}
+      .diat{fill:#f1efe8;} .mono{fill:#b4b2a9;} .edge{fill:#b4b2a9;} .edger{fill:#f7c1c1;}
+      .cr{stroke:#f09595;} .mkr{fill:#f09595;}
+    }
+  </style>
+
+  <text x="30" y="34" class="h">kvm-pilot — two guarantees per destructive call</text>
+  <text x="30" y="54" class="sub">Allowed (the operator opted this effect in) and approved (someone said yes to this exact call). Neither alone is enough.</text>
+
+  <defs>
+    <marker id="a" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path class="mkn" d="M0,0 L6,3 L0,6 Z"/></marker>
+    <marker id="r" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path class="mkr" d="M0,0 L6,3 L0,6 Z"/></marker>
+  </defs>
+
+  <!-- call -->
+  <rect class="purple" x="30" y="90" width="170" height="52" rx="6"/>
+  <text x="115" y="112" class="tp" text-anchor="middle">act tool call</text>
+  <text x="115" y="129" class="tps" text-anchor="middle">power · mouse · mount_iso …</text>
+
+  <line x1="200" y1="116" x2="240" y2="116" class="cn" stroke-width="1.5" marker-end="url(#a)"/>
+
+  <!-- gate 1 -->
+  <polygon class="dia" points="330,88 420,116 330,144 240,116"/>
+  <text x="330" y="112" class="diat" text-anchor="middle">effect enabled?</text>
+  <text x="330" y="126" class="diat" text-anchor="middle">ALLOW_* env gate</text>
+
+  <line x1="330" y1="144" x2="330" y2="180" class="cr" stroke-width="1.5" marker-end="url(#r)"/>
+  <text x="342" y="166" class="edger">no → fail closed</text>
+  <rect class="red" x="225" y="184" width="210" height="40" rx="4"/>
+  <text x="330" y="202" class="tr" text-anchor="middle">disabled by operator</text>
+  <text x="330" y="216" class="ts" text-anchor="middle">typed result names the flag to set</text>
+
+  <line x1="420" y1="116" x2="460" y2="116" class="cn" stroke-width="1.5" marker-end="url(#a)"/>
+  <text x="440" y="108" class="edge" text-anchor="middle">yes</text>
+
+  <!-- gate 2 -->
+  <polygon class="dia" points="555,88 650,116 555,144 460,116"/>
+  <text x="555" y="108" class="diat" text-anchor="middle">approved?</text>
+  <text x="555" y="121" class="diat" text-anchor="middle">human elicitation, or</text>
+  <text x="555" y="134" class="diat" text-anchor="middle">confirm=true policy</text>
+
+  <line x1="555" y1="144" x2="555" y2="180" class="cr" stroke-width="1.5" marker-end="url(#r)"/>
+  <text x="567" y="166" class="edger">cancel / deny</text>
+  <rect class="red" x="450" y="184" width="210" height="54" rx="4"/>
+  <text x="555" y="202" class="tr" text-anchor="middle">approval cancel</text>
+  <text x="555" y="217" class="ts" text-anchor="middle">typed denial + remediation hint —</text>
+  <text x="555" y="231" class="ts" text-anchor="middle">the action never reached the device</text>
+
+  <line x1="650" y1="116" x2="690" y2="116" class="cn" stroke-width="1.5" marker-end="url(#a)"/>
+  <text x="670" y="108" class="edge" text-anchor="middle">yes</text>
+
+  <!-- receipt -->
+  <rect class="green" x="690" y="86" width="140" height="60" rx="6"/>
+  <text x="760" y="108" class="tg" text-anchor="middle">receipt minted</text>
+  <text x="760" y="124" class="ts" text-anchor="middle">HMAC-signed ·</text>
+  <text x="760" y="138" class="ts" text-anchor="middle">single-use · expiring</text>
+
+  <!-- receipt detail band -->
+  <rect class="band" x="30" y="270" width="800" height="88" rx="6"/>
+  <text x="46" y="294" class="t">What the receipt binds</text>
+  <text x="46" y="314" class="mono">tool + arguments + target host + timestamp   ·   TTL default 60 s (KVM_PILOT_MCP_RECEIPT_TTL)</text>
+  <text x="46" y="334" class="ts">Dispatch re-verifies the signature and consumes the receipt before touching the device — a receipt can authorize exactly one</text>
+  <text x="46" y="349" class="ts">dispatch of exactly the approved call. The audit log records the whole chain: request, approval, receipt, outcome.</text>
+
+  <!-- fail-closed exits -->
+  <text x="30" y="396" class="lab">fail-closed re-approval paths — never a silent retry</text>
+  <rect class="red" x="30" y="408" width="250" height="60" rx="6"/>
+  <text x="46" y="430" class="tr">expired receipt</text>
+  <text x="46" y="447" class="ts">the approval went stale (TTL) —</text>
+  <text x="46" y="461" class="ts">re-approve; nothing was sent</text>
+  <rect class="red" x="300" y="408" width="250" height="60" rx="6"/>
+  <text x="316" y="430" class="tr">replayed receipt</text>
+  <text x="316" y="447" class="ts">already consumed once — a second</text>
+  <text x="316" y="461" class="ts">dispatch on one approval is refused</text>
+  <rect class="red" x="570" y="408" width="260" height="60" rx="6"/>
+  <text x="586" y="430" class="tr">arguments changed</text>
+  <text x="586" y="447" class="ts">receipt is bound to the exact call —</text>
+  <text x="586" y="461" class="ts">any drift in args/host fails the signature</text>
+</svg>

@@ -1,0 +1,88 @@
+<svg viewBox="0 0 860 440" xmlns="http://www.w3.org/2000/svg" role="img" aria-labelledby="ttl dsc">
+  <title id="ttl">The MCP trust ladder</title>
+  <desc id="dsc">Three ascending rungs. Rung one, the recommended start: READ_ONLY — only read tools are registered, every effect gate is force-closed, drivers are deny-all. Rung two: DRY_RUN — act tools appear but destructive calls are logged, never sent. Rung three: per-effect ALLOW flags — each effect class (power, HID, media, boot-config, SSH, appliance, external writes) is opted in individually, and every act call still needs a per-invocation approval backed by a signed single-use receipt. READ_ONLY wins over everything else.</desc>
+  <style>
+    text{font-family:var(--font-sans,ui-sans-serif,system-ui,sans-serif);}
+    .band{fill:#f1efe8;stroke:#d3d1c7;stroke-width:1;}
+    .step{fill:#e7e4d9;stroke:#d3d1c7;stroke-width:1;}
+    .green{fill:#eaf3de;stroke:#3b6d11;stroke-width:1.75;}
+    .card{fill:#fff;stroke:#b4b2a9;stroke-width:1.5;}
+    .purple{fill:#eeedfe;stroke:#534ab7;stroke-width:1.75;}
+    .h{fill:#2c2c2a;font-weight:500;font-size:18px;}
+    .sub{fill:#5f5e5a;font-weight:400;font-size:12px;}
+    .t{fill:#2c2c2a;font-weight:500;font-size:13px;}
+    .ts{fill:#5f5e5a;font-weight:400;font-size:11px;}
+    .tg{fill:#27500a;font-weight:600;font-size:13px;}
+    .tp{fill:#3c3489;font-weight:600;font-size:13px;}
+    .mono{fill:#5f5e5a;font-family:var(--font-mono,ui-monospace,monospace);font-weight:400;font-size:10.5px;}
+    .monog{fill:#27500a;font-family:var(--font-mono,ui-monospace,monospace);font-weight:500;font-size:11px;}
+    .monop{fill:#3c3489;font-family:var(--font-mono,ui-monospace,monospace);font-weight:500;font-size:11px;}
+    .lab{fill:#888780;font-weight:500;font-size:11px;}
+    .cn{stroke:#888780;}
+    .mkn{fill:#888780;}
+    @media (prefers-color-scheme:dark){
+      .band{fill:#211f1b;stroke:#4a4641;}
+      .step{fill:#2a2723;stroke:#4a4641;}
+      .green{fill:#27500a;stroke:#97c459;}
+      .card{fill:#2a2723;stroke:#5f5e5a;}
+      .purple{fill:#3c3489;stroke:#afa9ec;}
+      .h{fill:#f1efe8;} .sub{fill:#b4b2a9;} .t{fill:#f1efe8;} .ts{fill:#b4b2a9;} .lab{fill:#908d85;}
+      .tg{fill:#c0dd97;} .tp{fill:#cecbf6;} .mono{fill:#b4b2a9;} .monog{fill:#c0dd97;} .monop{fill:#cecbf6;}
+    }
+  </style>
+
+  <text x="30" y="34" class="h">kvm-pilot — the MCP trust ladder</text>
+  <text x="30" y="54" class="sub">Start blind-safe, rehearse, then open one effect at a time.</text>
+  <text x="30" y="70" class="sub">READ_ONLY wins over every other flag; each act still needs per-call approval.</text>
+
+  <defs>
+    <marker id="a" markerWidth="9" markerHeight="9" refX="6" refY="3" orient="auto"><path class="mkn" d="M0,0 L6,3 L0,6 Z"/></marker>
+  </defs>
+
+  <!-- staircase -->
+  <rect class="step" x="30" y="330" width="250" height="80" rx="4"/>
+  <rect class="step" x="290" y="240" width="250" height="170" rx="4"/>
+  <rect class="step" x="550" y="150" width="280" height="260" rx="4"/>
+
+  <!-- rung 1 -->
+  <rect class="green" x="46" y="212" width="218" height="104" rx="6"/>
+  <text x="155" y="236" class="tg" text-anchor="middle">1 · Read-only</text>
+  <text x="155" y="254" class="monog" text-anchor="middle">KVM_PILOT_MCP_READ_ONLY=1</text>
+  <text x="155" y="274" class="ts" text-anchor="middle">Only read tools are registered.</text>
+  <text x="155" y="289" class="ts" text-anchor="middle">Every effect gate force-closed;</text>
+  <text x="155" y="304" class="ts" text-anchor="middle">drivers built deny-all. See, never touch.</text>
+  <text x="155" y="352" class="lab" text-anchor="middle">recommended first rung</text>
+
+  <!-- rung 2 -->
+  <rect class="card" x="306" y="122" width="218" height="104" rx="6"/>
+  <text x="415" y="146" class="t" text-anchor="middle">2 · Dry-run</text>
+  <text x="415" y="164" class="mono" text-anchor="middle">KVM_PILOT_MCP_DRY_RUN=1</text>
+  <text x="415" y="184" class="ts" text-anchor="middle">Act tools appear; destructive calls</text>
+  <text x="415" y="199" class="ts" text-anchor="middle">are logged, never sent. Rehearse the</text>
+  <text x="415" y="214" class="ts" text-anchor="middle">workflow before anything can move.</text>
+  <text x="415" y="262" class="lab" text-anchor="middle">rehearsal rung</text>
+
+  <!-- rung 3 -->
+  <rect class="purple" x="566" y="32" width="248" height="104" rx="6"/>
+  <text x="690" y="56" class="tp" text-anchor="middle">3 · Per-effect opt-in</text>
+  <text x="690" y="74" class="monop" text-anchor="middle">KVM_PILOT_MCP_ALLOW_*</text>
+  <text x="690" y="94" class="ts" text-anchor="middle">One env flag per effect class, plus a</text>
+  <text x="690" y="109" class="ts" text-anchor="middle">per-call human approval — a signed,</text>
+  <text x="690" y="124" class="ts" text-anchor="middle">single-use, expiring receipt per act.</text>
+
+  <!-- effect list on step 3 -->
+  <text x="566" y="176" class="mono">ALLOW_POWER      power · wake · reboot chords</text>
+  <text x="566" y="196" class="mono">ALLOW_HID        type · key · mouse · calibrate</text>
+  <text x="566" y="216" class="mono">ALLOW_MEDIA      mount_iso · eject</text>
+  <text x="566" y="236" class="mono">ALLOW_CONFIG     set_boot_device</text>
+  <text x="566" y="256" class="mono">ALLOW_SSH        ssh_exec</text>
+  <text x="566" y="276" class="mono">ALLOW_APPLIANCE  appliance_reboot</text>
+  <text x="566" y="296" class="mono">ALLOW_EXTERNAL_WRITE  file_firmware_report</text>
+  <text x="566" y="322" class="lab">open only the effects this job needs</text>
+
+  <!-- ascent arrows -->
+  <line x1="270" y1="264" x2="300" y2="220" class="cn" stroke-width="1.5" marker-end="url(#a)"/>
+  <line x1="530" y1="174" x2="560" y2="130" class="cn" stroke-width="1.5" marker-end="url(#a)"/>
+  <text x="268" y="238" class="lab">verified in the matrix?</text>
+  <text x="532" y="148" class="lab">one effect at a time</text>
+</svg>

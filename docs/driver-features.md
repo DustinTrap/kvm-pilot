@@ -77,6 +77,8 @@ ledger, never hand-set** (CI fails on drift):
 
 See [firmware-registry.md](firmware-registry.md#maturity-derived-from-the-run-ledger-98).
 
+![Evidence in, maturity out: live fleet runs, the one-command test-report, and community hardware-report issues feed the run ledger shipped inside the wheel; aggregation per device × firmware × capability with a minimum-sample gate derives the alpha → beta → rc → ga ladder. A failure is a first-class ledger row — the ledger wins.](maturity-ledger.svg)
+
 ### The capability vocabulary
 
 Every driver is scored against the full `Capability` enum, so "not supported"
@@ -141,6 +143,12 @@ Structural set: `system_info, power, hid, video, virtual_media, gpio, events, lo
 | `watchdog` | — | n/a | n/a | Not implemented. |
 | `firmware_update` | `firmware-update`, `firmware-check` | **false-report** | live:gl.inet RM1PE@V1.5.1 (alpha, **FAILED**) | GL `/api/upgrade/*` (provisional, reverse-engineered). On RM1PE the `start` POST **returns 200 and no-ops** (#94/#95) — the driver now verifies an actual upgrade-state change and reports failure otherwise. Registry `remote_update`: `risk=high, recovery_required=true, self_flash_blind=true` (physical U-Boot recovery only; a flash can re-disable the REST API and can corrupt if media is mounted). **The GL web console is the only known-good upgrade path** (V1.5.1→V1.9.1 live-verified, #177; quirk `firmware-flash-webui-only`). See [firmware-update.md](firmware-update.md). |
 | `ssh` | `ssh-check`, `ssh-exec` · MCP `ssh_reachable`, `ssh_exec` | (per-profile) | n/a as a driver cap | Not a GLKVM capability. In-band SSH to the **managed host's** OS is a per-profile channel (`ssh_*` config, #81). Separately, an **appliance-SSH** channel to the KVM's *own* OS (#162) backs `kvm-pilot appliance-*` / `paths` for encoder-wedge recovery REST can't see. |
+
+The `video` row is the one that confuses people most — the GL encoder is
+**on-demand**, so a "failed" snapshot usually means nobody is watching, not a
+broken device:
+
+![The snapshot pipeline: a snapshot call finds the on-demand GL encoder idle; kvm-pilot connects a WebSocket video client to wake it (about 1.5 seconds) and a JPEG plus the live signal state comes back. The three failure exits: a 503 on a headless unit means the encoder is asleep, not wedged; H.264 at the panel's native resolution yields a tiny undecodable frame; a black frame with hdmi_signal true means the host display is asleep.](snapshot-pipeline.svg)
 
 ## `pikvm` — stock PiKVM (canonical base)
 
