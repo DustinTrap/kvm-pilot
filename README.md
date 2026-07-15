@@ -1,90 +1,36 @@
 <!-- mcp-name: io.github.DustinTrap/kvm-pilot -->
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/assets/logo.svg" alt="kvm-pilot" width="460">
+</p>
+
+<p align="center">
+  <a href="https://pypi.org/project/kvm-pilot/"><img src="https://img.shields.io/pypi/v/kvm-pilot?color=534ab7" alt="PyPI version"></a>
+  <a href="https://pypi.org/project/kvm-pilot/"><img src="https://img.shields.io/pypi/pyversions/kvm-pilot" alt="Python versions"></a>
+  <a href="https://github.com/DustinTrap/kvm-pilot/actions/workflows/ci.yml"><img src="https://github.com/DustinTrap/kvm-pilot/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/DustinTrap/kvm-pilot/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue" alt="License: Apache-2.0"></a>
+  <a href="https://registry.modelcontextprotocol.io/v0/servers?search=kvm-pilot"><img src="https://img.shields.io/badge/MCP_registry-io.github.DustinTrap%2Fkvm--pilot-534ab7" alt="MCP registry"></a>
+</p>
+
 # kvm-pilot
 
-**AI-driven bare-metal control for IP-KVMs (PiKVM, the GL.iNet GLKVM fork GL-RM1 / GL-RM1PE, BliKVM) and Redfish BMCs (iDRAC, iLO, OpenBMC).**
+**Smart hands for your AI agents.** A write-capable, multi-plane
+(KVM + BMC + SSH) MCP server for controlling physical machines —
+**gated, verified, audited.**
 
-`kvm-pilot` is a stdlib-only-at-its-core Python client for the PiKVM REST API, a safety layer
-that gates destructive power/media operations, and a pluggable vision subsystem
-that reads a KVM screenshot and tells you what boot phase the machine is in —
-`bios_menu`, `grub_menu`, `installer_progress`, `login_prompt`, `crash_screen`,
-and so on. That last part is the point: it lets you drive a headless box through
-POST, firmware, bootloader, and OS install **with no agent on the target**,
-because the classifier works at the pixel level where there is no OS to cooperate.
+`kvm-pilot` lets an agent drive a headless box through POST, firmware, the
+bootloader, and an OS install **with no agent on the target**: it works at the
+pixel level through an IP-KVM (PiKVM, the GL.iNet GLKVM fork GL-RM1 /
+GL-RM1PE, BliKVM), at the structured-state level through a BMC (Redfish on
+iDRAC/iLO/OpenBMC, IPMI on BMCs that predate Redfish), and over SSH once an OS
+is up. A pluggable vision subsystem reads a KVM screenshot and tells you what
+boot phase the machine is in — `bios_menu`, `grub_menu`, `installer_progress`,
+`login_prompt`, `crash_screen`, and so on — and a safety layer gates every
+destructive operation behind operator opt-ins and per-call approvals.
 
-Vision runs on Claude **or** any local OpenAI-compatible VLM (LM Studio, Ollama,
-vLLM, llama.cpp). Point it at a model on your own GPU and the screenshots never
-leave your network and cost nothing per frame.
-
-> **Status: beta — ready for broader testing.** (The exact version lives in the
-> [CHANGELOG](https://github.com/DustinTrap/kvm-pilot/blob/main/CHANGELOG.md);
-> install with `pip install --pre kvm-pilot`.) The core paths have graduated
-> from mocked-only to live-verified: a fleet of GL-RM1PE units has exercised
-> `snapshot`/`healthcheck`/`logs`/`power_state`/`virtual_media`/`info` across
-> two firmware lines — on V1.9.1 those capabilities sit at **beta** maturity in
-> the run ledger that ships in the wheel, derived from real runs, never
-> hand-edited — and a Dell iDRAC6 has exercised the IPMI driver live end-to-end
-> (power, boot-device, sensors, event log, SOL serial console). The paths that
-> can hurt are hardened: transports never re-fire a destructive request, MCP
-> approvals are signed single-use receipts with an audit trail, and every
-> destructive effect — power, HID, media, boot-config, appliance, SSH,
-> external writes — has its own operator opt-in gate. Recent betas added
-> remote boot-device control (Redfish, IPMI, and in-band `efibootmgr`),
-> Wake-on-LAN, an IPMI driver for BMCs that predate Redfish, a serial (SOL)
-> console, mouse auto-calibration, and headless native-resolution GLKVM
-> snapshots; `kvm-pilot test-report` turns contributing evidence into one
-> command, and the firmware registry feeds itself (`firmware-check` auto-files
-> registry updates).
-> **Now we need your hardware.** PiKVM, BliKVM, other GLKVM models, and Redfish
-> BMCs (iDRAC/iLO/OpenBMC) are the combos the matrix needs most — success *or*
-> failure, a
-> [hardware report](https://github.com/DustinTrap/kvm-pilot/issues/new?template=hardware-report.yml)
-> takes two minutes and the hourly ingest does the rest. Anything the
-> [Hardware-Compatibility list](https://github.com/DustinTrap/kvm-pilot/wiki/Hardware-Compatibility)
-> doesn't show as exercised is still unverified: expect some API movement before
-> 1.0, note the remote firmware-flash no-op on GL-RM1PE
-> ([#94](https://github.com/DustinTrap/kvm-pilot/issues/94)/[#95](https://github.com/DustinTrap/kvm-pilot/issues/95)),
-> and don't point destructive ops at a machine you can't afford to have
-> power-cycled unexpectedly. See [Compatibility](#compatibility).
-
----
-
-## ⚠️ GLKVM users: enable the PiKVM API first
-
-On GL.iNet firmware the PiKVM REST API is **disabled by default**. Until you
-enable it, every `/api/*` call returns 404 and `kvm-pilot` cannot talk to the
-device. To enable it, SSH into the unit (or use the app's terminal) and
-uncomment the relevant block in:
-
-```
-/etc/kvmd/nginx-kvmd.conf
-```
-
-then restart the service (or reboot the unit). Note that a **firmware upgrade can
-revert this**, so you may need to redo it after updates. This is a GL firmware
-behavior, not a `kvm-pilot` setting. Stock PiKVM devices expose the API by
-default and need no change.
-
-`kvm-pilot` now **detects this condition**: select the GL driver and a 404 across
-`/api/*` is surfaced as a clear, actionable `ApiDisabledError` (pointing you at
-`nginx-kvmd.conf`) instead of a bare HTTP 404 — and you can preflight with
-`check_api_enabled()`.
-
-```python
-from kvm_pilot import make_driver           # or: from kvm_pilot import GLKVMDriver
-
-gl = make_driver("glkvm", host="192.168.8.1", passwd="…")   # GL-RM1 / GL-RM1PE
-gl.check_api_enabled()        # raises ApiDisabledError with the fix if it's off
-gl.get_firmware_info()        # {'version': …, 'model': 'GL-RM1PE', …}
-gl.known_quirks()             # firmware-specific quirks we track
-```
-
-Pin it for the CLI / a profile with `--driver glkvm`, `KVM_PILOT_DRIVER=glkvm`, or
-`driver = "glkvm"` in a config profile. (`PiKVMDriver` is the canonical base;
-`GLKVMDriver` / `BliKVMDriver` are the fork subclasses. `KVMClient` remains an
-alias of `PiKVMDriver`.)
-
----
+Vision runs on Claude **or** any local OpenAI-compatible VLM (LM Studio,
+Ollama, vLLM, llama.cpp). Point it at a model on your own GPU and the
+screenshots never leave your network and cost nothing per frame.
 
 ## How it works
 
@@ -96,37 +42,38 @@ firmware, the bootloader, and an OS install.
 
 ![kvm-pilot reads a screenshot from the KVM, a vision backend (Claude or a local VLM) classifies the boot phase, and kvm-pilot drives keyboard and power back through the KVM — a closed loop with no agent on the target machine.](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/how-it-works.svg)
 
-## Install
+## Quickstart
+
+One install gives you the whole product — the **`kvm-pilot` CLI**, the
+**`kvm-pilot-mcp` MCP server**, and the bundled **Claude skill** — nothing to
+clone. The current release line is a **pre-release**, so `--pre` is required
+(a plain `pip install kvm-pilot` deliberately picks up no pre-release;
+`0.1.0a1` is yanked and much older than this README — don't use it).
 
 ```bash
-pip install --pre kvm-pilot                    # CLI + skill + MCP server + WebSocket events, batteries included
+pip install --pre kvm-pilot                    # CLI + skill + MCP server + WebSocket events
 pip install --pre "kvm-pilot[totp]"            # + 2FA / TOTP support (pyotp)
 ```
 
-One install gives you the whole product: the **`kvm-pilot` CLI**, the **`kvm-pilot-mcp`
-MCP server** (for Claude Desktop / Claude Code and other agent hosts), and the
-bundled **Claude skill** — nothing to clone. The current release line is a
-**pre-release** (see the version badge / CHANGELOG for the exact tag), so `--pre`
-(or pinning the exact version) is required — a plain
-`pip install kvm-pilot` deliberately picks up no pre-release. The client/driver code
-imports only the standard library; the one runtime dependency is the `mcp` SDK
-(for the bundled server), and `totp`/`ws` are opt-in extras. (`0.1.0a1` is yanked
-and much older than this README — don't use it.) For the latest unreleased tree:
+### Driving a KVM from an AI agent (MCP)
 
 ```bash
-pip install "kvm-pilot[totp,ws] @ git+https://github.com/DustinTrap/kvm-pilot"
+claude mcp add kvm-pilot -s user \
+    -e KVM_PILOT_PROFILE=<profile> -e KVM_PILOT_MCP_READ_ONLY=1 -- \
+    kvm-pilot-mcp
 ```
 
-**Driving a KVM from an AI agent (MCP)?** Start with the
-[Getting started guide](https://github.com/DustinTrap/kvm-pilot/blob/main/docs/getting-started.md) — it covers enabling the
-`kvm-pilot-mcp` server in your agent, credentials, and sample prompts. The
-server is published to the official
-[MCP registry](https://github.com/modelcontextprotocol/registry) as
-**`io.github.DustinTrap/kvm-pilot`** (from the first release carrying this
-README), so registry-aware hosts can discover and install it by name. The
-Python/CLI quickstart below is for scripting.
+`KVM_PILOT_MCP_READ_ONLY=1` is the recommended first rung of the trust ladder
+— the agent can see everything and touch nothing until your hardware is
+verified. The [Getting started guide](https://github.com/DustinTrap/kvm-pilot/blob/main/docs/getting-started.md)
+covers credentials, Claude Desktop JSON config, sample prompts, and climbing
+the ladder. The server is published to the official
+[MCP registry](https://registry.modelcontextprotocol.io/v0/servers?search=kvm-pilot)
+as **`io.github.DustinTrap/kvm-pilot`**, so registry-aware hosts can discover
+and install it by name. Agents: the repo root carries an
+[`llms.txt`](https://github.com/DustinTrap/kvm-pilot/blob/main/llms.txt) doc map.
 
-## Quickstart
+### Scripting from Python
 
 ```python
 from kvm_pilot import KVMClient
@@ -145,6 +92,12 @@ analyzer = ScreenAnalyzer(kvm, local)
 # Block until the box reaches the GRUB menu, then pick the first entry
 analyzer.wait_for_state("grub_menu", timeout=120)
 kvm.press_key("Enter")
+```
+
+For the latest unreleased tree:
+
+```bash
+pip install "kvm-pilot[totp,ws] @ git+https://github.com/DustinTrap/kvm-pilot"
 ```
 
 ### CLI
@@ -175,6 +128,65 @@ capability it needs, and its gating), and
 every `KVM_PILOT_*` environment variable, and the precedence between flags,
 env, and profiles.
 
+> **GLKVM setup note:** on GL.iNet firmware the PiKVM REST API is **disabled by
+> default** (every `/api/*` call 404s, surfaced as a clear `ApiDisabledError`),
+> and a firmware upgrade can re-disable it. Enable it in
+> `/etc/kvmd/nginx-kvmd.conf` and pin the driver with `--driver glkvm` /
+> `driver = "glkvm"` — full steps in the
+> [troubleshooting guide](https://github.com/DustinTrap/kvm-pilot/blob/main/docs/troubleshooting.md#every-api-call-returns-404-glkvm).
+
+## The tool surface, by plane
+
+The same capability protocols span three actuation planes, so one agent
+workflow can mix pixels, structured BMC state, and shell access — with every
+destructive effect gated per class:
+
+| Plane | Read | Act (operator-gated) |
+|---|---|---|
+| **KVM — pixels & HID** (PiKVM · GLKVM · BliKVM) | `snapshot` · `classify_screen` · `wait_for_state` · `power_state` · `logs` · `list_virtual_media` | `power` · `type_text` / `press_key` / `send_shortcut` / `mouse` · `calibrate_mouse` · `mount_iso` / `eject` |
+| **BMC — structured state** (Redfish · IPMI) | `info` · `boot_options` · `logs` (SEL) · sensors (CLI) | `power` · `set_boot_device` · SOL console (CLI `console`) |
+| **SSH — in-band & appliance** | `ssh_reachable` · `appliance_status` · `access_paths` | `ssh_exec` · `wake` (WoL) · `appliance_reboot` |
+| **Meta — evidence & intake** | `capabilities` · `support_matrix` · `healthcheck` | `file_firmware_report` |
+
+The canonical per-tool reference — annotations, effect gates, approval
+lifecycle — is the [MCP server README](https://github.com/DustinTrap/kvm-pilot/blob/main/src/kvm_pilot/mcp/README.md);
+the CLI covers the full surface in [docs/cli.md](https://github.com/DustinTrap/kvm-pilot/blob/main/docs/cli.md).
+
+## Status & maturity
+
+> **Status: beta — ready for broader testing.** (The exact version lives in the
+> [CHANGELOG](https://github.com/DustinTrap/kvm-pilot/blob/main/CHANGELOG.md);
+> install with `pip install --pre kvm-pilot`.) The core paths have graduated
+> from mocked-only to live-verified: a fleet of GL-RM1PE units has exercised
+> `snapshot`/`healthcheck`/`logs`/`power_state`/`virtual_media`/`info` across
+> two firmware lines — on V1.9.1 those capabilities sit at **beta** maturity in
+> the run ledger that ships in the wheel, derived from real runs, never
+> hand-edited — and a Dell iDRAC6 has exercised the IPMI driver live end-to-end
+> (power, boot-device, sensors, event log, SOL serial console). The paths that
+> can hurt are hardened: transports never re-fire a destructive request, MCP
+> approvals are signed single-use receipts with an audit trail, and every
+> destructive effect — power, HID, media, boot-config, appliance, SSH,
+> external writes — has its own operator opt-in gate. Recent betas added
+> remote boot-device control (Redfish, IPMI, and in-band `efibootmgr`),
+> Wake-on-LAN, an IPMI driver for BMCs that predate Redfish, a serial (SOL)
+> console, mouse auto-calibration, and headless native-resolution GLKVM
+> snapshots; `kvm-pilot test-report` turns contributing evidence into one
+> command, and the firmware registry feeds itself (`firmware-check` auto-files
+> registry updates).
+> **Now we need your hardware.** PiKVM, BliKVM, other GLKVM models, and
+> Redfish BMCs (iDRAC/iLO/OpenBMC) are the combos the matrix needs most —
+> success *or* failure, a
+> [hardware report](https://github.com/DustinTrap/kvm-pilot/issues/new?template=hardware-report.yml)
+> takes two minutes and the hourly ingest does the rest. Anything the
+> [Hardware-Compatibility list](https://github.com/DustinTrap/kvm-pilot/wiki/Hardware-Compatibility)
+> doesn't show as exercised is still unverified: expect some API movement before
+> 1.0, note the remote firmware-flash no-op on GL-RM1PE
+> ([#94](https://github.com/DustinTrap/kvm-pilot/issues/94)/[#95](https://github.com/DustinTrap/kvm-pilot/issues/95)),
+> and don't point destructive ops at a machine you can't afford to have
+> power-cycled unexpectedly. See [Compatibility](#compatibility).
+
+![Evidence in, maturity out: live fleet runs, the one-command test-report, and community hardware-report issues feed the run ledger shipped inside the wheel; aggregation per device × firmware × capability with a minimum-sample gate derives the alpha → beta → rc → ga ladder. A failure is a first-class ledger row.](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/maturity-ledger.svg)
+
 ## Boot-phase detection
 
 The vision classifier maps each screenshot to a **phase** — `bios_menu`,
@@ -199,18 +211,19 @@ only when nothing cheaper can.
 The PiKVM/GLKVM client already exposes the cheap end — ATX and HID LEDs,
 video-signal and resolution, on-device OCR (`?ocr=true`), logs, Prometheus
 metrics, and a WebSocket event stream. The [capability protocols](https://github.com/DustinTrap/kvm-pilot/blob/main/docs/architecture.md)
-add `Logs`, `BootProgress`, `Sensors`, `SerialConsole`, and `Watchdog` as the
-seam for BMC drivers (Redfish/IPMI), where the boot phase is a structured enum
-(`BootProgress.LastState`) and the console is a serial text stream rather than
-pixels. Different device classes are nearly complementary: capture devices are
-strong on pixels, BMCs on structured state and serial text.
+add `Logs`, `BootProgress`, `Sensors`, `SerialConsole`, `Watchdog`, and
+`BootConfig` as the seam for BMC drivers (Redfish/IPMI), where the boot phase
+is a structured enum (`BootProgress.LastState`) and the console is a serial
+text stream rather than pixels. Different device classes are nearly
+complementary: capture devices are strong on pixels, BMCs on structured state
+and serial text.
 
 ## Safety model
 
 Power-offs, hard resets, virtual-media connect/disconnect and image uploads,
 keyboard/mouse injection (`type_text`, `press_key`, shortcuts, clicks), GPIO,
-and Redfish resets are classified as **destructive** and pass through a safety
-layer:
+boot-config changes, and Redfish/IPMI resets are classified as **destructive**
+and pass through a safety layer:
 
 - **dry-run** short-circuits *first*: it logs the intended call and skips it
   entirely — the confirm callback is never invoked, so dry runs never prompt
@@ -224,7 +237,11 @@ layer:
 The destructive set is defined explicitly in `kvm_pilot.safety.DESTRUCTIVE_OPS`
 so it is auditable rather than guessed. A vision classification can never
 trigger a destructive action on its own — you wire that yourself, and the
-safety layer still applies.
+safety layer still applies. On the MCP side each destructive *effect class*
+additionally needs an operator opt-in env gate plus a per-call approval backed
+by a signed single-use receipt — the **trust ladder**
+(`READ_ONLY` → `DRY_RUN` → per-effect `ALLOW_*`) is drawn in the
+[MCP server README](https://github.com/DustinTrap/kvm-pilot/blob/main/src/kvm_pilot/mcp/README.md).
 
 This software controls real hardware and can power-cycle or interrupt a running
 machine. Read [SECURITY.md](https://github.com/DustinTrap/kvm-pilot/blob/main/docs/SECURITY.md) before exposing a KVM to the internet.
@@ -290,10 +307,10 @@ this beta needs — please open a
 
 ## Architecture
 
-`kvm-pilot` is moving to a modular, **driver-plugin** architecture so support can
-expand to many KVM/BMC devices (PiKVM family, Redfish BMCs, JetKVM, …). Each
-device implements only the capability protocols its hardware supports; the CLI,
-safety layer, and vision subsystem stay device-agnostic. A `make_driver(kind)`
+`kvm-pilot` is built on a modular, **driver-plugin** architecture so support can
+expand to many KVM/BMC devices (PiKVM family, Redfish BMCs, IPMI BMCs, JetKVM, …).
+Each device implements only the capability protocols its hardware supports; the
+CLI, safety layer, and vision subsystem stay device-agnostic. A `make_driver(kind)`
 registry (mirroring `make_backend`) builds drivers by name, and a hardware-free
 `FakeDriver` lets you exercise the whole loop — capabilities, safety gating, the
 analyzer — with no device (`kvm-pilot capabilities --driver fake`). See
@@ -315,7 +332,10 @@ bmc.read_sensors()["temperatures"]
 bmc.power_off(wait=True)       # mapped to the target's actual ResetType, gated
 ```
 
-It's on the CLI too — `kvm-pilot info --driver redfish --host idrac.lan …`.
+An **`IpmiDriver`** (`make_driver("ipmi")`) covers BMCs that predate Redfish
+(e.g. Dell iDRAC6) over the system `ipmitool`: power, boot-device control,
+sensors, the SEL event log, and an SOL serial console (`kvm-pilot console`).
+Both are on the CLI too — `kvm-pilot info --driver redfish --host idrac.lan …`.
 Capability-specific subcommands a BMC can't serve (`type`, `snapshot`, `events`)
 fail cleanly rather than crashing. Add `--redfish-auth basic` for an endpoint
 without a SessionService (emulators, or a BMC with session auth disabled).
@@ -323,9 +343,13 @@ without a SessionService (emulators, or a BMC with session auth disabled).
 ## Documentation
 
 Full user and developer docs live in [`docs/`](https://github.com/DustinTrap/kvm-pilot/tree/main/docs/) (architecture, design
-decisions, the Redfish reference, contributing, and the security policy). The
+decisions, the Redfish reference, the
+[troubleshooting & FAQ](https://github.com/DustinTrap/kvm-pilot/blob/main/docs/troubleshooting.md),
+contributing, and the security policy). The
 [project wiki](https://github.com/DustinTrap/kvm-pilot/wiki) is an
-auto-generated, nicely formatted mirror of that folder.
+auto-generated, nicely formatted mirror of that folder, and the repo root
+carries an [`llms.txt`](https://github.com/DustinTrap/kvm-pilot/blob/main/llms.txt)
+doc map for AI agents.
 
 ## License
 
