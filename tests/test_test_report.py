@@ -53,14 +53,25 @@ def test_snapshot_row_carries_conditions_on_pass_and_fail(tmp_path, monkeypatch)
     rc, rows, _ = _run(tmp_path)
     assert rows[0] and _caps(rows[0])["snapshot"]["conditions"]["resolution"] == "1920x1080"
 
-    # Failure injection: non-JPEG bytes. Conditions must STILL be recorded —
-    # a fail row without its operating point is the #180 contradiction machine.
+    # Failure injection: non-image bytes (neither JPEG nor PNG). Conditions must
+    # STILL be recorded — a fail row without its operating point is the #180
+    # contradiction machine.
     monkeypatch.setattr(FakeDriver, "snapshot", lambda self: b"\x00\x00\x00\x01junk")
     rc, rows, _ = _run(tmp_path / "b")
     snap = _caps(rows[0])["snapshot"]
     assert rc == 0 and snap["passed"] is False
-    assert "non-JPEG" in snap["outcome"]
+    assert "non-image" in snap["outcome"]
     assert snap["conditions"]["resolution"] == "1920x1080"
+
+
+def test_snapshot_row_accepts_png(tmp_path, monkeypatch):
+    # AMT KVM renders the framebuffer to PNG; test-report must record that as a
+    # PASS — the old JPEG-only check logged AMT's working BIOS shot as a failure.
+    monkeypatch.setattr(FakeDriver, "snapshot", lambda self: b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
+    rc, rows, _ = _run(tmp_path)
+    snap = _caps(rows[0])["snapshot"]
+    assert rc == 0 and snap["passed"] is True
+    assert "png" in snap["outcome"]
 
 
 def test_destructive_not_exercised_without_include(tmp_path):

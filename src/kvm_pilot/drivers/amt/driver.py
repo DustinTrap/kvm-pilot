@@ -178,8 +178,17 @@ class AmtDriver(PowerMixin, CapabilityMixin):
         return {}
 
     def get_firmware_info(self) -> dict:
-        """Firmware version for the healthcheck label (``amt@host#<ver>``)."""
-        return {"version": self._amt_version()}
+        """Normalized firmware identity — the path the run ledger + firmware
+        registry join on (a bare ``version`` records identity as ``fake/fake``).
+        Mirrors the Redfish driver's shape: vendor/product/version + raw fields."""
+        chassis = self._safe(self._chassis) or {}
+        return {
+            "vendor": chassis.get("manufacturer"),
+            "product": chassis.get("model"),
+            "version": self._amt_version(),
+            "manufacturer": chassis.get("manufacturer"),
+            "model": chassis.get("model"),
+        }
 
     def _amt_version(self) -> str | None:
         # AMT core version lives in the AMT_SetupAndConfigurationService or in a
@@ -704,7 +713,11 @@ class AmtDriver(PowerMixin, CapabilityMixin):
         p.write_bytes(self.snapshot())
         return p
 
-    def type_text(self, text: str) -> None:
+    def type_text(self, text: str, *, keymap: str = "en-us", slow: bool = False,
+                  delay: float = 0.0) -> None:
+        # keymap is a kvmd concept; AMT types keysyms directly. slow/delay are
+        # accepted for CLI/MCP signature parity (KVMClient.type_text) and honored
+        # as an optional inter-keystroke pause.
         if not self.safety.guard("hid.type_text", f"Type {len(text)} chars into {self.host} (AMT RFB)"):
             return
         from .rfb import key_to_keysym
@@ -712,6 +725,8 @@ class AmtDriver(PowerMixin, CapabilityMixin):
         r = self._hid_session()
         for ch in text:
             r.tap(key_to_keysym(ch))
+            if slow and delay:
+                time.sleep(delay)
 
     def press_key(self, key: str) -> None:
         if not self.safety.guard("hid.press_key", f"Press {key!r} on {self.host} (AMT RFB)"):
@@ -733,13 +748,35 @@ class AmtDriver(PowerMixin, CapabilityMixin):
         for s in reversed(syms):
             r.key(s, False)
 
+    # AMT's RFB pointer is absolute *pixels* (unlike kvmd's centered range), so
+    # mouse_move takes real screen pixels and the percent/pixel helpers map onto
+    # the live framebuffer's own width/height — more accurate than kvmd's guess.
+    # Moves are ungated (HID protocol: only keys/clicks are gated).
+
     def mouse_move(self, x: int, y: int) -> None:
-        # Mouse *moves* are not gated (matches the HID protocol — only keys/clicks).
         self._hid_session().pointer(int(x), int(y))
 
-    def mouse_click(self, button: str = "left") -> None:
-        if not self.safety.guard("hid.mouse_click", f"{button}-click on {self.host} (AMT RFB)"):
+    def mouse_move_pixels(self, x: int, y: int, width: int | None = None,
+                          height: int | None = None) -> None:
+        # AMT is already pixel-native; width/height are advisory (accepted for
+        # KVMClient.mouse_move_pixels parity).
+        self._hid_session().pointer(int(x), int(y))
+
+    def mouse_move_percent(self, x_pct: float, y_pct: float) -> None:
+        r = self._hid_session()
+        w = r.width or 1024
+        h = r.height or 768
+        px = round(max(0.0, min(1.0, x_pct)) * (w - 1))
+        py = round(max(0.0, min(1.0, y_pct)) * (h - 1))
+        r.pointer(px, py)
+
+    def mouse_click(self, button: str = "left", hold_ms: int = 50, double: bool = False) -> None:
+        if not self.safety.guard(
+            "hid.mouse_click", f"{button} {'double-click' if double else 'click'} on {self.host} (AMT RFB)"
+        ):
             return
         b = {"left": 1, "middle": 2, "right": 3}.get(button, 1)
-        self._hid_session().click(b)
+        r = self._hid_session()
+        for _ in range(2 if double else 1):
+            r.click(b)
 

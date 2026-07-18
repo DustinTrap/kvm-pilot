@@ -184,6 +184,22 @@ class IpmiDriver(PowerMixin, CapabilityMixin):
             info = {k: v for k, v in info.items() if k in fields}
         return info
 
+    def get_firmware_info(self) -> dict:
+        """Normalized firmware identity — the path the run ledger + firmware
+        registry join on (a driver without it records identity as ``fake/fake``).
+        Mirrors the Redfish/AMT shape: vendor/product/version + raw fields."""
+        try:
+            info = self.get_info()
+        except KVMPilotError:
+            info = {}
+        return {
+            "vendor": info.get("manufacturer"),
+            "product": info.get("model"),
+            "version": info.get("bmc_version"),
+            "manufacturer": info.get("manufacturer"),
+            "model": info.get("model"),
+        }
+
     # -- Power ----------------------------------------------------------
 
     def is_powered_on(self) -> bool:

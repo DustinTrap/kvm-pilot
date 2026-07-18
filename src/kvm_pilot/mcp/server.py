@@ -1099,7 +1099,15 @@ def _run_mouse(
     if coord_space == "percent":
         if host is not None:
             x, y, calibrated = maybe_apply(host, kvm, x, y)
-        hid.mouse_move(act.pct_to_kvmd(x), act.pct_to_kvmd(y))
+        # Prefer the driver's own percent mapping when it has one (AMT maps onto
+        # its real framebuffer pixels; kvmd maps onto its centered range). Falling
+        # back to pct_to_kvmd would feed a pixel-native driver (AMT) a negative
+        # kvmd value and throw — #181/AMT first-class.
+        move_pct = getattr(kvm, "mouse_move_percent", None)
+        if move_pct is not None:
+            move_pct(x, y)
+        else:
+            hid.mouse_move(act.pct_to_kvmd(x), act.pct_to_kvmd(y))
     elif coord_space == "raw":
         hid.mouse_move(int(x), int(y))
     else:  # pixel — needs a driver that reports its capture resolution
