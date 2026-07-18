@@ -674,10 +674,11 @@ class AmtDriver(PowerMixin, CapabilityMixin):
             self._hid.connect()
         return self._hid
 
-    def _reset_kvm_session(self) -> None:
+    def reset_kvm_session(self) -> None:
         """Force-clear a stuck single KVM session by cycling the SAP (disable→enable).
         AMT KVM allows one session at a time; a dropped one can wedge the port until
-        it times out, so we clear it deterministically before retrying."""
+        it times out, so we clear it deterministically before retrying. Exposed as
+        ``kvm-pilot amt reset-kvm`` (the analogue of GL's ``recover-hid``)."""
         try:
             self._kvm_sap_state(3)
             time.sleep(2)
@@ -700,7 +701,7 @@ class AmtDriver(PowerMixin, CapabilityMixin):
             except ConnectionError as e:  # reset / broken pipe — often a stuck single session
                 last = e
                 if attempt < 2:
-                    self._reset_kvm_session()
+                    self.reset_kvm_session()
         raise last  # type: ignore[misc]
 
     def snapshot_base64(self) -> str:
