@@ -3,7 +3,12 @@
 # Legs intentionally absent:
 #   - kvmd-testenv: upstream's recipe needs host devices (gpio_mockup, /dev/video0)
 #     and source bind-mounts -> not self-containable in compose; use `make kvmd-testenv`.
-#   - ipmi_sim: no IPMI driver exists yet (#62); joins here when it lands.
+#   - ipmi_sim: the IPMI driver landed (#62) and has an env-gated external leg
+#     (tests/integration/test_ipmi_external.py, KVM_PILOT_IPMI_HOST); Fedora's
+#     OpenIPMI ipmi_sim isn't packaged as a self-contained image, so it stays a
+#     `make`/CI concern rather than a compose leg here.
+#   - amt: no self-contained WS-Man emulator to pin (the AMT external leg,
+#     tests/integration/test_amt_external.py, is env-gated on KVM_PILOT_AMT_HOST).
 services:
   redfish:
     # Same emulator + version the CI redfish-integration job pip-installs
