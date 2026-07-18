@@ -74,6 +74,28 @@
           }
         }
       ]
+    },
+    {
+      "vendor": "dell",
+      "product": "Latitude 5411",
+      "versions": [
+        {
+          "version": "AMT 14.1.67",
+          "maturity": {
+            "level": "beta",
+            "capabilities": {
+              "boot_config": "beta",
+              "enable_kvm": "beta",
+              "enable_sol": "beta",
+              "healthcheck": "beta",
+              "info": "beta",
+              "power": "beta",
+              "power_state": "beta",
+              "snapshot": "beta"
+            }
+          }
+        }
+      ]
     }
   ]
 }
