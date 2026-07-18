@@ -547,3 +547,66 @@ def test_zrle_plain_rle():
 def test_zrle_palette_rle():
     # palette [red, blue]; index 0 with run (0x80 + len 2), then index 1 (run 1)
     assert _zrle([130, 0x00, 0xF8, 0x1F, 0x00, 0x80, 2, 1]) == [0xF800, 0xF800, 0xF800, 0x001F]
+
+
+# -- healthcheck (AMT posture + quirks) -----------------------------------
+
+
+def _health(amt_emu):
+    from kvm_pilot.health import run_healthcheck
+
+    return {r.id: r for r in run_healthcheck(make(amt_emu)).results}
+
+
+def test_healthcheck_flags_plaintext_transport(amt_emu):
+    from kvm_pilot.health import Severity
+
+    assert _health(amt_emu)["amt-transport"].severity is Severity.WARNING  # amt_tls default False
+
+
+def test_healthcheck_critical_when_unprovisioned(amt_emu):
+    from kvm_pilot.health import Severity
+
+    amt_emu.state.provisioning_state = "0"  # pre-provisioning
+    assert _health(amt_emu)["amt-provisioning"].severity is Severity.CRITICAL
+
+
+def test_healthcheck_flags_kvm_consent_off(amt_emu):
+    from kvm_pilot.health import Severity
+
+    amt_emu.state.kvm_5900 = "true"
+    amt_emu.state.kvm_optin_policy = "false"
+    amt_emu.state.optin_required = "0"
+    assert _health(amt_emu)["amt-kvm-consent"].severity is Severity.WARNING
+
+
+def test_healthcheck_redirection_ok_when_listeners_on(amt_emu):
+    from kvm_pilot.health import Severity
+
+    amt_emu.state.redir_listener = "true"
+    amt_emu.state.kvm_5900 = "true"
+    assert _health(amt_emu)["amt-redirection"].severity is Severity.OK
+
+
+def test_healthcheck_reports_amt_quirks(amt_emu):
+    detail = _health(amt_emu)["firmware-quirks"].detail
+    assert "kvm-single-session" in detail
+    assert "kvm-graphical-only" in detail
+
+
+def test_amt_health_is_memoized(amt_emu):
+    # The AMT checks share ONE amt_health() read set — AMT flood-protects bursts.
+    drv = make(amt_emu)
+    drv.amt_health()
+    before = len(amt_emu.state.calls)
+    drv.amt_health()  # cached: no new WS-Man calls
+    assert len(amt_emu.state.calls) == before
+
+
+def test_healthcheck_skips_amt_checks_on_non_amt_driver():
+    # amt_health-guarded checks must self-skip on other drivers (fake has no amt_health).
+    from kvm_pilot.drivers.fake import FakeDriver
+    from kvm_pilot.health import run_healthcheck
+
+    ids = {r.id for r in run_healthcheck(FakeDriver()).results}
+    assert not any(i.startswith("amt-") for i in ids)

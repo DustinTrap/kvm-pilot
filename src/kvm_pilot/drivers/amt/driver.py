@@ -545,6 +545,79 @@ class AmtDriver(PowerMixin, CapabilityMixin):
                 "(env KVM_PILOT_AMT_KVM_PASSWORD) to a compliant value."
             )
 
+    def _rfb_password_ok(self) -> bool:
+        try:
+            self._check_rfb_password()
+            return True
+        except KVMPilotError:
+            return False
+
+    def amt_health(self) -> dict:
+        """AMT posture for the healthcheck — provisioning, control mode, transport
+        TLS, the SOL/KVM listener state, and the user-consent posture. Best-effort
+        (each field independent) and **memoized** so a healthcheck's several AMT
+        checks share ONE set of WS-Man reads — AMT flood-protects rapid bursts."""
+        if getattr(self, "_amt_health_cache", None) is None:
+            redir = self._safe(lambda: self._wsman.get(amt("AMT_RedirectionService"), self._REDIR_SVC_SEL))
+            kvm = self._safe(lambda: self._wsman.get(self._KVM_SD, self._KVM_SD_SEL))
+            optin = self._safe(lambda: self._wsman.get(self._OPTIN))
+
+            def _b(el: Any, tag: str) -> bool | None:
+                if el is None:
+                    return None
+                v = findtext(el, tag)
+                return None if v is None else v.strip().lower() == "true"
+
+            consent = None
+            if kvm is not None or optin is not None:
+                policy = _b(kvm, "OptInPolicy")
+                required = (findtext(optin, "OptInRequired") if optin is not None else None)
+                consent = bool(policy) or (required is not None and required.strip() != "0")
+            self._amt_health_cache = {
+                "tls": self._tls,
+                "provisioning_state": self._provisioning_state(),
+                "control_mode": self._control_mode(),
+                "sol_listener": _b(redir, "ListenerEnabled"),
+                "kvm_5900": _b(kvm, "Is5900PortEnabled"),
+                "kvm_consent_required": consent,
+                "rfb_password_ok": self._rfb_password_ok(),
+            }
+        return self._amt_health_cache
+
+    def known_quirks(self, firmware: str | None = None) -> list:
+        """AMT device/firmware quirks for the healthcheck (reuses the shared Quirk
+        dataclass). All observed live on a Dell Latitude 5411 (AMT 14.1.67)."""
+        from ..glkvm import Quirk
+
+        quirks = [
+            Quirk(id="kvm-single-session",
+                  summary="AMT KVM allows ONE redirection session; a dropped one can wedge "
+                          "port 5900 until it times out.",
+                  workaround="snapshot() cycles the KVM SAP and retries; clear a wedged session "
+                             "with `kvm-pilot amt reset-kvm`. Keep SessionTimeout non-zero.",
+                  source="observed"),
+            Quirk(id="kvm-graphical-only",
+                  summary="AMT KVM captures graphical framebuffers (BIOS/POST/GRUB/GUI) but NOT "
+                          "legacy VGA text mode — it resets right after the framebuffer request.",
+                  workaround="Capture at a graphical screen; a reset at that exact point means "
+                             "'unsupported display mode', not a driver fault.",
+                  source="observed"),
+            Quirk(id="boot-override-write-only",
+                  summary="The pending single-use boot *source* override is write-only — "
+                          "CIM_BootConfigSetting returns no BootOrder.",
+                  workaround="get_boot_options() reports override_readable=false; confirm the "
+                             "override by observing the next boot (SOL/KVM), not by reading it.",
+                  source="observed"),
+            Quirk(id="consent-mandatory-in-ccm",
+                  summary="In Client Control Mode, KVM user-consent is mandatory and cannot be "
+                          "disabled (only Admin Control Mode allows consent-off).",
+                  workaround="Use enable_kvm(require_consent=True) in CCM, or re-provision the ME "
+                             "in Admin Control Mode.",
+                  source="documented"),
+        ]
+        fw = firmware if firmware is not None else self._safe(self._amt_version)
+        return [q for q in quirks if q.applies_to(fw)]
+
     # -- SerialConsole (SOL via amtterm) --------------------------------
     #
     # AMT Serial-over-LAN relays the host's serial console as text — BIOS/GRUB
