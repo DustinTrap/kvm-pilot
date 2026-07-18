@@ -13,7 +13,15 @@ import pytest
 from kvm_pilot.drivers.amt import AmtDriver
 from kvm_pilot.drivers.amt.wsman import WsmanError
 from kvm_pilot.drivers.base import Capability
-from kvm_pilot.errors import AuthError, CapabilityError, KVMPilotError, SafetyError
+from kvm_pilot.errors import (
+    AuthError,
+    CapabilityError,
+    ConnectionError,
+    KVMPilotError,
+    ProtocolError,
+    SafetyError,
+)
+from kvm_pilot.errors import TimeoutError as KpTimeoutError
 from kvm_pilot.safety import deny_all
 
 
@@ -610,3 +618,588 @@ def test_healthcheck_skips_amt_checks_on_non_amt_driver():
 
     ids = {r.id for r in run_healthcheck(FakeDriver()).results}
     assert not any(i.startswith("amt-") for i in ids)
+
+
+# -- WS-Man transport-fault taxonomy --------------------------------------
+# Each transport failure must map onto the right kvm-pilot error type, and the
+# password must never leak into a raised message. is_powered_on() is the probe
+# (its first WS-Man POST is the Enumerate that trips each knob).
+
+
+def test_http_500_becomes_wsman_error(amt_emu):
+    amt_emu.state.http_status = 500
+    with pytest.raises(WsmanError):
+        make(amt_emu).is_powered_on()
+
+
+def test_read_timeout_becomes_timeout_error(amt_emu):
+    # The server stalls past the client deadline -> a WS-Man timeout, not a hang.
+    amt_emu.state.delay = 0.6
+    drv = AmtDriver("127.0.0.1", "admin", "secret", port=amt_emu.port, timeout=0.2, confirm=lambda *_: True)
+    with pytest.raises(KpTimeoutError):
+        drv.is_powered_on()
+
+
+def test_connection_refused_becomes_connection_error():
+    import socket
+
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()  # nothing listens here now
+    drv = AmtDriver("127.0.0.1", "admin", "secret", port=port, timeout=1.0, confirm=lambda *_: True)
+    with pytest.raises(ConnectionError):
+        drv.is_powered_on()
+
+
+def test_non_xml_body_becomes_protocol_error(amt_emu):
+    amt_emu.state.garbage_body = True
+    with pytest.raises(ProtocolError):
+        make(amt_emu).is_powered_on()
+
+
+def test_error_body_redacts_the_password(amt_emu):
+    # A fault body that echoes the admin password must never surface it verbatim.
+    amt_emu.state.http_status = 500
+    amt_emu.state.error_body = "<fault>admin password secret leaked here</fault>"
+    with pytest.raises(WsmanError) as ei:
+        make(amt_emu).is_powered_on()
+    msg = str(ei.value)
+    assert "secret" not in msg          # the raw credential is gone…
+    assert "REDACTED" in msg            # …replaced by the redaction marker
+
+
+# -- WS-Man device-refused + enumeration behaviour ------------------------
+
+
+def test_power_nonzero_return_raises(amt_emu):
+    # HTTP-200 but ReturnValue != 0 = the ME accepted the SOAP and refused the op.
+    amt_emu.state.nonzero_methods = {"RequestPowerStateChange"}
+    with pytest.raises(WsmanError):
+        make(amt_emu).power_on()
+
+
+def test_change_boot_order_nonzero_return_raises(amt_emu):
+    amt_emu.state.nonzero_methods = {"ChangeBootOrder"}
+    with pytest.raises(WsmanError):
+        make(amt_emu).set_boot_device("pxe")
+
+
+def test_set_boot_config_role_nonzero_return_raises(amt_emu):
+    # ChangeBootOrder succeeds; the single-use SetBootConfigRole is what's refused.
+    amt_emu.state.nonzero_methods = {"SetBootConfigRole"}
+    with pytest.raises(WsmanError):
+        make(amt_emu).set_boot_device("pxe")
+
+
+def test_kvm_sap_nonzero_return_raises(amt_emu):
+    amt_emu.state.nonzero_methods = {"RequestStateChange"}
+    with pytest.raises(WsmanError):
+        make(amt_emu, kvm_password="Abcd123!").enable_kvm()
+
+
+def test_enumerate_follows_pull_pagination(amt_emu):
+    # AMT returns a continuation context before EndOfSequence; the driver pulls twice.
+    amt_emu.state.enum_pages = True
+    assert make(amt_emu).is_powered_on() in (True, False)
+    assert amt_emu.state.pull_count == 2  # first page + the continuation page
+
+
+def test_is_powered_on_raises_without_powerstate(amt_emu):
+    # The association instance exists but omits PowerState -> we must not guess.
+    amt_emu.state.power_state_missing = True
+    with pytest.raises(WsmanError):
+        make(amt_emu).is_powered_on()
+
+
+def test_is_powered_on_raises_on_empty_enumeration(amt_emu):
+    # An Enumerate with no context yields no instances -> no PowerState to read.
+    amt_emu.state.enum_no_context = True
+    with pytest.raises(WsmanError):
+        make(amt_emu).is_powered_on()
+
+
+def test_amt_version_falls_back_to_software_identity(amt_emu):
+    # When AMT_SetupAndConfigurationService omits the version, the driver recovers
+    # it from a CIM_SoftwareIdentity whose InstanceID marks it as the AMT firmware.
+    amt_emu.state.amt_setup_no_version = True
+    assert make(amt_emu).get_firmware_info()["version"] == "16.1.25"
+
+
+def test_amt_version_none_when_nothing_reports_it(amt_emu):
+    amt_emu.state.amt_setup_no_version = True
+    amt_emu.state.swid_no_amt = True  # and no AMT-shaped SoftwareIdentity to fall back on
+    assert make(amt_emu).get_firmware_info()["version"] is None
+
+
+def test_get_info_tolerates_missing_chassis_and_uuid(amt_emu):
+    # Best-effort identity: a firmware that omits these classes blanks only them.
+    amt_emu.state.suppress_classes = {"CIM_Chassis", "CIM_ComputerSystemPackage"}
+    info = make(amt_emu).get_info()
+    assert info["manufacturer"] is None
+    assert info["uuid"] is None
+    assert info["amt_version"] == "16.1.25"  # unrelated lookups still succeed
+
+
+# -- amt_health resilience ------------------------------------------------
+
+
+def test_amt_health_tolerates_total_failure(amt_emu):
+    # Every WS-Man read faults -> amt_health still returns a full dict (all-None
+    # posture), never raising into the healthcheck.
+    amt_emu.state.fault_reason = "ME busy"
+    h = make(amt_emu).amt_health()
+    assert h["sol_listener"] is None
+    assert h["kvm_5900"] is None
+    assert h["control_mode"] is None          # IPS_HostBasedSetupService unreadable
+    assert h["kvm_consent_required"] is None  # neither KVM settings nor OptIn readable
+
+
+def test_amt_health_reports_valid_rfb_password(amt_emu):
+    # A compliant 8-char RFB credential reads back as OK in the posture.
+    h = make(amt_emu, kvm_password="Abcd123!").amt_health()
+    assert h["rfb_password_ok"] is True
+
+
+# -- SOL activation over a PTY (amtterm child) ----------------------------
+# Mirrors the IPMI SOL-over-PTY test: fake the PTY + amtterm child so the real
+# _sol_activate path is exercised without spawning anything.
+
+
+def _fake_sol(monkeypatch, master: int = 7, slave: int = 8):
+    import types
+
+    from kvm_pilot.drivers.amt import driver as amt_mod
+
+    rec = types.SimpleNamespace(argv=None, env=None, popens=0, set_blocking=[], closed=[])
+
+    class FakeProc:
+        def __init__(self, argv, **kw):
+            rec.argv, rec.env, rec.popens = argv, kw.get("env"), rec.popens + 1
+
+        def poll(self):
+            return None  # a live child
+
+    import pty  # the driver imports this lazily; patch the shared module object
+
+    monkeypatch.setattr(amt_mod.shutil, "which", lambda _n: "/usr/bin/amtterm")
+    monkeypatch.setattr(amt_mod.subprocess, "Popen", FakeProc)
+    monkeypatch.setattr(pty, "openpty", lambda: (master, slave))
+    monkeypatch.setattr(amt_mod.os, "close", lambda fd: rec.closed.append(fd))
+    monkeypatch.setattr(amt_mod.os, "set_blocking", lambda fd, b: rec.set_blocking.append((fd, b)))
+    return rec
+
+
+def test_sol_activate_spawns_amtterm_over_pty(amt_emu, monkeypatch):
+    rec = _fake_sol(monkeypatch)
+    drv = make(amt_emu)
+    fd = drv._sol_activate()
+    assert fd == 7
+    assert rec.argv == ["amtterm", "127.0.0.1", "16994"]   # host + SOL port, not the WS-Man port
+    assert rec.env["AMT_PASSWORD"] == "secret"             # password via env…
+    assert "secret" not in rec.argv                        # …never argv/ps
+    assert (7, False) in rec.set_blocking                  # master set non-blocking
+    assert 8 in rec.closed                                 # slave closed in the parent
+    # A live child (poll()->None) is reused: no second Popen, same fd.
+    assert drv._sol_activate() == 7
+    assert rec.popens == 1
+
+
+def test_serial_read_requires_amtterm(amt_emu, monkeypatch):
+    # The read/write pair activates lazily; a missing amtterm fails clearly there too
+    # (not only on the interactive console path).
+    from kvm_pilot.drivers.amt import driver as amt_mod
+
+    monkeypatch.setattr(amt_mod.shutil, "which", lambda _n: None)
+    with pytest.raises(CapabilityError):
+        make(amt_emu).serial_read()
+
+
+def test_serial_read_and_write_are_noops_under_dry_run(amt_emu, monkeypatch):
+    from kvm_pilot.drivers.amt import driver as amt_mod
+
+    monkeypatch.setattr(amt_mod.shutil, "which", lambda _n: "/usr/bin/amtterm")
+    drv = AmtDriver("127.0.0.1", "admin", "secret", port=amt_emu.port, dry_run=True)
+    assert drv.serial_read(timeout=0.1) == ""  # gate skips activation -> fd None
+    drv.serial_write("x")                        # no fd -> quietly does nothing
+
+
+def test_serial_read_breaks_on_pty_eio(amt_emu, monkeypatch):
+    import socket
+
+    from kvm_pilot.drivers.amt import driver as amt_mod
+
+    a, b = socket.socketpair()
+    try:
+        drv = make(amt_emu)
+        monkeypatch.setattr(drv, "_sol_activate", lambda: a.fileno())
+        b.sendall(b"x")  # make the fd readable so select() returns it
+        monkeypatch.setattr(
+            amt_mod.os, "read", lambda *_a: (_ for _ in ()).throw(OSError("EIO"))
+        )
+        assert drv.serial_read(timeout=0.5) == ""  # EIO on the dead PTY -> empty, not a crash
+    finally:
+        a.close()
+        b.close()
+
+
+def test_serial_read_stops_on_peer_close(amt_emu, monkeypatch):
+    import socket
+
+    a, b = socket.socketpair()
+    try:
+        drv = make(amt_emu)
+        monkeypatch.setattr(drv, "_sol_activate", lambda: a.fileno())
+        b.close()  # peer gone -> fd readable, os.read returns b"" (EOF)
+        assert drv.serial_read(timeout=0.5) == ""
+    finally:
+        a.close()
+
+
+# -- SOL / RFB teardown (serial_close + close) ----------------------------
+
+
+class _FakeProc:
+    def __init__(self, wait_raises: bool = False):
+        self.terminated = self.killed = self.waited = False
+        self._wait_raises = wait_raises
+
+    def poll(self):
+        return None
+
+    def terminate(self):
+        self.terminated = True
+
+    def wait(self, timeout=None):
+        self.waited = True
+        if self._wait_raises:
+            raise subprocess_TimeoutExpired()
+
+    def kill(self):
+        self.killed = True
+
+
+def subprocess_TimeoutExpired():  # small factory so the class body stays import-light
+    import subprocess
+
+    return subprocess.TimeoutExpired(cmd="amtterm", timeout=5)
+
+
+def test_serial_close_terminates_child_and_frees_fd(amt_emu):
+    import os
+
+    drv = make(amt_emu)
+    proc = _FakeProc()
+    r, w = os.pipe()  # a real fd so os.close(fd) actually runs
+    drv._sol, drv._sol_fd = proc, r
+    drv.serial_close()
+    assert proc.terminated and proc.waited and not proc.killed
+    assert drv._sol is None and drv._sol_fd is None
+    os.close(w)  # r is already closed by serial_close
+
+
+def test_serial_close_kills_when_wait_times_out(amt_emu):
+    drv = make(amt_emu)
+    proc = _FakeProc(wait_raises=True)
+    drv._sol, drv._sol_fd = proc, 10_000_007  # a bogus fd -> os.close swallows EBADF
+    drv.serial_close()
+    assert proc.terminated and proc.killed  # terminate then, on the wait timeout, kill
+
+
+def test_close_tears_down_sol_and_hid(amt_emu):
+    drv = make(amt_emu)
+    proc = _FakeProc()
+    drv._sol, drv._sol_fd = proc, None
+
+    class _Hid:
+        closed = False
+
+        def close(self):
+            self.closed = True
+
+    hid = _Hid()
+    drv._hid = hid
+    drv.close()
+    assert proc.terminated             # SOL child stopped
+    assert hid.closed                  # RFB HID session closed
+    assert drv._hid is None
+
+
+def test_close_with_no_hid_is_safe(amt_emu):
+    # close() with only a SOL child (no RFB HID session) tears down and returns.
+    drv = make(amt_emu)
+    proc = _FakeProc()
+    drv._sol, drv._sol_fd = proc, None
+    drv.close()
+    assert proc.terminated and drv._hid is None
+
+
+def test_close_swallows_hid_close_error(amt_emu):
+    drv = make(amt_emu)
+
+    class _BadHid:
+        def close(self):
+            raise RuntimeError("already gone")
+
+    drv._hid = _BadHid()
+    drv.close()  # must not raise despite the HID teardown throwing
+    assert drv._hid is None
+
+
+# -- reset_kvm_session + snapshot single-session retry --------------------
+
+
+def test_reset_kvm_session_swallows_wsman_errors(amt_emu, monkeypatch):
+    from kvm_pilot.drivers.amt import driver as amt_mod
+
+    monkeypatch.setattr(amt_mod.time, "sleep", lambda *_a: None)  # no real 5s wait
+    amt_emu.state.fault_reason = "SAP busy"
+    make(amt_emu).reset_kvm_session()  # a WS-Man fault mid-cycle is best-effort -> no raise
+
+
+def _driver_wsman_and_rfb(amt_emu, amt_rfb, **kw) -> AmtDriver:
+    return AmtDriver(
+        "127.0.0.1", "admin", "secret",
+        port=amt_emu.port, kvm_port=amt_rfb.port, kvm_password="rfbpass",
+        confirm=lambda *_: True, **kw,
+    )
+
+
+def test_snapshot_cycles_sap_and_retries_after_a_dropped_session(amt_emu, amt_rfb, monkeypatch):
+    from kvm_pilot.drivers.amt import driver as amt_mod
+
+    monkeypatch.setattr(amt_mod.time, "sleep", lambda *_a: None)  # skip reset_kvm_session's waits
+    amt_rfb.drop_first = 1  # the first KVM connection is wedged/dropped
+    png = _driver_wsman_and_rfb(amt_emu, amt_rfb).snapshot()
+    assert png[:8] == b"\x89PNG\r\n\x1a\n"                 # the retry succeeded
+    assert amt_emu.state.kvm_sap_requests == ["3", "2"]   # SAP cycled disable(3)->enable(2)
+
+
+def test_snapshot_reraises_when_every_attempt_drops(amt_emu, amt_rfb, monkeypatch):
+    from kvm_pilot.drivers.amt import driver as amt_mod
+
+    monkeypatch.setattr(amt_mod.time, "sleep", lambda *_a: None)
+    amt_rfb.drop_first = 5  # more than the 3 attempts -> the ConnectionError survives
+    with pytest.raises(ConnectionError):
+        _driver_wsman_and_rfb(amt_emu, amt_rfb).snapshot()
+
+
+# -- RFB handshake + transport error mapping ------------------------------
+
+
+def _rfb(port: int, password: str = "rfbpass"):
+    from kvm_pilot.drivers.amt.rfb import Rfb
+
+    return Rfb("127.0.0.1", port, password, timeout=5.0)
+
+
+def test_handshake_rejects_non_rfb_server(amt_rfb):
+    amt_rfb.bad_protocol = True
+    with pytest.raises(ProtocolError):
+        _rfb(amt_rfb.port).connect()
+
+
+def test_handshake_surfaces_reason_string_then_drop(amt_rfb):
+    amt_rfb.reason_drop = True
+    with pytest.raises(AuthError):
+        _rfb(amt_rfb.port).connect()
+
+
+def test_handshake_rejects_when_no_vnc_auth_offered(amt_rfb):
+    amt_rfb.no_vnc_auth = True
+    with pytest.raises(AuthError):
+        _rfb(amt_rfb.port).connect()
+
+
+def test_handshake_rejects_non_16bpp_framebuffer(amt_rfb):
+    amt_rfb.bad_bpp = True
+    with pytest.raises(ProtocolError):
+        _rfb(amt_rfb.port).connect()
+
+
+def test_connect_to_closed_port_raises_connection_error():
+    import socket
+
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()
+    with pytest.raises(ConnectionError):
+        _rfb(port).connect()
+
+
+def test_recv_maps_peer_close_to_connection_error(amt_rfb):
+    amt_rfb.drop_first = 1  # closed before the RFB banner -> _recv sees EOF
+    with pytest.raises(ConnectionError):
+        _rfb(amt_rfb.port).connect()
+
+
+def test_recv_maps_socket_error_to_connection_error(amt_rfb):
+    r = _rfb(amt_rfb.port)
+    r.connect()
+    r._sock.setblocking(False)  # no pending data -> recv raises BlockingIOError (OSError)
+    with pytest.raises(ConnectionError):
+        r._recv(1)
+
+
+def test_send_on_dropped_socket_raises_connection_error(amt_rfb):
+    r = _rfb(amt_rfb.port)
+    r.connect()
+    r._sock.close()  # AMT dropped us; the socket object is still set
+    with pytest.raises(ConnectionError):
+        r.key(0xFF0D, True)  # _send -> sendall on a closed socket
+
+
+def test_close_is_safe_without_connect():
+    _rfb(1).close()  # _sock is None -> a no-op teardown
+
+
+# -- RFB multi-frame / RLE / DesktopSize / control-message plumbing -------
+
+
+def test_snapshot_assembles_tiles_across_updates(amt_rfb):
+    # AMT sends the screen as many small tiles spread over several update messages.
+    amt_rfb.tile_mode = True
+    png = make_rfb(amt_rfb).snapshot()
+    assert _png_dims(png) == (amt_rfb.width, amt_rfb.height)
+    assert _png_first_pixel(png) == (255, 0, 0, 255)  # tile (0,0) is still red
+
+
+def test_snapshot_decodes_an_rle_rect_end_to_end(amt_rfb):
+    # A single RLE(16) rect through a real standard-zlib stream must round-trip.
+    amt_rfb.rle_mode = True
+    png = make_rfb(amt_rfb).snapshot()
+    assert _png_dims(png) == (amt_rfb.width, amt_rfb.height)
+    assert _png_first_pixel(png) == (255, 0, 0, 255)
+
+
+def test_snapshot_restarts_on_desktop_resize(amt_rfb):
+    # A DesktopSize(-223) pseudo-rect forces the client to restart the capture at
+    # the new geometry rather than mis-assembling the old one.
+    amt_rfb.resize_first_to = (3, 2)
+    png = make_rfb(amt_rfb).snapshot()
+    assert _png_dims(png) == (3, 2)
+    assert _png_first_pixel(png) == (255, 0, 0, 255)  # solid (resized) frame
+
+
+def test_snapshot_ignores_bell_and_cuttext(amt_rfb):
+    # Bell(2) / ServerCutText(3) interleaved with updates must be skipped, not fatal.
+    amt_rfb.inject_control = True
+    png = make_rfb(amt_rfb).snapshot()
+    assert _png_dims(png) == (amt_rfb.width, amt_rfb.height)
+    assert _png_first_pixel(png) == (255, 0, 0, 255)
+
+
+def test_snapshot_rejects_unsupported_rect_encoding(amt_rfb):
+    amt_rfb.bad_encoding = True
+    with pytest.raises(ProtocolError):
+        make_rfb(amt_rfb).snapshot()
+
+
+def test_snapshot_rejects_unexpected_server_message(amt_rfb):
+    amt_rfb.bad_message = True
+    with pytest.raises(ProtocolError):
+        make_rfb(amt_rfb).snapshot()
+
+
+def test_snapshot_gives_up_if_size_keeps_changing(amt_rfb):
+    amt_rfb.always_resize = True  # every update is a DesktopSize -> never converges
+    with pytest.raises(ProtocolError):
+        make_rfb(amt_rfb).snapshot()
+
+
+def test_snapshot_rejects_zero_sized_framebuffer():
+    from amt_rfb_emulator import AmtRfbEmulator
+
+    with AmtRfbEmulator(width=0, height=2, pixels=[]) as e:
+        drv = AmtDriver(
+            "127.0.0.1", "admin", "secret",
+            kvm_port=e.port, kvm_password="rfbpass", confirm=lambda *_: True,
+        )
+        with pytest.raises(ProtocolError):
+            drv.snapshot()
+
+
+# -- ZRLE tile edge cases + web-code keysyms ------------------------------
+
+
+def test_zrle_unknown_subencoding_raises():
+    from kvm_pilot.drivers.amt.rfb import _decode_zrle_tile
+
+    with pytest.raises(ProtocolError):
+        _decode_zrle_tile(bytes([17]), 2, 2)   # 17: neither packed-palette (<=16) nor RLE
+    with pytest.raises(ProtocolError):
+        _decode_zrle_tile(bytes([129]), 2, 2)  # 129: not plain-RLE(128), not palette-RLE(>=130)
+
+
+def test_zrle_plain_rle_run_exceeds_255():
+    # A run longer than 255 continues with 0xFF bytes: run = 1 + 255 + 1 = 257.
+    assert _zrle([128, 0x00, 0xF8, 255, 1]) == [0xF800] * 4  # solid red, truncated to the tile
+
+
+def test_zrle_palette_rle_run_exceeds_255():
+    # Palette-RLE with a >255 run: index 0 (high bit set) then 0xFF-continuation.
+    assert _zrle([130, 0x00, 0xF8, 0x1F, 0x00, 0x80, 255, 1]) == [0xF800] * 4
+
+
+def test_key_to_keysym_web_codes_and_unknown():
+    from kvm_pilot.drivers.amt.rfb import key_to_keysym
+
+    assert key_to_keysym("KeyA") == ord("a")     # KeyA..KeyZ -> the literal letter
+    assert key_to_keysym("Digit1") == ord("1")   # Digit0..Digit9 -> the literal digit
+    with pytest.raises(KVMPilotError):
+        key_to_keysym("NoSuchKey")
+
+
+# -- HID gating on the remaining verbs ------------------------------------
+
+
+def test_type_text_slow_paces_keystrokes(amt_rfb):
+    # slow=True with a real delay walks the inter-keystroke sleep path.
+    make_rfb(amt_rfb).type_text("hi", slow=True, delay=0.001)
+    assert _wait_for(lambda: len(amt_rfb.keys) >= 4)
+
+
+def test_type_text_dry_run_sends_nothing(amt_rfb):
+    make_rfb(amt_rfb, dry_run=True).type_text("hi")
+    assert not _wait_for(lambda: len(amt_rfb.keys) >= 1, timeout=0.3)
+
+
+def test_send_shortcut_dry_run_sends_nothing(amt_rfb):
+    make_rfb(amt_rfb, dry_run=True).send_shortcut("Ctrl+Alt+Delete")
+    assert not _wait_for(lambda: len(amt_rfb.keys) >= 1, timeout=0.3)
+
+
+def test_mouse_click_dry_run_sends_no_button(amt_rfb):
+    drv = make_rfb(amt_rfb, dry_run=True)
+    drv.mouse_move(1, 1)     # moves are ungated -> the pointer still lands
+    drv.mouse_click("left")  # the click is gated -> skipped under dry-run
+    assert _wait_for(lambda: len(amt_rfb.pointers) >= 1)
+    assert all(mask == 0 for mask, _, _ in amt_rfb.pointers)  # no press/release mask
+
+
+# -- WS-Man helper functions (unit) ---------------------------------------
+
+
+def test_wsman_tls_builds_https_opener():
+    # Constructing with tls=True wires the HTTPS handler and an https:// URL
+    # (no connection is opened here).
+    from kvm_pilot.drivers.amt.wsman import Wsman
+
+    w = Wsman("127.0.0.1", "admin", "secret", port=16993, tls=True)
+    assert w._url.startswith("https://")
+
+
+def test_wsman_small_helpers():
+    from xml.etree import ElementTree as ET
+
+    from kvm_pilot.drivers.amt import wsman as W
+
+    assert W._first(None, "", "x") == "x"   # first truthy value wins
+    assert W._first(None, "", None) == ""   # all falsy -> empty string
+    # _body_child: no <Body> yields the root; an empty <Body> yields the Body itself.
+    assert W._body_child(ET.fromstring("<Envelope/>")).tag == "Envelope"
+    empty = ET.fromstring(f'<s:Envelope xmlns:s="{W._S}"><s:Body/></s:Envelope>')
+    assert W._local(W._body_child(empty).tag) == "Body"
+    el = ET.fromstring("<a xmlns='n'><b/><b/></a>")
+    assert len(W.findall_local(el, "b")) == 2
