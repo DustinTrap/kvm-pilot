@@ -6,6 +6,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.0b9] — 2026-07-18
+
+**Beta 9 — the Intel AMT / vPro driver, live-validated and brought to first-class
+parity.** A new out-of-band driver for business Intel laptops & desktops (the
+firmware plane a capture-KVM can't see on a laptop), validated on real hardware
+and held to the same test/reliability/docs bar as the mature drivers — plus a new
+["Writing a first-class driver" guide](docs/plugin-development.md) codifying that
+bar, and the cross-plugin fixes AMT surfaced.
+
 ### Added
 - **Intel AMT / vPro driver** (`make_driver("amt")`, `--driver amt`,
   [`drivers/amt/`](src/kvm_pilot/drivers/amt/), #211) — the most fully-featured
@@ -36,13 +45,26 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   opt-in (Admin Control Mode only — rejected in Client Control Mode). The RFB
   password is validated as **exactly 8 chars** with complexity (AMT's rule) with
   a clear error.
-- **AMT KVM live-validated** on a Dell Latitude 5411 (AMT 14.1.67): captured a
-  full **1920×1080 BIOS/POST screenshot** over AMT — the firmware screen an
-  HDMI-capture KVM can't see. The RFB client now speaks AMT's real protocol:
-  replies `RFB 003.008` to AMT's `RFB 004.000`, keeps the native **16-bpp
-  RGB565** (no `SetPixelFormat`), advertises **RAW + RLE(16) + DesktopSize**, and
-  decodes AMT's **ZRLE tiles** (standard-zlib stream). WS-Man Power / SystemInfo /
-  single-use BootConfig and the SOL/KVM enablement were also exercised live.
+- **AMT KVM live-validated** on a Dell Latitude 5411 (AMT 14.1.67, derived
+  maturity **beta**): captured a full **1920×1080 BIOS/POST screenshot** over AMT
+  — the firmware screen an HDMI-capture KVM can't see. The RFB client speaks AMT's
+  real protocol: replies `RFB 003.008` to AMT's `RFB 004.000`, keeps the native
+  **16-bpp RGB565** (no `SetPixelFormat`), advertises **RAW + RLE(16) +
+  DesktopSize**, and decodes AMT's **ZRLE tiles** (standard-zlib stream). WS-Man
+  Power / SystemInfo / single-use BootConfig, the SOL channel (via `amtterm`), and
+  the remote SOL/KVM enablement were all exercised live.
+- **AMT is a first-class citizen.** CLI `kvm-pilot amt <enable-sol|enable-kvm
+  [--no-consent]|reset-kvm>` and MCP `amt_enable` (consent-off behind a dedicated
+  `KVM_PILOT_MCP_ALLOW_CONSENT_OFF` gate); five AMT healthcheck checks (transport
+  TLS, provisioning/control-mode, redirection-listener, KVM-consent, RFB password)
+  + `known_quirks()`; a cross-driver benchmark `get_boot_options` op; and full
+  docs on every surface (skill, MCP README, decisions, configuration, …). Test
+  coverage for the `amt` package is **99%** (unit + emulator-over-real-transport +
+  CLI + MCP + integration scaffold).
+- **["Writing a first-class driver" guide](docs/plugin-development.md)** — the
+  procedural standard (capabilities, the five test layers, every doc surface, the
+  ledger→maturity→wiki evidence chain, a Definition-of-Done), published to the
+  wiki, enforced by `tests/test_driver_contract.py`.
 
 ### Fixed
 - **AMT boot read-back honesty (#211)** — real AMT `CIM_BootConfigSetting`
@@ -50,12 +72,27 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   write-only; `get_boot_options()` now reports `override_readable: false` /
   `target: null` instead of a misleading `"none"`. `BIOSSetup` stays readable.
 - **AMT KVM single-session robustness** — `snapshot()` cycles the KVM SAP and
-  retries on a connection drop (AMT allows one session at a time and can wedge
-  it); `SessionTimeout` is set non-zero so a dropped session self-clears.
+  retries on a connection drop; `SessionTimeout` is set non-zero so a dropped
+  session self-clears.
+- **`set_boot_device('bios')` firmware rejection (#215)** — some AMT firmware
+  rejects `AMT_BootSettingData.BIOSSetup=true` (boot-to-setup) with an opaque
+  `InvalidRepresentation` though pxe/cd/hdd/none work; now a clear `CapabilityError`
+  + a quirk instead of a raw fault.
+- **Cross-plugin (#214)** — AMT surfaced fleet-wide gaps, fixed for every driver:
+  `test-report` accepts PNG snapshots (was JPEG-only → false FAIL); `get_firmware_info`
+  returns vendor/product on AMT **and IPMI** (was `fake/fake` in the ledger); the
+  CLI `type`/`click`/`mouse-move` handlers and the MCP `mouse` tool now work with a
+  minimal/pixel-native HID driver instead of tracebacking.
 
-Covered by 56 AMT unit tests (WS-Man + RFB + ZRLE-decoder vectors); full suite
-1063 passed. **Caveat:** AMT KVM captures *graphical* screens (BIOS/POST/GRUB/
-GUI) but not legacy VGA text mode; port 5900 KVM is absent on some AMT ≥12 SKUs.
+Full suite **1147 passed / 10 skipped**. **Honest caveats** (target/firmware-
+dependent, not driver bugs): AMT KVM captures *graphical* screens (BIOS/POST/GRUB/
+GUI) but not legacy VGA text mode, and port 5900 is absent on some AMT ≥12 SKUs;
+SOL shows text only if the target redirects its console to serial (server BIOSes
+do, the tested laptop does not); `boot-device bios` is firmware-dependent (#215);
+HID keystroke *effect* is `unverified` live (format verified vs MeshCommander +
+emulator-tested — the test unit was stuck at an EC-serviced firmware alert). IDE-R/
+USB-R virtual media remains tracked in #213 (the `amtider` shell-out is incompatible
+with AMT 14).
 
 ## [0.1.0b8] — 2026-07-14
 
