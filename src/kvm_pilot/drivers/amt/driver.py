@@ -392,13 +392,29 @@ class AmtDriver(PowerMixin, CapabilityMixin):
         self._wsman.put(uri, body, selectors=selectors)
 
     def _put_boot_setting_data(self, *, bios_setup: bool) -> None:
-        """Reset AMT_BootSettingData, setting BIOSSetup for the 'bios' target."""
-        self._rmw_put(amt("AMT_BootSettingData"), "AMT_BootSettingData", {
-            "BIOSSetup": "true" if bios_setup else "false",
-            "BIOSPause": "false",
-            "BootMediaIndex": "0",
-            "UserPasswordBypass": "false",
-        })
+        """Reset AMT_BootSettingData, setting BIOSSetup for the 'bios' target.
+
+        Some AMT firmware (observed on a Dell Latitude 5411, AMT 14.1.67) rejects
+        ``BIOSSetup=true`` — boot-to-BIOS-setup — with an opaque
+        ``InvalidRepresentation`` (HTTP 400) even though the same full-object Put
+        with ``BIOSSetup=false`` and the pxe/cd/hdd boot sources are accepted. It's
+        a firmware/security limit on remote boot-to-setup, not a representation
+        bug, so we surface a clear message instead of a raw fault (#215)."""
+        try:
+            self._rmw_put(amt("AMT_BootSettingData"), "AMT_BootSettingData", {
+                "BIOSSetup": "true" if bios_setup else "false",
+                "BIOSPause": "false",
+                "BootMediaIndex": "0",
+                "UserPasswordBypass": "false",
+            })
+        except WsmanError as e:
+            if bios_setup and "400" in str(e):
+                raise CapabilityError(
+                    "this AMT firmware rejected boot-to-BIOS-setup "
+                    "(AMT_BootSettingData.BIOSSetup) — a firmware-dependent limit; boot a "
+                    "source instead (set_boot_device('pxe'/'cd'/'hdd'))."
+                ) from e
+            raise
 
     def _change_boot_order(self, source_instance_id: str | None) -> None:
         if source_instance_id is None:
@@ -614,6 +630,13 @@ class AmtDriver(PowerMixin, CapabilityMixin):
                   workaround="Use enable_kvm(require_consent=True) in CCM, or re-provision the ME "
                              "in Admin Control Mode.",
                   source="documented"),
+            Quirk(id="bios-boot-target-firmware-dependent",
+                  summary="Some firmware rejects boot-to-BIOS-setup (AMT_BootSettingData."
+                          "BIOSSetup=true) with InvalidRepresentation, though pxe/cd/hdd boot "
+                          "sources work (observed on a Latitude 5411).",
+                  workaround="set_boot_device('bios') raises a clear CapabilityError there; boot a "
+                             "source (pxe/cd/hdd) instead.",
+                  source="observed"),
         ]
         fw = firmware if firmware is not None else self._safe(self._amt_version)
         return [q for q in quirks if q.applies_to(fw)]

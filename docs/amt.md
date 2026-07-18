@@ -7,12 +7,25 @@ and the `amtterm` SOL client.
 > **Status:** **live-validated on a Dell Latitude 5411 (AMT 14.1.67).** WS-Man
 > Power / SystemInfo / single-use BootConfig, remote SOL + KVM enablement, and a
 > full **1920×1080 BIOS/POST screenshot over KVM redirection** were all exercised
-> against real hardware; the whole surface is also covered by pure-stdlib
-> emulators (WS-Man SOAP + an RFB server), a DES FIPS-46-3 vector, and ZRLE
-> tile-decode vectors. Known limits below (text-mode capture; 5900 absent on some
-> AMT ≥12 SKUs). The
+> against real hardware (derived maturity **beta**); the SOL channel connects live
+> via `amtterm`. The whole surface is also covered by pure-stdlib emulators (WS-Man
+> SOAP + an RFB server), a DES FIPS-46-3 vector, and ZRLE tile-decode vectors. The
 > [support matrix](https://github.com/DustinTrap/kvm-pilot/wiki/Hardware-Compatibility)
 > is the source of truth. Sources at the bottom.
+>
+> **Honest live caveats** (all target/firmware-dependent, not driver bugs):
+> - **Video** captures *graphical* screens (BIOS/POST/GRUB/GUI) but **not legacy
+>   VGA text mode**; 5900 is absent on some AMT ≥12 SKUs.
+> - **SOL** connects, but shows text only if the target redirects its console to
+>   serial — server BIOSes do; the Latitude 5411 *laptop* BIOS does not, so the
+>   channel is validated but there's no BIOS/OS serial content.
+> - **`boot-device bios`** (boot-to-BIOS-setup) is firmware-dependent — rejected on
+>   the Latitude 5411 with a clear error ([#215](https://github.com/DustinTrap/kvm-pilot/issues/215));
+>   pxe/cd/hdd/none work.
+> - **HID** wire format is verified against MeshCommander (standard RFB `KeyEvent`,
+>   big-endian X11 keysyms) and emulator-tested, but live keystroke *effect* is
+>   `unverified` — the test unit sits at a persistent Dell F1 firmware alert the
+>   embedded controller services, which the emulated USB keyboard can't dismiss.
 
 ## Why AMT
 

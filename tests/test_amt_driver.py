@@ -141,6 +141,30 @@ def test_set_boot_bios_sets_biossetup(amt_emu):
     assert amt_emu.state.bios_setup == "true"
 
 
+def test_set_boot_bios_firmware_rejection_is_clear(amt_emu, monkeypatch):
+    # Some firmware (Latitude 5411, AMT 14.1.67) rejects BIOSSetup=true with an
+    # opaque 400 InvalidRepresentation though pxe/cd work — the driver must turn
+    # that into a clear CapabilityError, not a raw WsmanError (#215).
+    drv = make(amt_emu)
+    orig_put = drv._wsman.put
+
+    def fake_put(uri, body, selectors=None):
+        if "BootSettingData" in uri and "BIOSSetup>true" in body:
+            raise WsmanError("AMT WS-Man HTTP 400 from host: ...d:InvalidRepresentation...")
+        return orig_put(uri, body, selectors=selectors)
+
+    monkeypatch.setattr(drv._wsman, "put", fake_put)
+    with pytest.raises(CapabilityError, match="boot-to-BIOS-setup"):
+        drv.set_boot_device("bios")
+    drv.set_boot_device("pxe")  # BIOSSetup=false path is unaffected — must not raise
+
+
+def test_known_quirks_includes_bios_and_kvm(amt_emu):
+    ids = {q.id for q in make(amt_emu).known_quirks()}
+    assert "bios-boot-target-firmware-dependent" in ids
+    assert "kvm-single-session" in ids
+
+
 def test_set_boot_usb_rejected(amt_emu):
     with pytest.raises(KVMPilotError):
         make(amt_emu).set_boot_device("usb")
