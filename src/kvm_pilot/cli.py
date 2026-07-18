@@ -51,6 +51,7 @@ if TYPE_CHECKING:
     # capability-partial (a BMC — strong on structured state, but no keyboard or
     # screen), so capability-specific subcommands gate on supports() before
     # dispatch instead of AttributeError-ing deep in a handler.
+    from .drivers.amt import AmtDriver
     from .drivers.base import (
         BootConfig,
         BootProgress,
@@ -63,7 +64,7 @@ if TYPE_CHECKING:
     from .drivers.ipmi import IpmiDriver
     from .drivers.redfish import RedfishDriver
 
-    AnyDriver = KVMClient | FakeDriver | RedfishDriver | IpmiDriver
+    AnyDriver = KVMClient | FakeDriver | RedfishDriver | IpmiDriver | AmtDriver
     RichDriver = KVMClient | FakeDriver
 
 
@@ -1239,7 +1240,7 @@ def cmd_events(args) -> int:
 # -- parser ----------------------------------------------------------------
 
 def _add_common(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--driver", choices=["pikvm", "glkvm", "blikvm", "redfish", "ipmi", "fake"],
+    p.add_argument("--driver", choices=["pikvm", "glkvm", "blikvm", "redfish", "ipmi", "amt", "fake"],
                    help="Device driver (overrides KVM_PILOT_DRIVER / config profile; "
                         "default pikvm; 'glkvm' = GL.iNet GLKVM fork, 'redfish' = a DMTF "
                         "Redfish BMC (no HID/Video — capability-partial), 'fake' = no hardware)")

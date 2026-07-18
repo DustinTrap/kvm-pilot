@@ -220,6 +220,35 @@ Structural set: `system_info, power, virtual_media, logs, boot_progress, sensors
 | `firmware_update` | — | n/a | n/a | Redfish `UpdateService` not yet implemented (a later step). |
 | `ssh` | `ssh-check`, `ssh-exec` | (per-profile) | n/a as a driver cap | Per-profile in-band channel, as above. |
 
+## `amt` — Intel AMT / vPro (business Intel laptops & desktops)
+
+[`AmtDriver`](../src/kvm_pilot/drivers/amt/driver.py) (#211) — firmware-level
+out-of-band management across **three** native protocols, all pure-stdlib:
+WS-Man SOAP (power / inventory / single-use boot), SOL serial via `amtterm`, and
+**RFB / KVM-redirection** for the capability that makes AMT worth having on a
+laptop — a real **BIOS/POST/GRUB screenshot** (plus keyboard/mouse) on a machine
+whose HDMI a capture-KVM never sees boot. It is the **first non-PiKVM driver to
+implement `video` + `hid`**, closing the seam Redfish leaves open.
+
+**Mock-tested only — not yet live-validated.** Covered by 41 unit tests over
+pure-stdlib WS-Man and RFB emulators, including a DES FIPS-46-3 known-answer
+vector for the VNC auth; but AMT network access still has to be activated in MEBx
+on the test unit, so every reliability rating is `unverified`. See
+[amt.md](amt.md) for the protocol reference and live-bring-up checklist.
+
+Structural set: `power, system_info, boot_config, serial_console, video, hid`.
+
+| Capability | CLI / MCP surface | Reliability | Testing level | Notes |
+|---|---|---|---|---|
+| `power` | `power`, `power-cycle` · MCP `power`, `power_state` | unverified | emulator (WS-Man) | CIM `RequestPowerStateChange` (on `2` / soft-off `8` / hard-off `6` / reset `10`); reads `CIM_AssociatedPowerManagementService.PowerState`. |
+| `system_info` | `info` · MCP `info` | unverified | emulator (WS-Man) | `CIM_Chassis`/package identity + `AMT_SetupAndConfigurationService` (AMT version, provisioning state); best-effort — one faulting field never blanks the rest. |
+| `boot_config` | `boot-device` | unverified | emulator (WS-Man) | **Single-use only** (AMT's model): `CIM_BootConfigSetting.ChangeBootOrder` + `SetBootConfigRole` one-shot; `bios` flips `AMT_BootSettingData.BIOSSetup`. `--persistent`, `usb`/`diag` rejected. |
+| `serial_console` | `console` · `serial_read`/`serial_write` | unverified | emulator + mocked `amtterm` | SOL over port 16994 via `amtterm`; password via `AMT_PASSWORD` env, never argv. Works at BIOS/GRUB when serial-redirect is on. |
+| `video` | `snapshot` · MCP `snapshot` | unverified | emulator (RFB) | RFB/VNC framebuffer → PNG (stdlib `zlib`/`struct`; inline DES for VNC auth). The **platform** framebuffer — captures BIOS/POST/GRUB. |
+| `hid` | `type`, `press`, `key`, `mouse-*` · MCP `type`, `press_key` | unverified | emulator (RFB) | KeyEvent/PointerEvent over the RFB session; X11 keysym map. Keys/clicks gated; mouse *moves* ungated. |
+| `virtual_media` | — | n/a | n/a | AMT IDE-R exists but is not implemented in this version. |
+| `sensors` / `logs` / `events` / `watchdog` / `firmware_update` | — | n/a | n/a | Not implemented for AMT. |
+
 ## `fake` — in-process test double (no hardware)
 
 [`FakeDriver`](../src/kvm_pilot/drivers/fake.py) implements the capability
