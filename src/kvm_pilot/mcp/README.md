@@ -31,7 +31,8 @@ client/driver code stays stdlib-only; `mcp` is imported only in this subpackage.
 | `boot_options` | `readOnlyHint` | Current boot-source override (target/enabled/mode) plus the device's **allowable** boot targets and whether the mode is settable — feature-detected from the BMC (Redfish `AllowableValues` / IPMI), never assumed. Read this before `set_boot_device` so you offer only targets the device accepts |
 | `power` | `destructiveHint` | `on` / `off` / `off-hard` / `reset` — **disabled unless the operator opts in** (`KVM_PILOT_MCP_ALLOW_POWER`) |
 | `wake` | `destructiveHint` | Send a Wake-on-LAN magic packet to the managed host (its wired NIC's MAC, from the profile or `mac=`) — the out-of-band power-on path when ATX isn't wired, and the first thing to try when a host stopped answering (suspended hosts wake in seconds). A state change, so it shares the power gate (`KVM_PILOT_MCP_ALLOW_POWER`) |
-| `set_boot_device` | `destructiveHint` | Boot-source override on Redfish/IPMI devices (`pxe`/`cd`/`hdd`/`usb`/`bios`/…, one-time by default or `persistent=true`, optional UEFI/legacy mode) — a **config mutation**, its own effect class: needs `KVM_PILOT_MCP_ALLOW_CONFIG` + approval. Check `boot_options` first for what this BMC accepts |
+| `set_boot_device` | `destructiveHint` | Boot-source override on Redfish/IPMI/AMT devices (`pxe`/`cd`/`hdd`/`usb`/`bios`/…, one-time by default or `persistent=true`, optional UEFI/legacy mode) — a **config mutation**, its own effect class: needs `KVM_PILOT_MCP_ALLOW_CONFIG` + approval. Check `boot_options` first for what this device accepts (AMT is single-use only; its source override is write-only) |
+| `amt_enable` | `destructiveHint` | **Intel AMT only.** Open the SOL/IDE-R (`feature='sol'`) or KVM 5900 (`feature='kvm'`) redirection listener over WS-Man — a **config mutation** (`KVM_PILOT_MCP_ALLOW_CONFIG` + `confirm=true`). `consent_off=true` (KVM) DISABLES the on-screen user-consent prompt (silent screen access) and needs a **second** dedicated gate, `KVM_PILOT_MCP_ALLOW_CONSENT_OFF` — an agent can't disable consent through `ALLOW_CONFIG` alone |
 | `type_text` | `destructiveHint` | Type text on the host console (HID keyboard) — needs `KVM_PILOT_MCP_ALLOW_HID` + per-invocation approval |
 | `press_key` | `destructiveHint` | Press one key (e.g. `Enter`, `F2`) — needs `KVM_PILOT_MCP_ALLOW_HID` + approval |
 | `send_shortcut` | `destructiveHint` | Send a key chord (e.g. `ControlLeft,AltLeft,F2`). Gated **by effect**: a reboot/power chord (Ctrl+Alt+Del, Magic SysRq) needs `ALLOW_POWER`; an ordinary session chord needs `ALLOW_HID` |
@@ -62,7 +63,7 @@ per-invocation approvals below apply regardless of annotation.
 | read | ✅ | — | ✅ | — | `info` `healthcheck` `capabilities` `support_matrix` `power_state` `boot_options` `logs` `snapshot` `list_virtual_media` `ssh_reachable` `ssh_discover` `appliance_status` `access_paths` |
 | read, open-world | ✅ | — | ✅ | ⚠️ | `classify_screen` — the *server-side vision backend* may be a cloud VLM (a local backend never leaves your network) |
 | read, open-world, timed | ✅ | — | — | ⚠️ | `wait_for_state` — same vision caveat, and a timed wait is not idempotent |
-| destructive | — | ⚠️ | — | — | `power` `wake` `set_boot_device` `type_text` `press_key` `send_shortcut` `ctrl_alt_delete` `mouse` `ssh_exec` `appliance_reboot` — not safely repeatable (a second reset reboots again) |
+| destructive | — | ⚠️ | — | — | `power` `wake` `set_boot_device` `amt_enable` `type_text` `press_key` `send_shortcut` `ctrl_alt_delete` `mouse` `ssh_exec` `appliance_reboot` — not safely repeatable (a second reset reboots again) |
 | reversible write | — | — | ✅ | — | `eject` (undoable and convergent; still MEDIA-gated), `calibrate_mouse` (pointer moves only, re-run converges; still HID-gated) |
 | reversible write, open-world | — | — | ✅ | ⚠️ | `mount_iso` (may fetch an ISO by URL), `file_firmware_report` (files a GitHub issue; dedupes against existing ones, hence idempotent) — still gated by MEDIA / EXTERNAL_WRITE |
 
@@ -129,6 +130,8 @@ re-prompt without giving up human sign-off is a follow-up to #72.)
 |---|---|---|---|---|---|---|---|---|
 | `pikvm` / `glkvm` / `blikvm` | ✅ | ✅ | ✅ | ✅ (with ATX detail) | ✅ | ✅ | ✅ | ✅ |
 | `redfish` (iDRAC, iLO, XCC, OpenBMC, …) | ✅ | ✅ (checks it can't serve are omitted) | ✅ | ✅ | ✅ | ❌ no video capability | ❌ no video capability | ✅ |
+| `ipmi` (pre-Redfish BMCs over `ipmitool`) | ✅ | ✅ | ✅ | ✅ | ✅ (SEL) | ❌ no video capability | ❌ no video capability | ✅ |
+| `amt` (Intel AMT/vPro) | ✅ | ✅ | ✅ | ✅ | ❌ not implemented | ✅ **firmware BIOS/POST/GRUB** | ✅ | ✅ |
 | `fake` (in-process test double) | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ |
 
 A tool the active driver cannot serve returns a clean MCP tool error naming
@@ -146,6 +149,12 @@ right interface (the skill's *Choosing an interface* matrix is the full guide):
   `file_firmware_report`, #190; the currency readout itself rides along in its
   result and in `healthcheck`.)
 - **MSD mode switching** → the **Python library**.
+- **Serial console (SOL)** on AMT/IPMI → the **CLI** (`kvm-pilot console`); no MCP
+  serial tool. AMT/IPMI *feature enablement* other than the redirection listeners
+  (`amt_enable`) — e.g. re-provisioning — stays out of band.
+- **Disabling AMT KVM user-consent** → possible via `amt_enable(consent_off=true)`
+  but only behind the dedicated `KVM_PILOT_MCP_ALLOW_CONSENT_OFF` gate; the
+  operator-present CLI path is `kvm-pilot amt enable-kvm --no-consent`.
 - **Restart `kvmd` / inspect `/etc/kvmd` on the appliance** → **out-of-band
   SSH** to the appliance. (A full appliance reboot *does* have a tool now —
   `appliance_reboot`, `ALLOW_APPLIANCE`-gated; `power` still acts on the
