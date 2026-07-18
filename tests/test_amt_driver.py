@@ -153,6 +153,89 @@ def test_get_boot_options_shape(amt_emu):
     assert "usb" not in opts["allowable"]
 
 
+# -- boot read-back honesty (AMT's source override is write-only) ----------
+
+
+def test_boot_readback_unknown_when_amt_omits_bootorder(amt_emu):
+    # Real AMT: CIM_BootConfigSetting has no BootOrder -> we must NOT claim "none".
+    amt_emu.state.boot_order_readable = False
+    opts = make(amt_emu).get_boot_options()
+    assert opts["enabled"] == "Unknown"
+    assert opts["target"] is None
+    assert opts["override_readable"] is False
+
+
+def test_boot_readback_roundtrips_when_readable(amt_emu):
+    # The emulator models BootOrder, so a set source reads back (readable=True).
+    drv = make(amt_emu)
+    drv.set_boot_device("pxe")
+    opts = drv.get_boot_options()
+    assert opts["target"] == "pxe"
+    assert opts["enabled"] == "Once"
+    assert opts["override_readable"] is True
+
+
+def test_boot_bios_setup_is_readable(amt_emu):
+    amt_emu.state.boot_order_readable = False  # even when the source override isn't
+    make(amt_emu).set_boot_device("bios")
+    opts = make(amt_emu).get_boot_options()
+    assert opts["target"] == "bios"
+    assert opts["enabled"] == "Once"
+    assert opts["override_readable"] is True  # BIOSSetup IS readable
+
+
+# -- feature enablement over WS-Man (SOL / KVM) ---------------------------
+
+
+def test_enable_sol_opens_listener(amt_emu):
+    make(amt_emu).enable_sol()
+    assert amt_emu.state.redir_listener == "true"
+    assert amt_emu.state.redir_state == "32771"  # IDER+SOL both
+
+
+def test_enable_sol_gated(amt_emu):
+    make(amt_emu, dry_run=True).enable_sol()
+    assert amt_emu.state.redir_listener == "false"
+    with pytest.raises(SafetyError):
+        AmtDriver("127.0.0.1", "admin", "secret", port=amt_emu.port, confirm=deny_all).enable_sol()
+
+
+def test_enable_kvm_with_consent(amt_emu):
+    make(amt_emu, kvm_password="Abcd123!").enable_kvm()
+    assert amt_emu.state.kvm_5900 == "true"
+    assert amt_emu.state.kvm_rfb_password == "Abcd123!"
+    assert amt_emu.state.kvm_sap_requested == "2"      # SAP enabled
+    assert amt_emu.state.kvm_optin_policy == "true"    # consent kept
+    assert amt_emu.state.optin_required == "1"          # global consent untouched
+
+
+def test_enable_kvm_consent_off_in_acm(amt_emu):
+    amt_emu.state.control_mode = "2"  # ACM
+    make(amt_emu, kvm_password="Abcd123!").enable_kvm(require_consent=False)
+    assert amt_emu.state.kvm_optin_policy == "false"
+    assert amt_emu.state.optin_required == "0"           # global consent cleared
+
+
+def test_enable_kvm_consent_off_rejected_in_ccm(amt_emu):
+    amt_emu.state.control_mode = "1"  # CCM — consent is mandatory
+    with pytest.raises(CapabilityError):
+        make(amt_emu, kvm_password="Abcd123!").enable_kvm(require_consent=False)
+    assert amt_emu.state.kvm_5900 == "false"  # nothing changed
+
+
+def test_enable_kvm_rejects_bad_rfb_password(amt_emu):
+    # default profile password "secret" is 6 chars / no complexity -> rejected early
+    with pytest.raises(KVMPilotError):
+        make(amt_emu).enable_kvm()
+    assert amt_emu.state.kvm_5900 == "false"
+
+
+def test_enable_kvm_gated(amt_emu):
+    make(amt_emu, kvm_password="Abcd123!", dry_run=True).enable_kvm()
+    assert amt_emu.state.kvm_5900 == "false"
+    assert amt_emu.state.kvm_sap_requested is None
+
+
 # -- auth -----------------------------------------------------------------
 
 
@@ -399,3 +482,39 @@ def test_key_to_keysym_named_and_literal():
     assert key_to_keysym("Enter") == 0xFF0D
     assert key_to_keysym("F2") == 0xFFBF
     assert key_to_keysym("a") == ord("a")
+
+
+# -- ZRLE tile decode (AMT RLE(16), the hybrid-GPU path) -------------------
+# Hand-crafted vectors for each sub-encoding — independent of any encoder, so a
+# bug in one can't mask a bug in the other. Colours in RGB565: red=0xF800,
+# green=0x07E0, blue=0x001F, white=0xFFFF, black=0x0000.
+
+
+def _zrle(u):
+    from kvm_pilot.drivers.amt.rfb import _decode_zrle_tile
+
+    return _decode_zrle_tile(bytes(u), 2, 2)
+
+
+def test_zrle_solid():
+    assert _zrle([1, 0x00, 0xF8]) == [0xF800] * 4  # solid red
+
+
+def test_zrle_raw():
+    assert _zrle([0, 0x00, 0xF8, 0xE0, 0x07, 0x1F, 0x00, 0xFF, 0xFF]) == \
+        [0xF800, 0x07E0, 0x001F, 0xFFFF]
+
+
+def test_zrle_packed_palette():
+    # 2-colour [black, white], 1 bpp, byte-aligned rows -> a checkerboard
+    assert _zrle([2, 0x00, 0x00, 0xFF, 0xFF, 0x80, 0x40]) == [0xFFFF, 0x0000, 0x0000, 0xFFFF]
+
+
+def test_zrle_plain_rle():
+    # red run 3 (len byte 2 -> 1+2), blue run 1 (len byte 0 -> 1+0)
+    assert _zrle([128, 0x00, 0xF8, 2, 0x1F, 0x00, 0]) == [0xF800, 0xF800, 0xF800, 0x001F]
+
+
+def test_zrle_palette_rle():
+    # palette [red, blue]; index 0 with run (0x80 + len 2), then index 1 (run 1)
+    assert _zrle([130, 0x00, 0xF8, 0x1F, 0x00, 0x80, 2, 1]) == [0xF800, 0xF800, 0xF800, 0x001F]

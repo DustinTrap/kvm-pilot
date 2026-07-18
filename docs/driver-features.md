@@ -230,21 +230,24 @@ laptop — a real **BIOS/POST/GRUB screenshot** (plus keyboard/mouse) on a machi
 whose HDMI a capture-KVM never sees boot. It is the **first non-PiKVM driver to
 implement `video` + `hid`**, closing the seam Redfish leaves open.
 
-**Mock-tested only — not yet live-validated.** Covered by 41 unit tests over
-pure-stdlib WS-Man and RFB emulators, including a DES FIPS-46-3 known-answer
-vector for the VNC auth; but AMT network access still has to be activated in MEBx
-on the test unit, so every reliability rating is `unverified`. See
-[amt.md](amt.md) for the protocol reference and live-bring-up checklist.
+**Live-validated on a Dell Latitude 5411 (AMT 14.1.67)** — WS-Man power / info /
+single-use boot, remote SOL + KVM enablement, and a **1920×1080 BIOS/POST
+screenshot over KVM redirection** all exercised on real hardware — plus 56 unit
+tests over pure-stdlib WS-Man and RFB emulators (DES FIPS-46-3 vector; ZRLE
+tile-decode vectors). One run on one unit, so ratings are `probed`, not the
+matured `beta`. See [amt.md](amt.md) for the protocol reference and the honest
+caveats (text-mode capture; 5900 absent on some AMT ≥12 SKUs).
 
-Structural set: `power, system_info, boot_config, serial_console, video, hid`.
+Structural set: `power, system_info, boot_config, serial_console, video, hid`
+(plus driver-specific `enable_sol()` / `enable_kvm()` — remote listener toggles).
 
 | Capability | CLI / MCP surface | Reliability | Testing level | Notes |
 |---|---|---|---|---|
-| `power` | `power`, `power-cycle` · MCP `power`, `power_state` | unverified | emulator (WS-Man) | CIM `RequestPowerStateChange` (on `2` / soft-off `8` / hard-off `6` / reset `10`); reads `CIM_AssociatedPowerManagementService.PowerState`. |
-| `system_info` | `info` · MCP `info` | unverified | emulator (WS-Man) | `CIM_Chassis`/package identity + `AMT_SetupAndConfigurationService` (AMT version, provisioning state); best-effort — one faulting field never blanks the rest. |
-| `boot_config` | `boot-device` | unverified | emulator (WS-Man) | **Single-use only** (AMT's model): `CIM_BootConfigSetting.ChangeBootOrder` + `SetBootConfigRole` one-shot; `bios` flips `AMT_BootSettingData.BIOSSetup`. `--persistent`, `usb`/`diag` rejected. |
-| `serial_console` | `console` · `serial_read`/`serial_write` | unverified | emulator + mocked `amtterm` | SOL over port 16994 via `amtterm`; password via `AMT_PASSWORD` env, never argv. Works at BIOS/GRUB when serial-redirect is on. |
-| `video` | `snapshot` · MCP `snapshot` | unverified | emulator (RFB) | RFB/VNC framebuffer → PNG (stdlib `zlib`/`struct`; inline DES for VNC auth). The **platform** framebuffer — captures BIOS/POST/GRUB. |
+| `power` | `power`, `power-cycle` · MCP `power`, `power_state` | probed (Latitude 5411) | live + emulator | CIM `RequestPowerStateChange` (on `2` / soft-off `8` / hard-off `6` / reset `10`); reads `CIM_AssociatedPowerManagementService.PowerState`. Read + reset exercised live. |
+| `system_info` | `info` · MCP `info` | probed (Latitude 5411) | live + emulator | `CIM_Chassis`/package identity + `AMT_SetupAndConfigurationService` (AMT version, provisioning state); best-effort — one faulting field never blanks the rest. |
+| `boot_config` | `boot-device` | probed (Latitude 5411) | live + emulator | **Single-use only**: `ChangeBootOrder` + `SetBootConfigRole` one-shot; `bios` flips `AMT_BootSettingData.BIOSSetup`. The source override is **write-only** on AMT (`get_boot_options` reports `override_readable: false`). `--persistent`, `usb`/`diag` rejected. |
+| `serial_console` | `console` · `serial_read`/`serial_write` | unverified | emulator + mocked `amtterm` | SOL over port 16994 via `amtterm` (listener opened live via `enable_sol`); password via `AMT_PASSWORD` env, never argv. Works at BIOS/GRUB when serial-redirect is on. |
+| `video` | `snapshot` · MCP `snapshot` | probed (Latitude 5411) | live (1080p BIOS) + emulator | AMT **RFB 4.0**: reply `RFB 003.008`, native 16-bpp RGB565 (no `SetPixelFormat`), **RLE(16)/ZRLE** over standard zlib + RAW + DesktopSize → PNG. Captures graphical BIOS/POST/GRUB; **not** legacy VGA text mode. Single-session (SAP-cycle retry). |
 | `hid` | `type`, `press`, `key`, `mouse-*` · MCP `type`, `press_key` | unverified | emulator (RFB) | KeyEvent/PointerEvent over the RFB session; X11 keysym map. Keys/clicks gated; mouse *moves* ungated. |
 | `virtual_media` | — | n/a | n/a | AMT IDE-R exists but is not implemented in this version. |
 | `sensors` / `logs` / `events` / `watchdog` / `firmware_update` | — | n/a | n/a | Not implemented for AMT. |

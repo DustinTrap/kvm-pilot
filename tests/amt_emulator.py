@@ -26,7 +26,19 @@ class AmtState:
         self.power_state = "8"          # CIM PowerState: 2=on, 8=off-soft
         self.last_power_request: str | None = None
         self.boot_order = ""            # substring compared against the source id
+        self.boot_order_readable = True  # real AMT omits BootOrder (write-only) — flip to test honesty
         self.bios_setup = "false"
+        # redirection / KVM enablement knobs
+        self.redir_listener = "false"   # AMT_RedirectionService.ListenerEnabled
+        self.redir_state = "32771"      # EnabledState 32771 = IDER+SOL both
+        self.kvm_5900 = "false"         # IPS_KVMRedirectionSettingData.Is5900PortEnabled
+        self.kvm_optin_policy = "true"
+        self.kvm_session_timeout = "3"
+        self.kvm_rfb_password: str | None = None
+        self.kvm_sap_state = "3"        # CIM_KVMRedirectionSAP.EnabledState: 3=disabled, 6=enabled
+        self.kvm_sap_requested: str | None = None
+        self.optin_required = "1"       # IPS_OptInService: 0=none, 1=KVM, 4294967295=all
+        self.control_mode = "2"         # IPS_HostBasedSetupService: 1=CCM, 2=ACM
         self.provisioning_state = "2"   # 2 = post/provisioned
         self.amt_version = "16.1.25"
         self.manufacturer = "Dell Inc."
@@ -121,13 +133,53 @@ class _Handler(BaseHTTPRequestHandler):
                 "BIOSSetup": st.bios_setup, "BIOSPause": "false", "BootMediaIndex": "0",
                 "UseSOL": "false"})
         if cls == "CIM_BootConfigSetting":
-            return _inst("CIM_BootConfigSetting", {
-                "InstanceID": "Intel(r) AMT: Boot Configuration 0", "BootOrder": st.boot_order})
+            fields = {"InstanceID": "Intel(r) AMT: Boot Configuration 0"}
+            if st.boot_order_readable:  # real AMT omits BootOrder — the write-only reality
+                fields["BootOrder"] = st.boot_order
+            return _inst("CIM_BootConfigSetting", fields)
+        if cls == "AMT_RedirectionService":
+            return _inst("AMT_RedirectionService", {
+                "CreationClassName": "AMT_RedirectionService", "Name": "Intel(r) AMT Redirection Service",
+                "SystemName": "Intel(r) AMT", "SystemCreationClassName": "CIM_ComputerSystem",
+                "EnabledState": st.redir_state, "ListenerEnabled": st.redir_listener})
+        if cls == "IPS_KVMRedirectionSettingData":
+            return _inst("IPS_KVMRedirectionSettingData", {
+                "InstanceID": "Intel(r) KVM Redirection Settings",
+                "ElementName": "Intel(r) KVM Redirection Settings", "EnabledByMEBx": "true",
+                "Is5900PortEnabled": st.kvm_5900, "OptInPolicy": st.kvm_optin_policy,
+                "SessionTimeout": st.kvm_session_timeout, "RFBPassword": st.kvm_rfb_password or "",
+                "DefaultScreen": "0"})
+        if cls == "CIM_KVMRedirectionSAP":
+            return _inst("CIM_KVMRedirectionSAP", {
+                "Name": "KVM Redirection Service Access Point", "SystemName": "ManagedSystem",
+                "SystemCreationClassName": "CIM_ComputerSystem", "CreationClassName": "CIM_KVMRedirectionSAP",
+                "EnabledState": st.kvm_sap_state})
+        if cls == "IPS_OptInService":
+            return _inst("IPS_OptInService", {
+                "Name": "Intel(r) AMT OptIn Service", "CreationClassName": "IPS_OptInService",
+                "SystemName": "Intel(r) AMT", "SystemCreationClassName": "CIM_ComputerSystem",
+                "OptInRequired": st.optin_required, "OptInState": "0", "CanModifyOptInPolicy": "1"})
+        if cls == "IPS_HostBasedSetupService":
+            return _inst("IPS_HostBasedSetupService", {
+                "CurrentControlMode": st.control_mode,
+                "ElementName": "Intel(r) AMT Host Based Setup Service"})
         return _inst(cls, {})
 
     def _record_put(self, resource: str, req: ET.Element) -> None:
-        if resource.rsplit("/", 1)[-1] == "AMT_BootSettingData":
-            self._state.bios_setup = _text(req, "BIOSSetup") or self._state.bios_setup
+        st = self._state
+        cls = resource.rsplit("/", 1)[-1]
+        if cls == "AMT_BootSettingData":
+            st.bios_setup = _text(req, "BIOSSetup") or st.bios_setup
+        elif cls == "AMT_RedirectionService":
+            st.redir_listener = _text(req, "ListenerEnabled") or st.redir_listener
+            st.redir_state = _text(req, "EnabledState") or st.redir_state
+        elif cls == "IPS_KVMRedirectionSettingData":
+            st.kvm_5900 = _text(req, "Is5900PortEnabled") or st.kvm_5900
+            st.kvm_optin_policy = _text(req, "OptInPolicy") or st.kvm_optin_policy
+            st.kvm_session_timeout = _text(req, "SessionTimeout") or st.kvm_session_timeout
+            st.kvm_rfb_password = _text(req, "RFBPassword")
+        elif cls == "IPS_OptInService":
+            st.optin_required = _text(req, "OptInRequired") or st.optin_required
 
     def _invoke(self, action: str, resource: str, req: ET.Element) -> str:
         st = self._state
@@ -142,6 +194,9 @@ class _Handler(BaseHTTPRequestHandler):
             # pick the source selector specifically (empty for none/bios).
             sels = [c.text for c in req.iter() if c.tag.rsplit("}", 1)[-1] == "Selector"]
             st.boot_order = next((s for s in sels if s and "Force" in s), "")
+        elif method == "RequestStateChange" and resource.rsplit("/", 1)[-1] == "CIM_KVMRedirectionSAP":
+            st.kvm_sap_requested = _text(req, "RequestedState")
+            st.kvm_sap_state = "6" if st.kvm_sap_requested == "2" else "3"
         return _body(_inst(f"{method}_OUTPUT", {"ReturnValue": "0"}))
 
 

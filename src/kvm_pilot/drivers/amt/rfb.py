@@ -8,21 +8,37 @@ see. It also carries keyboard/mouse, so the whole pre-boot surface is drivable.
 Scope: standard-port KVM redirection (TCP 5900) with **VNC Authentication**
 (RFB security type 2). That needs single-block DES, which the stdlib lacks, so a
 compact, FIPS-vector-tested DES lives here — keeping the driver dependency-free.
-RAW-encoded framebuffers are decoded and re-encoded to PNG with ``zlib``.
 
-Prerequisites on the target (MEBx / WS-Man): KVM Redirection enabled,
-standard-port (5900) redirection on, an RFB password set, and (for unattended
-capture) user-consent off. **Status: mock-tested only — no live AMT KVM has
-validated this path yet** (the support matrix is the source of truth, per
-CLAUDE.md); the emulator exercises the handshake, auth, RAW decode, and event
-encoding, but real-firmware quirks are unproven.
+AMT's KVM server is Intel's **RFB 4.0** (it announces ``RFB 004.000``), which is
+3.8-compatible for framebuffer *only if the client cooperates* — the hard-won
+lessons, matching MeshCommander's decoder, are baked in here:
+
+  * **Reply ``RFB 003.008``** (downgrade) — do NOT echo 004.000.
+  * The framebuffer is **16-bpp RGB565**; the client must **not** send a
+    ``SetPixelFormat`` (AMT resets on 32-bpp) — we keep the native format.
+  * ``SetEncodings`` must **explicitly list RAW** (AMT doesn't assume it) plus
+    the DesktopSize pseudo-encoding; the screen arrives as ≤64×64 RAW tiles.
+
+Prerequisites on the target: KVM Redirection enabled, standard-port (5900) on, an
+**exactly-8-char** RFB password set, and (for unattended capture) user-consent
+off. The driver's ``enable_kvm()`` sets all of these over WS-Man. Note Intel
+dropped 5900 at AMT ≥12 on some SKUs; where it isn't served, use SOL instead.
+
+**Live-validated** against a Dell Latitude 5411 (AMT 14.1.67): a full
+1920×1080 BIOS/POST screenshot decoded correctly. One honest caveat learned
+there — AMT captures *graphical* framebuffers (BIOS / POST / GRUB / a GUI) but
+**not legacy VGA text mode**: it resets right after the framebuffer request
+rather than delivering a frame. A reset at that exact point means "unsupported
+display mode," not a bug here.
 """
 
 from __future__ import annotations
 
 import socket
 import struct
+import time
 import zlib
+from collections.abc import Sequence
 
 from ...errors import AuthError, ConnectionError, KVMPilotError, ProtocolError
 
@@ -184,6 +200,97 @@ def key_to_keysym(name: str) -> int:
 # RFB client.                                                                 #
 # --------------------------------------------------------------------------- #
 
+# AMT KVM encodings: RAW pixels, RLE(16) (a ZRLE-style zlib+tile scheme), and the
+# DesktopSize pseudo-encoding. We advertise RLE because integrated/hybrid-GPU
+# platforms refuse RAW and reset unless RLE is offered (MeshCentral's "try RLE8"
+# case) — but RAW is decoded too, for SKUs that do send it.
+_ENC_RAW = 0
+_ENC_RLE = 16
+_ENC_DESKTOP_SIZE = -223  # 0xFFFFFF21
+
+
+def _build_rgb565_lut() -> bytes:
+    """RGB565 little-endian uint16 -> RGB888, precomputed once. The 5/6/5 bits are
+    bit-replicated into the low bits so full-scale maps to 255 (not 248/252)."""
+    lut = bytearray(65536 * 3)
+    for v in range(65536):
+        r = (v >> 8) & 0xF8
+        g = (v >> 3) & 0xFC
+        b = (v & 0x1F) << 3
+        lut[v * 3] = r | (r >> 5)
+        lut[v * 3 + 1] = g | (g >> 6)
+        lut[v * 3 + 2] = b | (b >> 5)
+    return bytes(lut)
+
+
+_RGB565_LUT = _build_rgb565_lut()
+
+
+def _decode_zrle_tile(u: bytes, w: int, h: int) -> list[int]:
+    """Decode one AMT RLE(16) tile (already zlib-inflated bytes ``u``) into ``w*h``
+    RGB565 pixel values. The first byte is a ZRLE sub-encoding:
+
+      0        RAW — w*h little-endian RGB565 pixels
+      1        solid — one pixel fills the tile
+      2..16    packed palette — N palette entries then packed indices (1/2/4 bpp,
+               each row byte-aligned)
+      128      plain RLE — [pixel][run-length bytes, 255-terminated], run = 1+Σ
+      130..255 palette RLE — (sub-128) palette entries, then index bytes; a set
+               high bit means a run-length follows
+    """
+    n = w * h
+    sub = u[0]
+
+    def pixel(off: int) -> int:  # little-endian RGB565 at u[off:off+2]
+        return u[off] | (u[off + 1] << 8)
+
+    if sub == 0:  # RAW
+        return [pixel(1 + i * 2) for i in range(n)]
+    if sub == 1:  # solid
+        return [pixel(1)] * n
+    if 2 <= sub <= 16:  # packed palette
+        palette = [pixel(1 + i * 2) for i in range(sub)]
+        p = 1 + sub * 2
+        bpp = 1 if sub == 2 else (2 if sub <= 4 else 4)
+        mask = (1 << bpp) - 1
+        out: list[int] = []
+        for _row in range(h):
+            cur = have = 0  # each row starts on a fresh byte (byte-aligned)
+            for _col in range(w):
+                if have == 0:
+                    cur, have, p = u[p], 8, p + 1
+                have -= bpp
+                out.append(palette[(cur >> have) & mask])
+        return out
+    if sub == 128:  # plain RLE
+        p, out = 1, []
+        while len(out) < n:
+            px, p = pixel(p), p + 2
+            run = 1
+            while True:
+                b, p = u[p], p + 1
+                run += b
+                if b != 255:
+                    break
+            out.extend([px] * run)
+        return out[:n]
+    if sub >= 130:  # palette RLE
+        size = sub - 128
+        palette = [pixel(1 + i * 2) for i in range(size)]
+        p, out = 1 + size * 2, []
+        while len(out) < n:
+            idx, p = u[p], p + 1
+            run = 1
+            if idx & 0x80:
+                while True:
+                    b, p = u[p], p + 1
+                    run += b
+                    if b != 255:
+                        break
+            out.extend([palette[idx & 0x7F]] * run)
+        return out[:n]
+    raise ProtocolError(f"AMT RFB: unknown RLE sub-encoding {sub}")
+
 
 class Rfb:
     """One RFB session to an AMT KVM-redirection endpoint (connect → auth →
@@ -194,6 +301,11 @@ class Rfb:
         self.width = self.height = 0
         self._sock: socket.socket | None = None
         self._last_xy = (0, 0)
+        # AMT's RLE(16) is a ZRLE-style scheme over ONE zlib stream spanning the
+        # whole session — never reset per rect. AMT 14 firmware uses the *standard*
+        # zlib format (a 0x78 0x9c header on the first tile), not raw deflate, so
+        # wbits defaults to 15 (verified live against the wire).
+        self._zlib = zlib.decompressobj()
 
     def __enter__(self) -> Rfb:
         self.connect()
@@ -208,7 +320,10 @@ class Rfb:
         assert self._sock is not None
         buf = bytearray()
         while len(buf) < n:
-            chunk = self._sock.recv(n - len(buf))
+            try:
+                chunk = self._sock.recv(n - len(buf))
+            except OSError as e:  # reset/timeout — AMT dropped us mid-message
+                raise ConnectionError(f"AMT RFB {self.host}:{self.port} dropped: {e}") from e
             if not chunk:
                 raise ConnectionError(f"AMT RFB {self.host}:{self.port} closed mid-message")
             buf.extend(chunk)
@@ -216,7 +331,10 @@ class Rfb:
 
     def _send(self, data: bytes) -> None:
         assert self._sock is not None
-        self._sock.sendall(data)
+        try:
+            self._sock.sendall(data)
+        except OSError as e:  # broken pipe — AMT closed the connection (e.g. stuck session)
+            raise ConnectionError(f"AMT RFB {self.host}:{self.port} dropped on send: {e}") from e
 
     def connect(self) -> None:
         try:
@@ -250,44 +368,86 @@ class Rfb:
         self._send(bytes([1]))  # ClientInit: shared
         init = self._recv(24)
         self.width, self.height = struct.unpack(">HH", init[:4])
+        bpp = init[4]
         self._recv(struct.unpack(">I", init[20:24])[0])  # desktop name
-        # Ask for a fixed 32-bpp true-colour BGRA format so RAW decodes uniformly.
-        self._send(
-            b"\x00\x00\x00\x00" + struct.pack(
-                ">BBBBHHHBBB", 32, 24, 0, 1, 255, 255, 255, 16, 8, 0
-            ) + b"\x00\x00\x00"
-        )
-        self._send(b"\x02\x00\x00\x01\x00\x00\x00\x00")  # SetEncodings: RAW(0) only
+        if bpp != 16:  # AMT KVM is always RGB565; anything else we can't decode
+            raise ProtocolError(
+                f"AMT RFB: expected a 16-bpp RGB565 framebuffer, got {bpp}-bpp — "
+                "unexpected AMT KVM format."
+            )
+        # Crucially: send NO SetPixelFormat — AMT resets on a 32-bpp request; we
+        # keep its native RGB565. SetEncodings MUST list RAW explicitly (AMT does
+        # not assume it); RLE(16) is offered so hybrid-GPU platforms (which won't
+        # send RAW) still deliver frames; DesktopSize(-223) handles res changes.
+        self._send(struct.pack(">BBHiii", 2, 0, 3, _ENC_RLE, _ENC_RAW, _ENC_DESKTOP_SIZE))
 
     # -- Video ----------------------------------------------------------
 
     def framebuffer_png(self) -> bytes:
-        """Request one full RAW framebuffer update and return it as PNG bytes."""
-        w, h = self.width, self.height
-        if not w or not h:
-            raise ProtocolError("AMT RFB: server reported a 0-sized framebuffer")
-        self._send(struct.pack(">BBHHHH", 3, 0, 0, 0, w, h))  # FramebufferUpdateRequest
-        rgba = self._read_update(w, h)
-        return encode_png(w, h, rgba)
+        """Capture one full framebuffer as PNG. AMT sends the screen as ≤64×64 RAW
+        RGB565 tiles (possibly spread across several update messages); we assemble
+        them into a canvas and re-encode with ``zlib``. A DesktopSize change
+        restarts the capture at the new dimensions."""
+        for _ in range(3):
+            w, h = self.width, self.height
+            if not w or not h:
+                raise ProtocolError("AMT RFB: server reported a 0-sized framebuffer")
+            canvas = bytearray(w * h * 4)
+            self._send(struct.pack(">BBHHHH", 3, 0, 0, 0, w, h))  # FBUR: full, non-incremental
+            if self._collect_frame(canvas, w, h):
+                return encode_png(w, h, bytes(canvas))
+        raise ProtocolError("AMT RFB: framebuffer size kept changing during capture")
 
-    def _read_update(self, w: int, h: int) -> bytes:
-        hdr = self._recv(4)
-        if hdr[0] != 0:
-            raise ProtocolError(f"AMT RFB: unexpected server message {hdr[0]}")
-        canvas = bytearray(w * h * 4)
-        for _ in range(struct.unpack(">H", hdr[2:4])[0]):
-            rx, ry, rw, rh, enc = struct.unpack(">HHHHi", self._recv(12))
-            if enc != 0:
-                raise ProtocolError(f"AMT RFB: only RAW encoding is handled (got {enc})")
-            data = self._recv(rw * rh * 4)  # BGRA per the pixel format we set
-            for row in range(rh):
-                src = row * rw * 4
-                for col in range(rw):
-                    p = src + col * 4
-                    b, g, r = data[p], data[p + 1], data[p + 2]
-                    d = ((ry + row) * w + (rx + col)) * 4
-                    canvas[d], canvas[d + 1], canvas[d + 2], canvas[d + 3] = r, g, b, 255
-        return bytes(canvas)
+    def _collect_frame(self, canvas: bytearray, w: int, h: int) -> bool:
+        """Read update messages until the whole canvas is covered. Returns False if
+        a DesktopSize rectangle means we must restart at the new size."""
+        covered = 0
+        deadline = time.monotonic() + self._timeout
+        while covered < w * h:
+            if time.monotonic() > deadline:
+                raise ProtocolError("AMT RFB: timed out assembling the framebuffer")
+            msg = self._recv(1)[0]
+            if msg == 2:  # Bell — ignore
+                continue
+            if msg == 3:  # ServerCutText: 3 pad + u32 length + text
+                self._recv(3)
+                self._recv(struct.unpack(">I", self._recv(4))[0])
+                continue
+            if msg != 0:  # 0 = FramebufferUpdate
+                raise ProtocolError(f"AMT RFB: unexpected server message {msg}")
+            self._recv(1)  # pad
+            for _ in range(struct.unpack(">H", self._recv(2))[0]):
+                rx, ry, rw, rh, enc = struct.unpack(">HHHHi", self._recv(12))
+                if enc == _ENC_DESKTOP_SIZE:
+                    self.width, self.height = rw, rh
+                    return False  # caller restarts at the new size
+                if enc == _ENC_RAW:
+                    vals: Sequence[int] = struct.unpack(f"<{rw * rh}H", self._recv(rw * rh * 2))
+                elif enc == _ENC_RLE:
+                    dlen = struct.unpack(">I", self._recv(4))[0]
+                    vals = _decode_zrle_tile(self._zlib.decompress(self._recv(dlen)), rw, rh)
+                else:
+                    raise ProtocolError(f"AMT RFB: unsupported encoding {enc}")
+                self._blit_pixels(canvas, w, rx, ry, rw, rh, vals)
+                covered += rw * rh
+        return True
+
+    def _blit_pixels(
+        self, canvas: bytearray, cw: int, x: int, y: int, w: int, h: int, vals: Sequence[int]
+    ) -> None:
+        """Write w*h RGB565 pixel values into the RGBA canvas at (x, y) via the LUT."""
+        lut = _RGB565_LUT
+        i = 0
+        for row in range(h):
+            o = ((y + row) * cw + x) * 4
+            for _col in range(w):
+                v3 = vals[i] * 3
+                canvas[o] = lut[v3]
+                canvas[o + 1] = lut[v3 + 1]
+                canvas[o + 2] = lut[v3 + 2]
+                canvas[o + 3] = 255
+                o += 4
+                i += 1
 
     # -- HID ------------------------------------------------------------
 

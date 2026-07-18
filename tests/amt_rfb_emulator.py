@@ -76,8 +76,8 @@ class AmtRfbEmulator:
         return bytes(buf)
 
     def _session(self, conn: socket.socket) -> None:
-        conn.sendall(b"RFB 003.008\n")
-        self._recv(conn, 12)                     # client ProtocolVersion
+        conn.sendall(b"RFB 004.000\n")           # AMT announces RFB 4.0
+        self._recv(conn, 12)                     # client ProtocolVersion (it downgrades to 003.008)
         conn.sendall(bytes([1, 2]))              # 1 security type: VNC-auth (2)
         self._recv(conn, 1)                      # client's chosen type
         conn.sendall(b"\x00" * 16)               # 16-byte challenge
@@ -87,7 +87,7 @@ class AmtRfbEmulator:
             return
         conn.sendall(struct.pack(">I", 0))       # SecurityResult: OK
         self._recv(conn, 1)                      # ClientInit
-        pf = struct.pack(">BBBBHHHBBB", 32, 24, 0, 1, 255, 255, 255, 16, 8, 0) + b"\x00\x00\x00"
+        pf = struct.pack(">BBBBHHHBBB", 16, 16, 0, 1, 31, 63, 31, 11, 5, 0) + b"\x00\x00\x00"  # RGB565
         name = b"AMT-EMU"
         conn.sendall(struct.pack(">HH", self.width, self.height) + pf
                      + struct.pack(">I", len(name)) + name)
@@ -118,9 +118,10 @@ class AmtRfbEmulator:
     def _framebuffer(self) -> bytes:
         data = bytearray()
         for (r, g, b) in self.pixels:
-            data += bytes([b, g, r, 0])          # BGRA, matching our SetPixelFormat
+            v = ((r >> 3) << 11) | ((g >> 2) << 5) | (b >> 3)  # pack to RGB565
+            data += struct.pack("<H", v)                       # little-endian, as AMT sends it
         return (
-            struct.pack(">BBH", 0, 0, 1)                          # FramebufferUpdate, 1 rect
-            + struct.pack(">HHHHi", 0, 0, self.width, self.height, 0)  # rect header, RAW
+            struct.pack(">BBH", 0, 0, 1)                              # FramebufferUpdate, 1 rect
+            + struct.pack(">HHHHi", 0, 0, self.width, self.height, 0)  # full-screen RAW rect
             + bytes(data)
         )
