@@ -660,6 +660,33 @@ def cmd_appliance(args) -> int:
     return 0
 
 
+def cmd_amt(args) -> int:
+    # Intel AMT feature enablement over WS-Man — open the SOL/KVM listeners
+    # remotely (no MEBx trip) + clear a wedged single KVM session. Driver-specific,
+    # behind a getattr guard like `appliance` is for GL.
+    client = _build_client(args)
+    if getattr(client, "enable_sol", None) is None:
+        print("`amt` commands require --driver amt (Intel AMT/vPro).", file=sys.stderr)
+        return 2
+    kvm = cast("AmtDriver", client)
+    dry = getattr(args, "dry_run", False)
+    if args.action == "enable-sol":
+        kvm.enable_sol()
+        print(f"AMT SOL/IDE-R redirection listener {'would be enabled' if dry else 'enabled'} "
+              f"on {kvm.host} (port 16994).")
+    elif args.action == "enable-kvm":
+        kvm.enable_kvm(require_consent=not args.no_consent)
+        note = (" — USER CONSENT OFF: anyone with the AMT credentials can then view/control "
+                "the screen with NO on-screen prompt") if args.no_consent else \
+               " (the on-screen consent prompt stays on)"
+        print(f"AMT KVM redirection {'would be enabled' if dry else 'enabled'} on {kvm.host} "
+              f"(port 5900){note}.")
+    else:  # reset-kvm
+        kvm.reset_kvm_session()
+        print(f"AMT KVM session {'would be cleared' if dry else 'cleared'} on {kvm.host}.")
+    return 0
+
+
 def cmd_paths(args) -> int:
     # The lockout-exposure view: which independent recovery paths are live (#162).
     from .health import access_paths
@@ -1608,6 +1635,20 @@ def build_parser() -> argparse.ArgumentParser:
                    help="loadavg (read-only diagnostics) or reboot (gated recovery)")
     _add_common(p)
     p.set_defaults(func=cmd_appliance)
+
+    p = sub.add_parser(
+        "amt",
+        help="Intel AMT feature enablement over WS-Man: open the SOL/KVM listeners, "
+             "clear a stuck KVM session (needs --driver amt)")
+    p.add_argument("action", choices=["enable-sol", "enable-kvm", "reset-kvm"],
+                   help="enable-sol (open 16994), enable-kvm (open 5900 + set the 8-char RFB "
+                        "password), reset-kvm (clear a wedged single KVM session)")
+    p.add_argument("--no-consent", dest="no_consent", action="store_true",
+                   help="enable-kvm only: DISABLE the on-screen user-consent prompt (Admin "
+                        "Control Mode only). Anyone with the AMT credentials can then watch/"
+                        "drive the console silently — CLI-only, never exposed via MCP by default")
+    _add_common(p)
+    p.set_defaults(func=cmd_amt)
 
     p = sub.add_parser(
         "paths",

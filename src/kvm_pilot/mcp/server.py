@@ -859,6 +859,56 @@ def set_boot_device(
 
 
 @mcp.tool(annotations=_DESTRUCTIVE)
+def amt_enable(
+    feature: Literal["sol", "kvm"],
+    consent_off: bool = False,
+    confirm: bool = False,
+    profile: str | None = None,
+) -> dict:
+    """Enable an Intel AMT redirection listener over WS-Man (Intel AMT/vPro only). CONFIG MUTATION.
+
+    ``feature='sol'`` opens the SOL/IDE-R listener (16994); ``feature='kvm'`` opens
+    KVM redirection (5900) and sets the RFB password. Disabled unless the operator
+    enabled config mutations (``KVM_PILOT_MCP_ALLOW_CONFIG``); ``confirm=true`` is
+    required. ``consent_off=true`` (KVM only) DISABLES the on-screen user-consent
+    prompt — a surveillance escalation — and additionally requires the dedicated
+    operator gate ``KVM_PILOT_MCP_ALLOW_CONSENT_OFF`` (see README.md); leaving it
+    false keeps the prompt.
+    """
+    if not _env_flag("KVM_PILOT_MCP_ALLOW_CONFIG"):
+        raise ToolError(
+            "AMT feature enablement is disabled on this server. Only the human operator can "
+            "enable it, by setting the config-mutation enable environment variable (documented "
+            "in the server's README.md) in the MCP server's own environment before starting it."
+        )
+    if not confirm:
+        raise ToolError(f"amt_enable {feature!r} was not confirmed")
+    if consent_off:
+        if feature != "kvm":
+            raise ToolError("consent_off applies only to feature='kvm'")
+        if not _env_flag("KVM_PILOT_MCP_ALLOW_CONSENT_OFF"):
+            raise ToolError(
+                "disabling AMT user-consent is disabled on this server. It lets anyone with the "
+                "AMT credentials watch and control the console with NO on-screen prompt, so it "
+                "needs a dedicated operator gate (KVM_PILOT_MCP_ALLOW_CONSENT_OFF, see README.md) "
+                "beyond ALLOW_CONFIG. It cannot be enabled from within an agent session."
+            )
+    with _driver(profile, confirm=allow_all, enforce_health=True) as (cfg, kvm):
+        fn = getattr(kvm, "enable_sol" if feature == "sol" else "enable_kvm", None)
+        if fn is None:
+            raise ToolError("this driver has no AMT feature enablement (use the amt driver)")
+        if feature == "sol":
+            fn()
+        else:
+            fn(require_consent=not consent_off)
+        return {
+            **_provenance(cfg), "feature": feature,
+            "port": 16994 if feature == "sol" else 5900,
+            "consent": "off" if consent_off else "on", "dry_run": _dry_run(),
+        }
+
+
+@mcp.tool(annotations=_DESTRUCTIVE)
 def wake(
     mac: str | None = None,
     broadcast: str | None = None,

@@ -1046,3 +1046,38 @@ def test_driver_ipmi_capabilities_offline(capsys):
     for cap in ("power", "system_info", "boot_config", "sensors", "logs"):
         assert cap in out
     assert "hid" not in out and "video" not in out  # IPMI has neither
+
+
+def test_driver_amt_capabilities_offline(capsys):
+    rc = main(["capabilities", "--driver", "amt", "--host", "10.0.1.99"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    for cap in ("power", "system_info", "boot_config", "serial_console", "video", "hid"):
+        assert cap in out
+
+
+def test_amt_subcommand_requires_amt_driver(capsys):
+    rc = main(["amt", "enable-sol", "--driver", "fake", "--host", "x"])
+    assert rc == 2
+    assert "require --driver amt" in capsys.readouterr().err
+
+
+def test_amt_enable_sol_via_cli(amt_emu, monkeypatch, capsys):
+    monkeypatch.setenv("KVM_PILOT_AMT_PORT", str(amt_emu.port))
+    rc = main(["amt", "enable-sol", "--driver", "amt", "--host", "127.0.0.1",
+               "--user", "admin", "--passwd", "secret", "--yes"])
+    assert rc == 0
+    assert amt_emu.state.redir_listener == "true"
+    assert "16994" in capsys.readouterr().out
+
+
+def test_amt_enable_kvm_no_consent_via_cli(amt_emu, monkeypatch, capsys):
+    monkeypatch.setenv("KVM_PILOT_AMT_PORT", str(amt_emu.port))
+    monkeypatch.setenv("KVM_PILOT_AMT_KVM_PASSWORD", "Abcd123!")
+    amt_emu.state.control_mode = "2"  # ACM — consent-off allowed
+    rc = main(["amt", "enable-kvm", "--no-consent", "--driver", "amt", "--host", "127.0.0.1",
+               "--user", "admin", "--passwd", "secret", "--yes"])
+    assert rc == 0
+    assert amt_emu.state.kvm_5900 == "true"
+    assert amt_emu.state.optin_required == "0"
+    assert "CONSENT OFF" in capsys.readouterr().out

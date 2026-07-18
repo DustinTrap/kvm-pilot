@@ -57,6 +57,7 @@ EXPECTED_ANNOTATIONS = {
     "power": DESTRUCTIVE,
     "wake": DESTRUCTIVE,
     "set_boot_device": DESTRUCTIVE,
+    "amt_enable": DESTRUCTIVE,
     "type_text": DESTRUCTIVE,
     "press_key": DESTRUCTIVE,
     "send_shortcut": DESTRUCTIVE,
@@ -237,6 +238,34 @@ def test_power_errors_without_operator_gate(config_file):
     assert "operator" in text
     # The refusal must not hand the agent a copy-pasteable incantation.
     assert "KVM_PILOT_MCP_ALLOW_POWER" not in text
+
+
+def test_amt_enable_requires_config_gate(config_file):
+    """amt_enable is CONFIG_MUTATION — confirm=true alone must not fire it."""
+
+    async def interact(session):
+        return await session.call_tool("amt_enable", {"feature": "sol", "confirm": True})
+
+    result = run_session(server_env(config_file), interact)  # ALLOW_CONFIG unset
+    assert result.isError is True
+    assert "disabled on this server" in result.content[0].text
+
+
+def test_amt_enable_consent_off_needs_dedicated_gate(config_file):
+    """Disabling AMT user-consent is a surveillance escalation: it needs a SECOND
+    operator gate beyond ALLOW_CONFIG (the user's 'allow behind a gate' choice)."""
+
+    async def interact(session):
+        return await session.call_tool(
+            "amt_enable", {"feature": "kvm", "consent_off": True, "confirm": True}
+        )
+
+    # ALLOW_CONFIG on, but the dedicated consent-off gate is NOT — must still refuse.
+    env = server_env(config_file, KVM_PILOT_MCP_ALLOW_CONFIG="1")
+    result = run_session(env, interact)
+    assert result.isError is True
+    text = result.content[0].text.lower()
+    assert "consent" in text and "gate" in text
 
 
 def test_power_requires_confirm_as_second_factor(config_file):
