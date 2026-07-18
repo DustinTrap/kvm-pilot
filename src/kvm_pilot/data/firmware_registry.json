@@ -91,6 +91,7 @@
               "info": "beta",
               "power": "beta",
               "power_state": "beta",
+              "serial_console": "beta",
               "snapshot": "beta"
             }
           }
