@@ -205,6 +205,16 @@ class TestSystemInfo:
         drv, _ = ipmi
         assert drv.get_info()["model"] != "localhost"
 
+    def test_firmware_info_has_vendor_product(self, ipmi):
+        # The run ledger / firmware registry join on vendor+product; without this
+        # test-report recorded IPMI identity as fake/fake (the R710 row was
+        # hand-authored to work around it). Now derived from FRU/MC.
+        drv, _ = ipmi
+        fw = drv.get_firmware_info()
+        assert fw["vendor"] == "DELL"
+        assert fw["product"] == "PowerEdge R710"
+        assert fw["version"] == "1.85"
+
 
 class TestBootConfig:
     def test_get_boot_options_pxe_once_efi(self, ipmi):

@@ -169,10 +169,14 @@ def probe_snapshot(kvm: Any) -> dict[str, Any]:
         data = kvm.snapshot()
     except KVMPilotError as exc:
         return _row("snapshot", False, str(exc), cond)
-    if not data or not data.startswith(b"\xff\xd8\xff"):
+    # Accept JPEG (kvmd) or PNG (AMT KVM renders the framebuffer to PNG) — a
+    # JPEG-only check recorded AMT's working BIOS screenshot as a FAIL.
+    fmt = ("jpeg" if data[:3] == b"\xff\xd8\xff"
+           else "png" if data[:8] == b"\x89PNG\r\n\x1a\n" else None)
+    if not data or fmt is None:
         return _row("snapshot", False,
-                    f"non-JPEG or empty bytes (len={len(data or b'')})", cond)
-    return _row("snapshot", True, f"jpeg {len(data)} bytes", cond)
+                    f"non-image or empty bytes (len={len(data or b'')})", cond)
+    return _row("snapshot", True, f"{fmt} {len(data)} bytes", cond)
 
 
 def probe_healthcheck(kvm: Any) -> dict[str, Any]:

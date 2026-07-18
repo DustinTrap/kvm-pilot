@@ -97,6 +97,15 @@ def test_firmware_info_feeds_health_label(amt_emu):
     assert make(amt_emu).get_firmware_info()["version"] == "16.1.25"
 
 
+def test_firmware_info_has_vendor_product(amt_emu):
+    # The run ledger / firmware registry join on vendor+product — a bare version
+    # records identity as fake/fake (test-report bug the standard now forbids).
+    fw = make(amt_emu).get_firmware_info()
+    assert fw["vendor"] == "Dell Inc."
+    assert fw["product"] == "Latitude 5411"
+    assert fw["version"] == "16.1.25"
+
+
 def test_get_info_survives_partial_failure(amt_emu):
     # A firmware that faults must not blank every field — get_info is best-effort.
     amt_emu.state.fault_reason = "boom"
@@ -435,6 +444,26 @@ def test_mouse_move_then_click(amt_rfb):
     assert _wait_for(lambda: len(amt_rfb.pointers) >= 3)
     # move (button mask 0), then a left click: press (mask 1) + release (mask 0)
     assert amt_rfb.pointers == [(0, 10, 20), (1, 10, 20), (0, 10, 20)]
+
+
+def test_hid_rich_cli_signatures(amt_rfb):
+    # The CLI/MCP call the richer KVMClient signatures; AMT must accept them
+    # rather than TypeError (the P0 bug where `type`/`click`/`mouse-move` crashed).
+    drv = make_rfb(amt_rfb)
+    drv.type_text("hi", slow=True, delay=0.0)           # slow=/delay= must not raise
+    assert _wait_for(lambda: len(amt_rfb.keys) >= 4)
+    drv.mouse_click("left", hold_ms=10, double=True)    # hold_ms=/double= must not raise
+    assert _wait_for(lambda: len(amt_rfb.pointers) >= 4)  # double = two down/up pairs
+
+
+def test_mouse_move_percent_maps_onto_framebuffer(amt_rfb):
+    # 2x2 emulator framebuffer -> percent maps onto real pixels (0..w-1).
+    drv = make_rfb(amt_rfb)
+    drv.mouse_move_percent(1.0, 1.0)
+    drv.mouse_move_pixels(0, 0)
+    assert _wait_for(lambda: len(amt_rfb.pointers) >= 2)
+    assert amt_rfb.pointers[0] == (0, 1, 1)   # 100% of a 2px axis -> pixel 1
+    assert amt_rfb.pointers[1] == (0, 0, 0)   # pixel-native passthrough
 
 
 def test_hid_dry_run_sends_nothing(amt_rfb):
