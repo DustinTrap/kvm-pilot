@@ -54,6 +54,7 @@ PAGES: list[tuple[str, str, str | None]] = [
     ("src/kvm_pilot/skill/SKILL.md", "skill.md", "Claude skill"),
     ("src/kvm_pilot/mcp/README.md", "mcp-server.md", "MCP server"),
     ("docs/CONTRIBUTING.md", "CONTRIBUTING.md", "Contributing"),
+    ("docs/plugin-development.md", "plugin-development.md", "Writing a first-class driver"),
     ("docs/SECURITY.md", "SECURITY.md", "Security policy"),
     # Analysis output: session-level review narratives (docs/analysis/).
     # NB: the wiki filename must keep the source stem (link rewriting maps by stem).
