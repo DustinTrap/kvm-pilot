@@ -4,6 +4,34 @@ All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and the project aims
 to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+- **Intel AMT / vPro driver** (`make_driver("amt")`, `--driver amt`,
+  [`drivers/amt/`](src/kvm_pilot/drivers/amt/), #211) — the most fully-featured
+  driver yet, managing AMT laptops/desktops out-of-band over three native
+  protocols, all **pure-stdlib**:
+  - **WS-Man** (SOAP over HTTP Digest, 16992/16993) — `Power` (CIM
+    `RequestPowerStateChange`: on / soft-off / hard-off / reset), `SystemInfo`
+    (manufacturer, model, serial, UUID, AMT version, provisioning state), and
+    single-use **`BootConfig`** (PXE / HDD / CD / BIOS-setup).
+  - **SOL** serial console (`SerialConsole`, port 16994) via `amtterm` —
+    `kvm-pilot console` works at BIOS/GRUB when serial-redirect is on; password
+    passed via `AMT_PASSWORD` env, never argv.
+  - **RFB / KVM-redirection** (`Video` + `HID`, standard-port 5900) — a
+    from-scratch stdlib VNC client (inline DES for the VNC challenge) that
+    captures the **platform framebuffer**: a genuine BIOS/POST/GRUB screenshot
+    on a machine whose HDMI a capture-KVM never sees boot, plus keyboard/mouse
+    injection. The first non-PiKVM driver to implement `Video`/`HID`.
+  - Destructive AMT ops (`amt.power_*`, `amt.reset_hard`, `amt.set_boot_device`,
+    `amt.serial_console`, and the shared `hid.*`) are gated through
+    `SafetyPolicy`; the KVM-redirection (RFB) password is a separate MEBx
+    credential (`amt_kvm_password` / `KVM_PILOT_AMT_KVM_PASSWORD`), falling back
+    to the WS-Man password when unset. Covered by 41 unit tests against
+    pure-stdlib WS-Man and RFB emulators (including a DES FIPS-46-3 known-answer
+    vector). **Not yet live-validated** — activation of AMT network access in
+    MEBx is pending on the test unit.
+
 ## [0.1.0b8] — 2026-07-14
 
 **Beta 8 — the docs, visuals & brand overhaul (#209).** No runtime code

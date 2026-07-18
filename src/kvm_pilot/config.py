@@ -106,6 +106,15 @@ class HostConfig:
     ipmi_port: int = 623
     ipmi_cipher: int | None = None
 
+    # Intel AMT / vPro (amt driver) — the WS-Man management port (16992 plaintext,
+    # 16993 TLS) and whether to use TLS. host/user/passwd are shared with the
+    # other OOB drivers; SOL (16994) and KVM-redirection (5900) ports are fixed.
+    amt_port: int = 16992
+    amt_tls: bool = False
+    # KVM-redirection (RFB) password — a *separate* MEBx credential from `passwd`;
+    # when unset the AMT driver falls back to the WS-Man admin password.
+    amt_kvm_password: str | None = None
+
 
 def _load_file(path: Path) -> dict[str, Any]:
     if not path.exists():
@@ -180,6 +189,9 @@ def resolve_host(
     ipmi_interface: str | None = None,
     ipmi_port: int | None = None,
     ipmi_cipher: int | None = None,
+    amt_port: int | None = None,
+    amt_tls: bool | None = None,
+    amt_kvm_password: str | None = None,
     config_path: Path | None = None,
 ) -> HostConfig:
     """Resolve a HostConfig from args > env > file (in that priority)."""
@@ -235,6 +247,9 @@ def resolve_host(
     verify_val = pick("verify_ssl", verify_ssl, "KVM_PILOT_VERIFY_SSL", False)
     if isinstance(verify_val, str):
         verify_val = verify_val.lower() in ("1", "true", "yes")
+    amt_tls_val = pick("amt_tls", amt_tls, "KVM_PILOT_AMT_TLS", False)
+    if isinstance(amt_tls_val, str):
+        amt_tls_val = amt_tls_val.lower() in ("1", "true", "yes")
     appliance_val = pick("appliance_ssh", appliance_ssh, "KVM_PILOT_APPLIANCE_SSH", False)
     if isinstance(appliance_val, str):
         appliance_val = appliance_val.lower() in ("1", "true", "yes")
@@ -270,6 +285,9 @@ def resolve_host(
             "ipmi_interface", ipmi_interface, "KVM_PILOT_IPMI_INTERFACE", "lanplus"),
         ipmi_port=int(pick("ipmi_port", ipmi_port, "KVM_PILOT_IPMI_PORT", 623)),
         ipmi_cipher=_opt_int(pick("ipmi_cipher", ipmi_cipher, "KVM_PILOT_IPMI_CIPHER")),
+        amt_port=int(pick("amt_port", amt_port, "KVM_PILOT_AMT_PORT", 16992)),
+        amt_tls=bool(amt_tls_val),
+        amt_kvm_password=pick("amt_kvm_password", amt_kvm_password, "KVM_PILOT_AMT_KVM_PASSWORD"),
     )
 
 

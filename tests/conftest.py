@@ -105,3 +105,21 @@ def emu():
 
     with RedfishEmulator() as e:
         yield e
+
+
+@pytest.fixture
+def amt_emu():
+    """A running pure-stdlib fake Intel AMT WS-Man service (see amt_emulator.py)."""
+    from amt_emulator import AmtEmulator
+
+    with AmtEmulator() as e:
+        yield e
+
+
+@pytest.fixture
+def amt_rfb():
+    """A running pure-stdlib fake AMT KVM-redirection (RFB/VNC) server."""
+    from amt_rfb_emulator import AmtRfbEmulator
+
+    with AmtRfbEmulator() as e:
+        yield e

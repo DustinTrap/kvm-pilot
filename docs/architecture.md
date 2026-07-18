@@ -86,7 +86,7 @@ for JetKVM, optional IPMI) slot in without touching driver code.
 ## Driver registry & families
 
 `make_driver(kind, **conf)` mirrors the vision layer's `make_backend` — it
-resolves `pikvm`/`glkvm`/`blikvm` (the PiKVM family), `redfish`, `ipmi`, and
+resolves `pikvm`/`glkvm`/`blikvm` (the PiKVM family), `redfish`, `ipmi`, `amt`, and
 `fake` (the in-process `FakeDriver`), and `register_driver()` lets a third party
 add a kind at runtime. The plan is for drivers to also register via a
 `kvm_pilot.drivers` **entry-point group**, so a driver can ship as a separate
@@ -106,6 +106,18 @@ predate Redfish (e.g. Dell iDRAC6): it shells out to the system `ipmitool`
 (`-I lanplus`, password via env — never argv) and implements `Power`,
 `SystemInfo`, `BootConfig`, `Sensors`, `Logs` (SEL), and `SerialConsole`
 (SOL over a PTY — the `kvm-pilot console` CLI).
+The **AMT / vPro** driver (`make_driver("amt")`,
+[`drivers/amt/`](../src/kvm_pilot/drivers/amt/), #211) manages Intel-AMT laptops
+and desktops out-of-band across *three* native protocols, all pure-stdlib: a
+**WS-Man** SOAP client (Digest over 16992/16993, [`amt/wsman.py`](../src/kvm_pilot/drivers/amt/wsman.py))
+for `Power` (CIM `RequestPowerStateChange`), `SystemInfo`, and single-use
+`BootConfig`; **SOL** serial (`SerialConsole`, port 16994 via the battle-tested
+`amtterm`, password via env); and **RFB / KVM-redirection** (`Video` + `HID`,
+[`amt/rfb.py`](../src/kvm_pilot/drivers/amt/rfb.py)) — a from-scratch VNC client
+(inline DES for the VNC challenge, since the stdlib has none) that captures the
+**platform framebuffer**, i.e. a real BIOS/POST/GRUB screenshot on a machine
+whose HDMI a capture-KVM never sees boot. It is the first non-PiKVM driver to
+implement `Video`/`HID`, closing the seam Redfish leaves open.
 
 ## Safety
 
@@ -134,17 +146,22 @@ e.g. `power.off_hard`.)
       "API disabled" 404 (→ `ApiDisabledError`), tracks per-firmware quirks, and
       carries GL's proprietary `/api/upgrade/*` flash layer.
       (Moving `PiKVMDriver` out of `client.py` into `drivers/pikvm/` is deferred.)
-- [x] **Step 4 — drivers.** Three concrete non-PiKVM drivers have landed:
+- [x] **Step 4 — drivers.** Four concrete non-PiKVM drivers have landed:
       `FakeDriver` ([`drivers/fake.py`](../src/kvm_pilot/drivers/fake.py)) — in-process,
       no hardware (#2) — `IpmiDriver` ([`drivers/ipmi.py`](../src/kvm_pilot/drivers/ipmi.py),
       #62 — pre-Redfish BMCs over `ipmitool`, live-validated on a Dell iDRAC6/R710
-      including SOL) — and `RedfishDriver`
+      including SOL) — `RedfishDriver`
       ([`drivers/redfish/`](../src/kvm_pilot/drivers/redfish/)), one stdlib client for
-      Dell iDRAC / HPE iLO / Supermicro / Lenovo XCC / OpenBMC. Redfish proves the
+      Dell iDRAC / HPE iLO / Supermicro / Lenovo XCC / OpenBMC — and `AmtDriver`
+      ([`drivers/amt/`](../src/kvm_pilot/drivers/amt/), #211 — Intel AMT/vPro over
+      WS-Man + SOL + RFB). Redfish proves the
       capability seam: it advertises a *complementary* set
       (`SystemInfo`, `Power`, `BootProgress`, `Sensors`, `Logs`, `VirtualMedia`) and
       none of `HID`/`Video`/`GPIO`, so structured-state sensing (`BootProgress`,
-      `Sensors`) finally has real implementers alongside the PiKVM pixels.
+      `Sensors`) finally has real implementers alongside the PiKVM pixels; the AMT
+      driver then closes the other half of the seam — the first non-PiKVM driver to
+      bring `Video` + `HID`, via firmware-level KVM redirection that screenshots the
+      BIOS/GRUB a capture-KVM can't reach.
       `RedfishDriver` is on the CLI (`--driver redfish`) via **capability-aware
       `--driver` dispatch** ([#27](https://github.com/DustinTrap/kvm-pilot/issues/27)):
       a subcommand needing a capability the device lacks fails cleanly (exit 1)

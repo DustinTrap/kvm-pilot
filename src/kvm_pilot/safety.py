@@ -72,6 +72,15 @@ DESTRUCTIVE_OPS: set[str] = {
     "ipmi.reset_hard",
     "ipmi.set_boot_device",
     "ipmi.serial_console",
+    # Intel AMT / vPro (WS-Man power + boot; AMT SOL serial console). HID over KVM
+    # redirection reuses the generic hid.* gates below (classified by effect, not
+    # transport), so no amt.hid_* ids are needed.
+    "amt.power_on",
+    "amt.power_off",
+    "amt.power_off_hard",
+    "amt.reset_hard",
+    "amt.set_boot_device",
+    "amt.serial_console",
     # HID input changes target state too: keystrokes and clicks land on a live
     # console (rm -rf is one type_text away). Mouse *moves* stay ungated.
     "hid.ctrl_alt_delete",
@@ -166,6 +175,13 @@ OP_EFFECT: dict[str, EffectClass] = {
     "ipmi.set_boot_device": EffectClass.CONFIG_MUTATION,
     # Opening SOL can inject keystrokes into the running host — same risk as HID.
     "ipmi.serial_console": EffectClass.HID_INPUT,
+    # Intel AMT / vPro — power + boot over WS-Man; SOL over redirection.
+    "amt.power_on": EffectClass.POWER_SOFT,
+    "amt.power_off": EffectClass.POWER_SOFT,      # 'soft' = ACPI graceful
+    "amt.power_off_hard": EffectClass.POWER_HARD,
+    "amt.reset_hard": EffectClass.POWER_HARD,
+    "amt.set_boot_device": EffectClass.CONFIG_MUTATION,
+    "amt.serial_console": EffectClass.HID_INPUT,  # SOL can inject keystrokes
     # HID input
     "hid.type_text": EffectClass.HID_INPUT,
     "hid.press_key": EffectClass.HID_INPUT,
