@@ -815,6 +815,116 @@ def check_exposed_services(driver: Any) -> CheckResult | None:
 
 
 # --------------------------------------------------------------------------- #
+# Intel AMT / vPro posture                                                   #
+# --------------------------------------------------------------------------- #
+#
+# AMT-specific checks: transport TLS (plaintext 16992 by default), provisioning /
+# control mode, the SOL/KVM redirection-listener state, the user-consent posture,
+# and the 8-char RFB password. They share ONE memoized ``driver.amt_health()``
+# read so the audit doesn't flood AMT's WS-Man endpoint (it rate-limits bursts),
+# and self-skip on every non-AMT driver (no ``amt_health`` method).
+
+
+def check_amt_transport_security(driver: Any) -> CheckResult | None:
+    health = getattr(driver, "amt_health", None)
+    if health is None:
+        return None
+    if health().get("tls"):
+        return CheckResult(
+            id="amt-transport", pillar=Pillar.SECURITY, severity=Severity.OK,
+            title="AMT transport security", detail="WS-Man over TLS (16993).")
+    return CheckResult(
+        id="amt-transport", pillar=Pillar.SECURITY, severity=Severity.WARNING,
+        title="AMT transport security",
+        detail="WS-Man is plaintext HTTP on 16992 — HTTP Digest protects the password hash, "
+               "but all management traffic (and the SOL/KVM setup) travels unencrypted.",
+        remediation="Provision AMT for TLS and set amt_tls=true (port 16993), or keep the ME "
+                    "on an isolated management VLAN.")
+
+
+def check_amt_provisioning(driver: Any) -> CheckResult | None:
+    health = getattr(driver, "amt_health", None)
+    if health is None:
+        return None
+    h = health()
+    state, mode = h.get("provisioning_state"), h.get("control_mode")
+    if state is not None and state != "post":
+        return CheckResult(
+            id="amt-provisioning", pillar=Pillar.READINESS, severity=Severity.CRITICAL,
+            title="AMT provisioning",
+            detail=f"AMT is not provisioned (state={state!r}); the ME will not answer "
+                   "management requests.",
+            remediation="Provision AMT (MEBx or host-based configuration) before use.",
+            cacheable=False)
+    modes = {"acm": "Admin Control Mode (consent-off allowed)",
+             "ccm": "Client Control Mode (KVM user-consent is mandatory)"}
+    return CheckResult(
+        id="amt-provisioning", pillar=Pillar.READINESS, severity=Severity.OK,
+        title="AMT provisioning",
+        detail=f"Provisioned; {modes.get(mode, 'control mode unknown')}.", cacheable=False)
+
+
+def check_amt_redirection(driver: Any) -> CheckResult | None:
+    health = getattr(driver, "amt_health", None)
+    if health is None:
+        return None
+    h = health()
+    off = [name for name, on in (("SOL/IDE-R (16994)", h.get("sol_listener")),
+                                 ("KVM (5900)", h.get("kvm_5900"))) if on is False]
+    if not off:
+        return CheckResult(
+            id="amt-redirection", pillar=Pillar.READINESS, severity=Severity.OK,
+            title="AMT redirection listeners",
+            detail="SOL and KVM redirection listeners are on.", cacheable=False)
+    return CheckResult(
+        id="amt-redirection", pillar=Pillar.READINESS, severity=Severity.WARNING,
+        title="AMT redirection listeners",
+        detail=f"Listener off: {', '.join(off)} — console/snapshot won't work until enabled.",
+        remediation="Run `kvm-pilot amt enable-sol` and/or `enable-kvm` (opens the listeners "
+                    "over WS-Man; no MEBx trip).",
+        cacheable=False)
+
+
+def check_amt_kvm_consent(driver: Any) -> CheckResult | None:
+    health = getattr(driver, "amt_health", None)
+    if health is None:
+        return None
+    h = health()
+    if h.get("kvm_5900") is not True:
+        return None  # KVM listener off -> consent posture is moot
+    if h.get("kvm_consent_required") is False:
+        return CheckResult(
+            id="amt-kvm-consent", pillar=Pillar.SECURITY, severity=Severity.WARNING,
+            title="AMT KVM user-consent",
+            detail="KVM redirection is enabled with user-consent OFF: anyone with the AMT "
+                   "credentials can view and control the screen with no on-screen prompt.",
+            remediation="Re-enable consent with `kvm-pilot amt enable-kvm` (drop --no-consent) "
+                        "unless silent access is intended for this box.")
+    return CheckResult(
+        id="amt-kvm-consent", pillar=Pillar.SECURITY, severity=Severity.OK,
+        title="AMT KVM user-consent", detail="KVM sessions require on-screen user consent.")
+
+
+def check_amt_rfb_password(driver: Any) -> CheckResult | None:
+    health = getattr(driver, "amt_health", None)
+    if health is None:
+        return None
+    h = health()
+    # Only a readiness problem once KVM is actually enabled: enable_kvm/snapshot
+    # need the AMT-required exactly-8-char password. Otherwise stay quiet.
+    if h.get("kvm_5900") is not True or h.get("rfb_password_ok"):
+        return None
+    return CheckResult(
+        id="amt-rfb-password", pillar=Pillar.READINESS, severity=Severity.WARNING,
+        title="AMT KVM RFB password",
+        detail="KVM 5900 is enabled but amt_kvm_password is not the AMT-required exactly-8-char "
+               "complex password — snapshot/HID auth will fail.",
+        remediation="Set amt_kvm_password (KVM_PILOT_AMT_KVM_PASSWORD) to an 8-char password "
+                    "with an upper, lower, digit and special character.",
+        cacheable=False)
+
+
+# --------------------------------------------------------------------------- #
 # Firmware checks (stable)                                                   #
 # --------------------------------------------------------------------------- #
 
@@ -1145,6 +1255,11 @@ CHECKS: list[Check] = [
     check_tls_posture,
     check_default_creds,
     check_exposed_services,
+    check_amt_transport_security,
+    check_amt_provisioning,
+    check_amt_redirection,
+    check_amt_kvm_consent,
+    check_amt_rfb_password,
     check_firmware_report,
     check_firmware_quirks,
     check_firmware_currency,
