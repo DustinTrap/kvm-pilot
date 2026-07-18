@@ -4,13 +4,15 @@ Implementation notes for [`drivers/amt/`](../src/kvm_pilot/drivers/amt/) (#211),
 grounded in Intel's AMT SDK (WS-Man / CIM classes), the RFB/VNC protocol spec,
 and the `amtterm` SOL client.
 
-> **Status:** **mock-tested only — not yet run against real hardware.** Every
-> path is covered by pure-stdlib emulators (WS-Man SOAP + an RFB server) and a
-> DES FIPS-46-3 known-answer vector, but the driver has **not** been live-validated:
-> AMT network access still has to be activated in MEBx on the test unit
-> (Manageability → Activate Network Access → DHCP). Don't claim more than the
+> **Status:** **live-validated on a Dell Latitude 5411 (AMT 14.1.67).** WS-Man
+> Power / SystemInfo / single-use BootConfig, remote SOL + KVM enablement, and a
+> full **1920×1080 BIOS/POST screenshot over KVM redirection** were all exercised
+> against real hardware; the whole surface is also covered by pure-stdlib
+> emulators (WS-Man SOAP + an RFB server), a DES FIPS-46-3 vector, and ZRLE
+> tile-decode vectors. Known limits below (text-mode capture; 5900 absent on some
+> AMT ≥12 SKUs). The
 > [support matrix](https://github.com/DustinTrap/kvm-pilot/wiki/Hardware-Compatibility)
-> shows. Sources at the bottom.
+> is the source of truth. Sources at the bottom.
 
 ## Why AMT
 
@@ -62,21 +64,57 @@ a PTY-driven session for scripted use. The password is passed via the
 `AMT_PASSWORD` environment variable — **never** on argv (so it can't leak via
 `ps`). Missing `amtterm` raises `CapabilityError` with an install hint.
 
+### Remote SOL / KVM enablement (no MEBx trip)
+
+MEBx *provisions* SOL and KVM, but their network **listeners** can be toggled
+over WS-Man — so `enable_sol()` and `enable_kvm()` open ports 16994 and 5900
+remotely (this is how MeshCommander / Intel's rpc-go work). Both are gated.
+
+- `enable_sol()` — full-object PUT to `AMT_RedirectionService`
+  (`ListenerEnabled=true`, `EnabledState=32771` = IDER+SOL).
+- `enable_kvm(require_consent=…)` — PUT `IPS_KVMRedirectionSettingData`
+  (`Is5900PortEnabled=true`, `RFBPassword`, `SessionTimeout` non-zero),
+  `CIM_KVMRedirectionSAP.RequestStateChange(2)`, and — for `require_consent=False`
+  — `IPS_OptInService.OptInRequired=0` to drop the on-screen consent prompt.
+  Consent-off needs **Admin Control Mode** (rejected in Client Control Mode).
+
+AMT's WS-Transfer Put is strict: send the **whole** object (a partial or
+reordered body is `InvalidRepresentation`), so the driver GET-modifies-PUTs the
+full instance via one `_rmw_put` helper.
+
 ### RFB / KVM-redirection (video + HID)
 
-`rfb.py` is a from-scratch RFB 3.8 client. Two things the stdlib doesn't give us:
+The KVM video path is the fiddliest thing in the driver, because AMT's KVM server
+is **Intel's proprietary RFB 4.0**, not stock VNC. The hard-won, live-validated
+protocol (matching MeshCommander's decoder):
 
-- **VNC auth needs DES**, which Python's stdlib dropped — so `rfb.py` carries a
-  small, self-contained DES (verified in tests against the **FIPS 46-3**
-  known-answer vector `key=0123456789ABCDEF, pt=4E6F772069732074 →
-  ct=3FA40E8A984D4815`). The VNC quirk of bit-reversing each password byte into
-  the DES key is handled inline.
-- **PNG encoding** — the RAW framebuffer (BGRA) is converted to RGBA and encoded
-  to PNG with `zlib` + `struct` + `crc32`, no Pillow.
+- **Version:** AMT announces `RFB 004.000`; the client must reply **`RFB 003.008`**
+  (downgrade) — echoing 004.000 gets dropped.
+- **Auth:** standard VNC (security type 2) needs **DES**, which the stdlib
+  dropped — so `rfb.py` carries a self-contained DES (verified against the
+  **FIPS 46-3** vector `key=0123456789ABCDEF, pt=4E6F772069732074 →
+  ct=3FA40E8A984D4815`; VNC's per-byte bit-reversal of the password is inline).
+  The **RFB password must be exactly 8 chars** with an upper/lower/digit/special
+  — the driver validates this up front (AMT otherwise returns an opaque fault).
+- **Pixel format:** AMT is **16-bpp RGB565**; the client sends **no**
+  `SetPixelFormat` (a 32-bpp request makes AMT reset) and keeps the native format.
+- **Encodings:** `SetEncodings` must **explicitly list RAW** (AMT doesn't assume
+  it) plus **RLE(16)** and DesktopSize. Integrated/hybrid-GPU platforms refuse
+  RAW and only deliver **RLE(16)** — AMT's ZRLE-style scheme over one **standard-
+  zlib** stream (a `0x78 0x9c` header; *not* raw deflate) of ≤64×64 tiles. The
+  full ZRLE sub-encodings (raw / solid / packed-palette / plain-RLE / palette-RLE)
+  are decoded; RGB565→RGB888 via a precomputed LUT; PNG out via `zlib`/`crc32`.
+- **Single session:** AMT allows one KVM session; a dropped one can wedge the
+  port, so `snapshot()` cycles the SAP and retries.
 
-`snapshot()` opens a short-lived redirection session and returns the platform
-framebuffer as PNG; `type_text`/`press_key`/`send_shortcut`/`mouse_*` reuse a
-persistent HID session, translating names via an X11 keysym map.
+`snapshot()` returns the platform framebuffer as PNG — a genuine BIOS/POST/GRUB
+screenshot (validated live at 1920×1080); `type_text`/`press_key`/`send_shortcut`/
+`mouse_*` reuse a persistent HID session with an X11 keysym map.
+
+> **Capture limit:** AMT grabs *graphical* framebuffers (BIOS / POST / GRUB / a
+> GUI) but **not legacy VGA text mode** — it resets right after the framebuffer
+> request instead of sending a frame. A reset at that exact point means
+> "unsupported display mode," not a driver bug.
 
 ## Configuration
 
@@ -88,32 +126,44 @@ user   = "admin"
 # passwd via KVM_PILOT_PASSWORD / config — the WS-Man + SOL credential
 amt_port = 16992          # WS-Man; 16993 with amt_tls = true
 amt_tls  = false
-# amt_kvm_password: the *separate* MEBx KVM-redirection (RFB) password;
-# falls back to `passwd` when unset. Env: KVM_PILOT_AMT_KVM_PASSWORD
+# amt_kvm_password: the *separate* KVM-redirection (RFB) password — must be
+# EXACTLY 8 chars (upper+lower+digit+special), AMT's rule. Falls back to `passwd`
+# when unset. Env: KVM_PILOT_AMT_KVM_PASSWORD
 ```
 
 The RFB (KVM-redirection) password is provisioned independently of the WS-Man
-admin password in MEBx, so it's a distinct field; when you haven't set a separate
-one, the driver reuses the WS-Man password.
+admin password, so it's a distinct field; when unset the driver reuses the WS-Man
+password — but note AMT requires the RFB password to be **exactly 8 characters**,
+so a longer admin password won't work for KVM and must be set separately.
 
 ## Safety
 
 Every state-changing op is gated through the one project `SafetyPolicy`:
 `amt.power_on` / `amt.power_off` / `amt.power_off_hard` / `amt.reset_hard`
-(power), `amt.set_boot_device` (config), `amt.serial_console` (SOL), and the
+(power), `amt.set_boot_device` (config), `amt.serial_console` (SOL),
+`amt.enable_sol` / `amt.enable_kvm` (open a management port — and `enable_kvm`
+with `require_consent=False` disables the on-screen consent prompt), and the
 shared `hid.type_text` / `hid.press_key` / `hid.send_shortcut` / `hid.mouse_click`
 for RFB input. Reads (`is_powered_on`, `get_info`, `get_boot_options`,
 `snapshot`, `mouse_move`) are ungated. `dry_run=True` / a `confirm` returning
 `False` short-circuits every write with no bytes on the wire.
 
+Two honesty notes baked into the driver: a pending **boot** source override is
+write-only on AMT (`CIM_BootConfigSetting` returns no `BootOrder`), so
+`get_boot_options()` reports `override_readable: false` rather than a misleading
+`none`; and rapid WS-Man bursts trip AMT's **flood protection** (HTTP 401) — serialize calls and back off rather than treating it as an auth failure.
+
 ## Live-bring-up checklist
 
 1. In MEBx (Ctrl-P at boot): set an MEBx password, **Manageability = Enabled**,
-   **Activate Network Access**, **Network → DHCP**.
-2. Confirm the ports are open: `nc -vz <host> 16992` (WS-Man),
-   `16994` (SOL), `5900` (KVM redirection — must be **standard-port** enabled).
-3. `kvm-pilot healthcheck --driver amt --host <host> --user admin` (intake gate).
-4. `kvm-pilot info` → `snapshot` (BIOS screenshot) → gated `power` / `console`.
+   **Activate Network Access**, **Network → DHCP**. Only 16992 (WS-Man) needs to
+   be open from here — the rest can be turned on remotely (step 3).
+2. `kvm-pilot healthcheck --driver amt --host <host> --user admin` (intake gate);
+   `kvm-pilot info` confirms identity + power over WS-Man.
+3. Enable the other channels over WS-Man (no MEBx trip): `enable_sol()` opens
+   16994; `enable_kvm()` opens 5900 (set an 8-char `amt_kvm_password` first).
+4. `snapshot` (BIOS/POST/GRUB screenshot — a *graphical* screen) → gated `power` /
+   `console` / `boot-device`.
 
 ## Sources
 

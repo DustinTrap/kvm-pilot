@@ -24,13 +24,38 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     on a machine whose HDMI a capture-KVM never sees boot, plus keyboard/mouse
     injection. The first non-PiKVM driver to implement `Video`/`HID`.
   - Destructive AMT ops (`amt.power_*`, `amt.reset_hard`, `amt.set_boot_device`,
-    `amt.serial_console`, and the shared `hid.*`) are gated through
-    `SafetyPolicy`; the KVM-redirection (RFB) password is a separate MEBx
-    credential (`amt_kvm_password` / `KVM_PILOT_AMT_KVM_PASSWORD`), falling back
-    to the WS-Man password when unset. Covered by 41 unit tests against
-    pure-stdlib WS-Man and RFB emulators (including a DES FIPS-46-3 known-answer
-    vector). **Not yet live-validated** — activation of AMT network access in
-    MEBx is pending on the test unit.
+    `amt.serial_console`, `amt.enable_sol`, `amt.enable_kvm`, and the shared
+    `hid.*`) are gated through `SafetyPolicy`; the KVM-redirection (RFB) password
+    is a separate MEBx credential (`amt_kvm_password` /
+    `KVM_PILOT_AMT_KVM_PASSWORD`), falling back to the WS-Man password when unset.
+- **AMT: remote feature enablement over WS-Man** — `enable_sol()` and
+  `enable_kvm(require_consent=…)` turn on the SOL/IDE-R listener and KVM
+  redirection (port 5900) *without a MEBx trip*: full-object WS-Transfer PUTs to
+  `AMT_RedirectionService` / `IPS_KVMRedirectionSettingData` /
+  `CIM_KVMRedirectionSAP`, plus `IPS_OptInService` to drop the user-consent
+  opt-in (Admin Control Mode only — rejected in Client Control Mode). The RFB
+  password is validated as **exactly 8 chars** with complexity (AMT's rule) with
+  a clear error.
+- **AMT KVM live-validated** on a Dell Latitude 5411 (AMT 14.1.67): captured a
+  full **1920×1080 BIOS/POST screenshot** over AMT — the firmware screen an
+  HDMI-capture KVM can't see. The RFB client now speaks AMT's real protocol:
+  replies `RFB 003.008` to AMT's `RFB 004.000`, keeps the native **16-bpp
+  RGB565** (no `SetPixelFormat`), advertises **RAW + RLE(16) + DesktopSize**, and
+  decodes AMT's **ZRLE tiles** (standard-zlib stream). WS-Man Power / SystemInfo /
+  single-use BootConfig and the SOL/KVM enablement were also exercised live.
+
+### Fixed
+- **AMT boot read-back honesty (#211)** — real AMT `CIM_BootConfigSetting`
+  carries no `BootOrder`, so a pending *source* override (pxe/hdd/cd) is
+  write-only; `get_boot_options()` now reports `override_readable: false` /
+  `target: null` instead of a misleading `"none"`. `BIOSSetup` stays readable.
+- **AMT KVM single-session robustness** — `snapshot()` cycles the KVM SAP and
+  retries on a connection drop (AMT allows one session at a time and can wedge
+  it); `SessionTimeout` is set non-zero so a dropped session self-clears.
+
+Covered by 56 AMT unit tests (WS-Man + RFB + ZRLE-decoder vectors); full suite
+1063 passed. **Caveat:** AMT KVM captures *graphical* screens (BIOS/POST/GRUB/
+GUI) but not legacy VGA text mode; port 5900 KVM is absent on some AMT ≥12 SKUs.
 
 ## [0.1.0b8] — 2026-07-14
 

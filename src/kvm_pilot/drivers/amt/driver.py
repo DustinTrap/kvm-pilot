@@ -29,7 +29,7 @@ import time
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from ...errors import CapabilityError, KVMPilotError
+from ...errors import CapabilityError, ConnectionError, KVMPilotError
 from ...safety import SafetyPolicy
 from ..base import CapabilityMixin, PowerMixin
 from .wsman import Wsman, WsmanError, amt, cim, escape, findtext
@@ -296,27 +296,46 @@ class AmtDriver(PowerMixin, CapabilityMixin):
     def get_boot_options(self) -> dict:
         setting = self._safe(lambda: self._wsman.get(amt("AMT_BootSettingData")))
         bios_setup = (findtext(setting, "BIOSSetup") or "").lower() == "true" if setting is not None else None
-        # AMT reports the pending source via CIM_BootConfigSetting/BootOrder; a
-        # firmware that omits it just yields target=None (still a valid answer).
-        target = self._pending_boot_target()
+        # HONESTY: the pending *source* override (pxe/hdd/cd) is effectively
+        # WRITE-ONLY on real AMT — CIM_BootConfigSetting returns only its keys, no
+        # BootOrder — so we can't read it back and must not report a definite
+        # "none" as if we had. BIOSSetup *is* readable (AMT_BootSettingData). The
+        # override lands on the next boot regardless; confirm it by observing the
+        # reboot (SOL/KVM), not by reading it here.
+        target, readable = self._pending_boot_target()
+        if bios_setup:
+            enabled, target = "Once", "bios"
+        elif readable:
+            enabled = "Once" if (target and target != "none") else "Disabled"
+        else:
+            enabled, target = "Unknown", None  # source override not read-backable on AMT
         return {
-            "enabled": "Once" if (target and target != "none") or bios_setup else "Disabled",
+            "enabled": enabled,
             "once": True,  # AMT overrides are always single-use
             "persistent": False,
-            "target": "bios" if bios_setup else (target or "none"),
+            "target": target,
+            "override_readable": bool(readable or bios_setup),
             "mode": "UEFI",  # AMT boots the platform's native mode; not separately settable here
             "mode_settable": False,
             "allowable": _BOOT_TOKENS,
         }
 
-    def _pending_boot_target(self) -> str | None:
+    def _pending_boot_target(self) -> tuple[str | None, bool]:
+        """Return ``(token, readable)`` for the pending single-use boot source.
+
+        Real AMT's ``CIM_BootConfigSetting`` carries no ``BootOrder`` element, so
+        ``readable`` is ``False`` there and ``token`` is ``None`` — the override is
+        write-only. The emulator models ``BootOrder`` so tests can still assert the
+        round-trip (``readable=True``).
+        """
         cfg = self._safe(lambda: self._wsman.get(cim("CIM_BootConfigSetting"), {"InstanceID": self._BOOT_CFG}))
-        if cfg is None:
-            return None
+        if cfg is None or not any(c.tag.rsplit("}", 1)[-1] == "BootOrder" for c in cfg):
+            return None, False
+        order = findtext(cfg, "BootOrder") or ""
         for src, token in {v: k for k, v in _BOOT_SOURCE.items() if k not in ("disk", "dvd")}.items():
-            if src in (findtext(cfg, "BootOrder") or ""):
-                return token
-        return "none"
+            if src in order:
+                return token, True
+        return "none", True
 
     def set_boot_device(self, device: str, *, once: bool = True, uefi: bool = True) -> dict:
         key = str(device).strip().lower()
@@ -339,32 +358,38 @@ class AmtDriver(PowerMixin, CapabilityMixin):
         self._set_boot_config_role(single_use=True)
         return self.get_boot_options()
 
-    def _put_boot_setting_data(self, *, bios_setup: bool) -> None:
-        """Reset AMT_BootSettingData, setting BIOSSetup for the 'bios' target.
+    def _rmw_put(
+        self, uri: str, root_name: str, overrides: dict[str, str],
+        selectors: dict[str, str] | None = None,
+    ) -> None:
+        """Read-modify-write a WS-Man instance: GET it, override the named fields,
+        and PUT the *whole* object back in the order AMT returned.
 
-        Echoes the existing instance back with the boolean flags normalized —
-        AMT rejects a partial Put, so we read-modify-write the whole element.
+        AMT's WS-Transfer Put is strict — a partial or reordered body is rejected
+        as ``InvalidRepresentation``. So we echo every child element AMT gave us
+        (read-only fields included; AMT ignores them), swapping in ``overrides``.
         """
-        el = self._wsman.get(amt("AMT_BootSettingData"))
-        # Re-serialize every child, overriding the boot-control booleans.
-        overrides = {
-            "BIOSSetup": "true" if bios_setup else "false",
-            "BIOSPause": "false",
-            "BootMediaIndex": "0",
-            "UserPasswordBypass": "false",
-        }
-        parts = []
-        seen = set()
-        for child in list(el):
+        el = self._wsman.get(uri, selectors)
+        parts, seen = [], set()
+        for child in el:
             name = child.tag.rsplit("}", 1)[-1]
             seen.add(name)
             val = overrides.get(name, child.text if child.text is not None else "")
             parts.append(f"<p:{name}>{escape(val)}</p:{name}>")
-        for name, val in overrides.items():
+        for name, val in overrides.items():  # fields the GET omitted (e.g. write-only RFBPassword)
             if name not in seen:
                 parts.append(f"<p:{name}>{escape(val)}</p:{name}>")
-        body = f'<p:AMT_BootSettingData xmlns:p="{amt("AMT_BootSettingData")}">{"".join(parts)}</p:AMT_BootSettingData>'
-        self._wsman.put(amt("AMT_BootSettingData"), body)
+        body = f'<p:{root_name} xmlns:p="{uri}">{"".join(parts)}</p:{root_name}>'
+        self._wsman.put(uri, body, selectors=selectors)
+
+    def _put_boot_setting_data(self, *, bios_setup: bool) -> None:
+        """Reset AMT_BootSettingData, setting BIOSSetup for the 'bios' target."""
+        self._rmw_put(amt("AMT_BootSettingData"), "AMT_BootSettingData", {
+            "BIOSSetup": "true" if bios_setup else "false",
+            "BIOSPause": "false",
+            "BootMediaIndex": "0",
+            "UserPasswordBypass": "false",
+        })
 
     def _change_boot_order(self, source_instance_id: str | None) -> None:
         if source_instance_id is None:
@@ -413,6 +438,103 @@ class AmtDriver(PowerMixin, CapabilityMixin):
         rv = findtext(out, "ReturnValue")
         if rv not in (None, "0"):
             raise WsmanError(f"AMT SetBootConfigRole on {self.host} returned {rv}")
+
+    # -- Feature enablement (WS-Man) ------------------------------------
+    #
+    # SOL and KVM redirection are provisioned in MEBx, but their network
+    # *listeners* can be toggled remotely over WS-Man (exactly how MeshCommander /
+    # Intel's rpc-go do it) — no physical MEBx trip. Both open a management port,
+    # so both are gated. AMT's Put is strict: full-object read-modify-write only.
+
+    _REDIR_SVC_SEL = {
+        "Name": "Intel(r) AMT Redirection Service", "SystemName": "Intel(r) AMT",
+        "SystemCreationClassName": "CIM_ComputerSystem", "CreationClassName": "AMT_RedirectionService",
+    }
+    _KVM_SAP_SEL = {
+        "Name": "KVM Redirection Service Access Point", "SystemName": "ManagedSystem",
+        "SystemCreationClassName": "CIM_ComputerSystem", "CreationClassName": "CIM_KVMRedirectionSAP",
+    }
+    _IPS = "http://intel.com/wbem/wscim/1/ips-schema/1/"
+    _KVM_SD = _IPS + "IPS_KVMRedirectionSettingData"
+    _KVM_SD_SEL = {"InstanceID": "Intel(r) KVM Redirection Settings"}
+    _OPTIN = _IPS + "IPS_OptInService"
+
+    def enable_sol(self) -> None:
+        """Turn on the AMT redirection *listener* (SOL + IDE-R, port 16994/16995)
+        over WS-Man. Idempotent; opens a management port, so it is gated.
+
+        ``EnabledState`` 32771 = IDER+SOL both enabled; ``ListenerEnabled`` opens
+        the socket. (Provisioning in MEBx is still a prerequisite.)"""
+        if not self.safety.guard("amt.enable_sol", f"Enable AMT SOL/IDE-R redirection on {self.host}"):
+            return
+        self._rmw_put(amt("AMT_RedirectionService"), "AMT_RedirectionService",
+                      {"ListenerEnabled": "true", "EnabledState": "32771"}, self._REDIR_SVC_SEL)
+
+    def enable_kvm(self, *, require_consent: bool = True) -> None:
+        """Enable KVM redirection on the standard VNC port 5900 over WS-Man.
+
+        Sets the 8-char RFB password (``amt_kvm_password``, falling back to the
+        admin password), opens the 5900 listener, and enables the KVM SAP. With
+        ``require_consent=False`` it also clears the global user-consent opt-in —
+        **Admin Control Mode only** (the ME forces consent in Client Control Mode)
+        — which lets a session start with no on-screen prompt. Gated."""
+        self._check_rfb_password()
+        if not require_consent and self._control_mode() != "acm":
+            raise CapabilityError(
+                "disabling KVM user-consent needs Admin Control Mode (ACM); this ME is in "
+                "Client Control Mode, where consent is mandatory — leave require_consent=True."
+            )
+        desc = (f"Enable AMT KVM redirection on {self.host} (port 5900"
+                + (", consent OFF" if not require_consent else "") + ")")
+        if not self.safety.guard("amt.enable_kvm", desc):
+            return
+        # SessionTimeout non-zero so a dropped single session self-clears instead
+        # of locking the port (0 = infinite); RFBPassword is write-only.
+        self._rmw_put(self._KVM_SD, "IPS_KVMRedirectionSettingData", {
+            "Is5900PortEnabled": "true",
+            "OptInPolicy": "true" if require_consent else "false",
+            "SessionTimeout": "60",
+            "RFBPassword": self._kvm_password,
+        }, self._KVM_SD_SEL)
+        self._kvm_sap_state(2)  # 2 = Enabled (no TimeoutPeriod — AMT quirk)
+        if not require_consent:
+            self._rmw_put(self._OPTIN, "IPS_OptInService", {"OptInRequired": "0"}, self._optin_selectors())
+
+    def _kvm_sap_state(self, state: int) -> None:
+        sap = cim("CIM_KVMRedirectionSAP")
+        body = (f'<p:RequestStateChange_INPUT xmlns:p="{sap}">'
+                f"<p:RequestedState>{state}</p:RequestedState></p:RequestStateChange_INPUT>")
+        out = self._wsman.invoke(sap, "RequestStateChange", body, selectors=self._KVM_SAP_SEL)
+        rv = findtext(out, "ReturnValue")
+        if rv not in (None, "0"):
+            raise WsmanError(f"AMT CIM_KVMRedirectionSAP.RequestStateChange({state}) on {self.host} returned {rv}")
+
+    def _optin_selectors(self) -> dict[str, str]:
+        opt = self._wsman.get(self._OPTIN)
+        keys = {k: findtext(opt, k)
+                for k in ("Name", "CreationClassName", "SystemName", "SystemCreationClassName")}
+        return {k: v for k, v in keys.items() if v}
+
+    def _control_mode(self) -> str | None:
+        """'ccm' (Client), 'acm' (Admin), or None — from IPS_HostBasedSetupService."""
+        svc = self._safe(lambda: self._wsman.get(self._IPS + "IPS_HostBasedSetupService"))
+        if svc is None:
+            return None
+        return {"1": "ccm", "2": "acm"}.get((findtext(svc, "CurrentControlMode") or "").strip())
+
+    def _check_rfb_password(self) -> None:
+        """AMT's standard-port (5900) RFB password must be EXACTLY 8 chars with an
+        upper, lower, digit and special char — the ME rejects anything else as an
+        InvalidRepresentation, which is opaque, so we fail early and clearly."""
+        pw = self._kvm_password or ""
+        ok = (len(pw) == 8 and any(c.isupper() for c in pw) and any(c.islower() for c in pw)
+              and any(c.isdigit() for c in pw) and any(not c.isalnum() for c in pw))
+        if not ok:
+            raise KVMPilotError(
+                "AMT KVM RFB password must be EXACTLY 8 characters with an uppercase, a "
+                "lowercase, a digit and a special character. Set 'amt_kvm_password' "
+                "(env KVM_PILOT_AMT_KVM_PASSWORD) to a compliant value."
+            )
 
     # -- SerialConsole (SOL via amtterm) --------------------------------
     #
@@ -543,11 +665,34 @@ class AmtDriver(PowerMixin, CapabilityMixin):
             self._hid.connect()
         return self._hid
 
+    def _reset_kvm_session(self) -> None:
+        """Force-clear a stuck single KVM session by cycling the SAP (disable→enable).
+        AMT KVM allows one session at a time; a dropped one can wedge the port until
+        it times out, so we clear it deterministically before retrying."""
+        try:
+            self._kvm_sap_state(3)
+            time.sleep(2)
+            self._kvm_sap_state(2)
+            time.sleep(3)
+        except (WsmanError, KVMPilotError, ConnectionError):
+            pass  # best-effort; the retry will surface any real failure
+
     def snapshot(self) -> bytes:
         """A PNG of the platform framebuffer — BIOS/POST/GRUB included (the reason
-        AMT matters here). Needs KVM redirection + standard-port 5900 in MEBx."""
-        with self._rfb_snapshot_session() as r:
-            return r.framebuffer_png()
+        AMT matters here). Needs KVM redirection + standard-port 5900 in MEBx.
+
+        AMT KVM is single-session and can wedge that session; on a connection drop
+        we cycle the SAP to clear it and retry (up to 3 attempts)."""
+        last: Exception | None = None
+        for attempt in range(3):
+            try:
+                with self._rfb_snapshot_session() as r:
+                    return r.framebuffer_png()
+            except ConnectionError as e:  # reset / broken pipe — often a stuck single session
+                last = e
+                if attempt < 2:
+                    self._reset_kvm_session()
+        raise last  # type: ignore[misc]
 
     def snapshot_base64(self) -> str:
         import base64
