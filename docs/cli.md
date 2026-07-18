@@ -25,14 +25,14 @@ support (`kvm-pilot capabilities` lists them, offline).
 | `sensors` | | sensors | Structured sensors (temps/fans/power/voltages) — BMC drivers. |
 | `logs` | | logs | Device/host event log; `--seek N` = seconds of lookback. |
 | `boot-progress` | | boot_progress | Structured boot phase (BMC BootProgress). |
-| `console` | ⚡ | serial_console | Attach an interactive serial console (IPMI SOL) to your terminal; exit with `~.` (tilde, period). Text-only — needs BIOS console redirection / a serial getty on the host (#208). |
+| `console` | ⚡ | serial_console | Attach an interactive serial console (IPMI or AMT SOL) to your terminal; exit with `~.` (tilde, period). Text-only — needs BIOS console redirection / a serial getty on the host (#208). |
 | `ssh-check` | | — (ssh_host) | Is the managed host's OS reachable over SSH (in-band)? |
 | `ssh-exec` | ⚡ | — (ssh_host) | Run a command on the managed host's OS over SSH (gated). |
 | `ssh-discover` | | — | Scan a CIDR for open SSH. RISKY/opt-in — your networks only. `--ssh-port`. |
 | `ssh-bootstrap` | ⚡ | hid, video | Bootstrap SSH on an installer host over KVM HID, then hand off (#81). Plans by default; `--execute`, `--vt`, `--command` (repeatable), `--ip-region`. |
 | `power` | ⚡ | power | `on` / `off` / `off-hard` / `reset`. |
 | `power-cycle` | ⚡ | power | Hard power cycle (off-hard → on). |
-| `boot-device` | ⚡ | boot_config | Set what the host boots next (`pxe`/`cd`/`hdd`/`usb`/`bios`/`diag`/`none`) via Redfish `BootSourceOverride` or IPMI; `--once`/`--persistent`, `--legacy` (BIOS vs UEFI), `--show` (read current + allowable), `--via {auto,redfish,ssh}` (ssh sets a one-time UEFI `BootNext` via `efibootmgr`) (#28/#201/#150). |
+| `boot-device` | ⚡ | boot_config | Set what the host boots next (`pxe`/`cd`/`hdd`/`usb`/`bios`/`diag`/`none`) via Redfish `BootSourceOverride`, IPMI, or AMT (AMT is single-use only — `--persistent` is rejected); `--once`/`--persistent`, `--legacy` (BIOS vs UEFI), `--show` (read current + allowable), `--via {auto,redfish,ssh}` (ssh sets a one-time UEFI `BootNext` via `efibootmgr`) (#28/#201/#150). |
 | `wake` | ⚡ | — (mac) | Send a Wake-on-LAN magic packet to the host's `mac` (from `--mac` or the profile); the OOB power-on path when the KVM has no wired ATX/GPIO (#199/#23). |
 | `type` | ⚡ | hid | Type text on the host console; `--slow` for finicky firmware. |
 | `key` | ⚡ | hid | Press a key (`Enter`, `F2`) or send a chord of kvmd key codes (`ControlLeft+AltLeft+F2`, #112). |
@@ -42,6 +42,7 @@ support (`kvm-pilot capabilities` lists them, offline).
 | `keep-awake` | | hid | Toggle the on-device mouse jiggler (`on`/`off`) so the target display doesn't DPMS-sleep between steps (#159). |
 | `recover-hid` | | hid | Reset/re-enumerate the USB HID gadget when keystrokes aren't reaching the target (#160). |
 | `appliance` | ⚡ (reboot) | — (appliance_ssh) | The KVM appliance's **own** OS (#162): `loadavg` (read-only diagnostics) or `reboot` (gated recovery; drops KVM control ~60s, target power untouched). |
+| `amt` | ⚡ | — (driver amt) | Intel AMT/vPro redirection enablement over WS-Man (needs `--driver amt`), no MEBx trip: `enable-sol` opens the SOL listener (16994); `enable-kvm` opens KVM redirection (5900) + sets the 8-char RFB password (`--no-consent` disables the on-screen user-consent prompt — Admin Control Mode only, CLI-only); `reset-kvm` clears a wedged single KVM session. |
 | `paths` | | — | Show which independent recovery paths are live (kvmd-REST / appliance-SSH / target-SSH / OOB power / console-HID), labeled by failure domain — the lockout-exposure view (#162). `--json`. |
 | `media-list` | | virtual_media | List images already on the KVM's MSD storage — check before downloading/uploading an ISO (#127). |
 | `mount` | ⚡ | virtual_media | Mount an ISO (local path or URL); verifies the media actually reports online (#77). `--name`, `--usb`. |

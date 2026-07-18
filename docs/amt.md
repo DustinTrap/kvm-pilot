@@ -160,8 +160,10 @@ write-only on AMT (`CIM_BootConfigSetting` returns no `BootOrder`), so
    be open from here — the rest can be turned on remotely (step 3).
 2. `kvm-pilot healthcheck --driver amt --host <host> --user admin` (intake gate);
    `kvm-pilot info` confirms identity + power over WS-Man.
-3. Enable the other channels over WS-Man (no MEBx trip): `enable_sol()` opens
-   16994; `enable_kvm()` opens 5900 (set an 8-char `amt_kvm_password` first).
+3. Enable the other channels over WS-Man (no MEBx trip): `kvm-pilot amt enable-sol`
+   opens 16994; `kvm-pilot amt enable-kvm` opens 5900 (set an 8-char
+   `amt_kvm_password` first). Also available as the MCP `amt_enable` tool and the
+   library `enable_sol()` / `enable_kvm()` methods.
 4. `snapshot` (BIOS/POST/GRUB screenshot — a *graphical* screen) → gated `power` /
    `console` / `boot-device`.
 

@@ -46,7 +46,7 @@ def test_scorecard_charts_capable_and_unsupported_ops():
 
     # Every op the driver structurally supports is measured, capable, warm p50 set.
     for cmd in ("capabilities", "get_info", "get_logs", "is_powered_on",
-                "snapshot", "boot_progress", "mouse_move"):
+                "snapshot", "boot_progress", "get_boot_options", "mouse_move"):
         assert by[cmd].capable, f"{cmd} should be capable on the fake driver"
         assert by[cmd].p50_ms == pytest.approx(1.0)  # step=0.001 s -> 1.0 ms per call
         assert by[cmd].samples == 6

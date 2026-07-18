@@ -5,6 +5,51 @@ are intentional**, so they don't get re-litigated. Newest first.
 
 ## Drivers
 
+### AMT KVM speaks Intel's RFB 4.0 — every "wrong-looking" client choice is required ([#211](https://github.com/DustinTrap/kvm-pilot/issues/211))
+The AMT KVM video path (`drivers/amt/rfb.py`) makes several calls that look like bugs
+against stock VNC but are exactly what Intel's firmware requires — all verified live on a
+Dell Latitude 5411 (AMT 14.1.67), matching MeshCommander's decoder:
+- **Reply `RFB 003.008` to AMT's `RFB 004.000`.** AMT announces its proprietary RFB 4.0;
+  echoing 004.000 gets the connection dropped. The 3.8 downgrade runs a standard, working
+  framebuffer session.
+- **Send NO `SetPixelFormat`; keep the native 16-bpp RGB565.** AMT only produces RGB565 and
+  **resets** on a 32-bpp request (what most VNC libraries send by default). Looks like a
+  missing step; it's a deliberate omission.
+- **`SetEncodings` must list RAW *explicitly*** (RFC 6143 says RAW is implicit, so clients
+  omit it — AMT doesn't assume it) plus RLE(16). Integrated/hybrid-GPU platforms refuse RAW
+  and only deliver **RLE(16)**.
+- **RLE(16) is decoded over a *standard-zlib* stream (`0x78 0x9c` header), not raw deflate.**
+  The reference research said `inflateInit(-15)` (raw); AMT 14 firmware uses standard zlib —
+  the wire was authoritative over the docs, so `zlib.decompressobj()` uses the default wbits.
+- **A reset right after the framebuffer request is "unsupported display mode", not a fault.**
+  AMT captures graphical screens (BIOS/POST/GRUB/GUI) but not legacy VGA text mode, so
+  `snapshot()` does not retry-forever on that reset.
+- **KVM is single-session; `snapshot()` cycles the SAP and retries.** A dropped session can
+  wedge port 5900, so `SessionTimeout` is set non-zero and a wedged session is cleared with
+  `reset_kvm_session()` (`kvm-pilot amt reset-kvm`).
+- **The RFB password must be EXACTLY 8 chars** (upper+lower+digit+special) — a separate
+  credential (`amt_kvm_password`) from the WS-Man password, validated up front because AMT
+  otherwise rejects it with an opaque `InvalidRepresentation`.
+
+### AMT boot override is write-only; `get_boot_options` says so honestly ([#211](https://github.com/DustinTrap/kvm-pilot/issues/211))
+Real AMT `CIM_BootConfigSetting` returns only its keys — no `BootOrder` — so the pending
+single-use *source* override (pxe/hdd/cd) **cannot be read back**. `get_boot_options()`
+therefore reports `override_readable: false` and `target: null` rather than a misleading
+`"none"` (which would look like "no override is set" when we simply can't tell). `BIOSSetup`
+*is* readable. This looks like an incomplete read implementation; it's the honest ceiling of
+what the ME discloses. Confirm an override by observing the next boot (SOL/KVM), not by reading it.
+
+### AMT SOL/KVM are enabled over WS-Man with a full-object Put; consent-off needs ACM ([#211](https://github.com/DustinTrap/kvm-pilot/issues/211))
+MEBx *provisions* SOL and KVM, but their network listeners are toggled remotely over WS-Man
+(`enable_sol`/`enable_kvm`) — no physical MEBx trip, matching MeshCommander/rpc-go. Two
+non-obvious calls: AMT's WS-Transfer Put is strict, so a partial or reordered body is rejected
+as `InvalidRepresentation` — the driver **GET-modifies-PUTs the whole instance** (`_rmw_put`),
+which looks wasteful but is required. And disabling the on-screen user-consent prompt
+(`OptInRequired=0`) only works in **Admin Control Mode**; the ME forces consent in Client
+Control Mode, so `enable_kvm(require_consent=False)` is rejected there rather than silently
+ignored. Rapid WS-Man bursts trip AMT's flood protection (HTTP 401), so the AMT healthcheck
+checks share one memoized `amt_health()` read.
+
 ### Host-visible virtual-media device names are per-driver data, seeded GL-only ([#78](https://github.com/DustinTrap/kvm-pilot/issues/78))
 The device name a target host shows for a brand's MSD gadget (GLKVM: the observed
 `UEFI: Glinet Optical Drive 1.00` boot-menu entry) is declared as a driver class

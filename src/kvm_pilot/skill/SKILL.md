@@ -1,11 +1,15 @@
 ---
 name: kvm-pilot
 description: >-
-  AI-driven bare-metal control of PiKVM and GL.iNet GLKVM devices (GL-RM1 /
-  GL-RM1PE). Use whenever the user wants to remotely operate a headless server
-  or workstation through a KVM — power on/off/cycle, mount an install ISO,
-  enter BIOS/UEFI, type at a console, or watch the screen to detect boot phase
-  (POST, GRUB, installer, login, crash). Backed by the `kvm-pilot` Python
+  AI-driven bare-metal control of IP-KVMs (PiKVM, GL.iNet GLKVM GL-RM1 /
+  GL-RM1PE), server BMCs (Redfish iDRAC/iLO/XCC, pre-Redfish IPMI), and Intel
+  AMT/vPro laptops & desktops. Use whenever the user wants to remotely operate a
+  headless server or workstation — power on/off/cycle, mount an install ISO,
+  set the next boot device, enter BIOS/UEFI, type at a console, or watch the
+  screen to detect boot phase (POST, GRUB, installer, login, crash). Intel AMT
+  is the out-of-band answer for business laptops where an HDMI-capture KVM is
+  blind below the OS: it captures a firmware-level BIOS/POST/GRUB screenshot and
+  drives power/SOL beneath the OS. Backed by the `kvm-pilot` Python
   package; vision runs on Claude or a local OpenAI-compatible VLM. **No single
   interface is best for everything — pick per action: the bundled MCP server
   (`kvm-pilot-mcp`) for the visual loop (snapshot/classify), gated act tools
@@ -56,6 +60,10 @@ remote before physical**, below).
 | Move / click the mouse (installers, BIOS, desktops) | **MCP** `mouse` | Absolute positioning; `percent` coords by default. A click must carry `observed_frame_ref` from a recent `snapshot` (refused if the host rebooted since). Needs `KVM_PILOT_MCP_ALLOW_HID`. |
 | See what media is already on the KVM | **MCP** `list_virtual_media` or CLI `media-list` | Read-only MSD inventory. **Check this before asking the user to download or upload an ISO** — the image may already be in storage from an earlier install; mount it instead of round-tripping gigabytes. The reply's `host_visible_as` (when present) is the device name the target's boot menu shows for truly presented media — match it to confirm readiness and to pick the correct boot entry instead of guessing. |
 | Mount / eject install media | **MCP** `mount_iso` / `eject`, or CLI `mount` / `eject` | Virtual media (ISO path or URL). MCP needs `KVM_PILOT_MCP_ALLOW_MEDIA` + approval. |
+| **Set the next boot device** (PXE/CD/HDD/BIOS) | **MCP `set_boot_device`** (gated CONFIG) or CLI `boot-device` | Redfish / IPMI / AMT. AMT is **single-use only** and its source override is **write-only** — confirm it by watching the boot, not by reading it back. |
+| **Screenshot BIOS/POST/GRUB on a laptop** the capture-KVM can't see boot | **`snapshot` with `--driver amt`** (MCP or CLI) | Intel AMT renders the firmware framebuffer *below* the OS — the one driver that sees pre-boot on a laptop. **Graphical screens only** (not legacy VGA text mode; a reset right after the request means "unsupported display mode"). |
+| **Attach a text serial console (SOL)** | **CLI `console`** (IPMI or AMT) | Watch BIOS/GRUB/kernel over serial when serial-redirect is on. No MCP serial tool. |
+| **Enable AMT SOL/KVM redirection** (open the listeners) | **CLI `amt enable-sol` / `enable-kvm`**, or **MCP `amt_enable`** (gated CONFIG) | Over WS-Man, no MEBx trip. `--no-consent` (CLI) / `consent_off` (MCP, needs the extra `ALLOW_CONSENT_OFF` gate) disables the on-screen user-consent prompt. Clear a wedged single KVM session with `amt reset-kvm`. |
 | firmware-update, events | **CLI only** | The MCP server does not expose these. |
 | Contribute firmware currency to the registry (file the report) | **MCP `file_firmware_report`** or CLI `firmware-check` (auto-files) | Files a GitHub issue via the `gh` CLI when the registry is behind — an external write: MCP needs `KVM_PILOT_MCP_ALLOW_EXTERNAL_WRITE` + approval; `dry_run=true` previews (#190). |
 | MSD mode switching | **Python library only** | Not in MCP or CLI. |
@@ -99,7 +107,13 @@ Prefer remote recovery, in this order:
 3. **Clear a KVM-side fault** — `recover-hid` (HID gadget), then an **appliance
    reboot** (SSH) for a wedged encoder — but only once WoL/ping have shown the host
    is actually up while video/HID are stuck.
-4. Only after remote options are exhausted, suggest **physical intervention**
+4. **On a business Intel laptop/desktop, use Intel AMT/vPro** (`--driver amt`) — the
+   out-of-band lever *below* the OS, independent of the capture-KVM. It gives power
+   (reset the wedged host), a firmware **BIOS/POST/GRUB screenshot** the HDMI-capture
+   KVM can't see on a laptop, and SOL — precisely the pre-boot surface a capture-KVM
+   is blind to. Provision AMT in MEBx first; then `amt enable-sol`/`enable-kvm` open
+   the listeners over WS-Man with no further MEBx trip.
+5. Only after remote options are exhausted, suggest **physical intervention**
    (press the power button) or **wiring the ATX cable** for future remote control.
 
 > **Keep managed hosts awake.** GNOME/Fedora Workstation auto-suspends on idle (even
@@ -162,7 +176,11 @@ dark-host recovery):
   - `ctrl_alt_delete` — a reboot, so it needs `ALLOW_POWER` (not the HID gate)
   - `mount_iso` / `eject` — virtual media (`KVM_PILOT_MCP_ALLOW_MEDIA`)
   - `set_boot_device` — boot-source override (pxe/cd/hdd/usb/bios…, one-time
-    or persistent) on Redfish/IPMI devices (`KVM_PILOT_MCP_ALLOW_CONFIG`)
+    or persistent) on Redfish/IPMI/AMT devices (`KVM_PILOT_MCP_ALLOW_CONFIG`)
+  - `amt_enable` — open the Intel AMT SOL (`feature='sol'`) or KVM 5900
+    (`feature='kvm'`) redirection listener over WS-Man (`KVM_PILOT_MCP_ALLOW_CONFIG`);
+    `consent_off=true` disables the on-screen user-consent prompt and needs the
+    **second** gate `KVM_PILOT_MCP_ALLOW_CONSENT_OFF`
   - `ssh_exec` — run a command over SSH (`KVM_PILOT_MCP_ALLOW_SSH`)
   - `appliance_reboot` — reboot the **KVM appliance itself** to clear a wedged
     encoder; target power untouched, drops KVM control ~60 s

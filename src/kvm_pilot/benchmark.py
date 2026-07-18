@@ -73,6 +73,7 @@ DEFAULT_OPS: tuple[Op, ...] = (
     Op("is_powered_on", Capability.POWER, lambda d: d.is_powered_on()),  # type: ignore[attr-defined]
     Op("read_sensors", Capability.SENSORS, lambda d: d.read_sensors()),  # type: ignore[attr-defined]
     Op("boot_progress", Capability.BOOT_PROGRESS, lambda d: d.get_boot_progress()),  # type: ignore[attr-defined]
+    Op("get_boot_options", Capability.BOOT_CONFIG, lambda d: d.get_boot_options()),  # type: ignore[attr-defined]
     Op("snapshot", Capability.VIDEO, lambda d: d.snapshot()),  # type: ignore[attr-defined]
     Op("mouse_move", Capability.HID, lambda d: d.mouse_move(*_HID_PROBE), is_hid=True),  # type: ignore[attr-defined]
 )

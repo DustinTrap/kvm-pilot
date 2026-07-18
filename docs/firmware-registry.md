@@ -20,10 +20,13 @@ read the version off the box — lives in the driver:
 | `glkvm` | `gl.inet` | reported board (`Rockchip RV1126B-P …`) | kvmd version (`4.82`) |
 | `pikvm` / `blikvm` | `pikvm` / `blikvm` | reported board | kvmd version |
 | `redfish` | `Manufacturer` (Dell/HPE/…) | Manager `Model` (`iDRAC 9`, `iLO 5`) | Manager `FirmwareVersion` |
+| `ipmi` | FRU `Board Mfg` | FRU `Board Product` | `mc info` Firmware Revision |
+| `amt` | chassis `Manufacturer` | chassis `Model` | AMT firmware version (e.g. `14.1.67`) |
 
-The registry and the checks stay 100% generic. Adding IPMI or AMT later is just a
-new driver returning the same three fields — **no change to the registry or the
-checks**. (On the PiKVM family a device can't report its *product* firmware
+The registry and the checks stay 100% generic. Adding the IPMI and AMT drivers
+(both now live-validated) was just a new driver returning the same three fields —
+**no change to the registry or the checks** — and any future family lands the same
+way. (On the PiKVM family a device can't report its *product* firmware
 version, so kvmd is the currency proxy; on BMCs the reported version *is* the
 upgradeable one.)
 
