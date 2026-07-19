@@ -83,6 +83,31 @@ def test_soap_fault_becomes_wsman_error(amt_emu):
         drv.power_on()
 
 
+def test_http_error_surfaces_soap_fault_reason(amt_emu):
+    """An HTTP 4xx/5xx whose body is a SOAP fault is surfaced with its Reason and
+    specific Subcode, not truncated to the XML namespace preamble (#216).
+
+    Regression from a live ME-firmware-update incident: the wedged ME answered
+    every call with ``HTTP 500 / e:TimedOut`` and the old ``body[:300]`` slice
+    discarded the reason, leaving only ``<?xml … xmlns:g=… xmlns:f=…``."""
+    from kvm_pilot.drivers.amt.wsman import _S
+
+    amt_emu.state.http_status = 500
+    amt_emu.state.error_body = (
+        f'<s:Envelope xmlns:s="{_S}"><s:Body><s:Fault>'
+        "<s:Code><s:Value>s:Receiver</s:Value>"
+        "<s:Subcode><s:Value>e:TimedOut</s:Value></s:Subcode></s:Code>"
+        "<s:Reason><s:Text>The operation has timed out.</s:Text></s:Reason>"
+        "</s:Fault></s:Body></s:Envelope>"
+    )
+    with pytest.raises(WsmanError) as ei:
+        make(amt_emu).power_on()
+    msg = str(ei.value)
+    assert "The operation has timed out." in msg
+    assert "e:TimedOut" in msg          # the specific subcode, not the Sender/Receiver class
+    assert "xmlns" not in msg           # not the raw, truncated namespace preamble
+
+
 # -- system info ----------------------------------------------------------
 
 
@@ -1214,13 +1239,30 @@ def test_wsman_tls_builds_https_opener():
     assert w._url.startswith("https://")
 
 
+def test_fault_detail_prefers_subcode_and_ignores_nonfault():
+    from xml.etree import ElementTree as ET
+
+    from kvm_pilot.drivers.amt.wsman import _S, Wsman
+
+    w = Wsman("127.0.0.1", "admin", "secret")  # builds the opener; opens no socket
+    # No fault -> None, so the HTTP-error path falls back to raw text.
+    assert w._fault_detail(ET.fromstring(f'<s:Envelope xmlns:s="{_S}"><s:Body/></s:Envelope>')) is None
+    # A fault -> Reason + the specific Code/Subcode/Value, not the top-level class.
+    fault = ET.fromstring(
+        f'<s:Envelope xmlns:s="{_S}"><s:Body><s:Fault>'
+        "<s:Code><s:Value>s:Receiver</s:Value>"
+        "<s:Subcode><s:Value>e:TimedOut</s:Value></s:Subcode></s:Code>"
+        "<s:Reason><s:Text>The operation has timed out.</s:Text></s:Reason>"
+        "</s:Fault></s:Body></s:Envelope>"
+    )
+    assert w._fault_detail(fault) == "The operation has timed out. (subcode e:TimedOut)"
+
+
 def test_wsman_small_helpers():
     from xml.etree import ElementTree as ET
 
     from kvm_pilot.drivers.amt import wsman as W
 
-    assert W._first(None, "", "x") == "x"   # first truthy value wins
-    assert W._first(None, "", None) == ""   # all falsy -> empty string
     # _body_child: no <Body> yields the root; an empty <Body> yields the Body itself.
     assert W._body_child(ET.fromstring("<Envelope/>")).tag == "Envelope"
     empty = ET.fromstring(f'<s:Envelope xmlns:s="{W._S}"><s:Body/></s:Envelope>')
