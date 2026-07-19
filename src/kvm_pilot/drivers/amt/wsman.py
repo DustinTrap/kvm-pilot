@@ -121,7 +121,7 @@ class Wsman:
                     e.code,
                 ) from None
             raise WsmanError(
-                f"AMT WS-Man HTTP {e.code} from {self.host}: {self._redact(_text(e.read()))[:300]}",
+                f"AMT WS-Man HTTP {e.code} from {self.host}: {self._http_error_detail(e.read())}",
                 e.code,
             ) from None
         except urllib.error.URLError as e:
@@ -145,17 +145,44 @@ class Wsman:
         return root
 
     def _check_fault(self, root: ET.Element) -> None:
-        fault = root.find(f".//{{{_S}}}Fault")
+        detail = self._fault_detail(root)
+        if detail is not None:
+            raise WsmanError(f"AMT WS-Man fault from {self.host}: {self._redact(detail)}")
+
+    def _http_error_detail(self, body: bytes) -> str:
+        """Human-readable detail for an HTTP 4xx/5xx: the SOAP fault's Reason +
+        Subcode when the body is a parseable fault (AMT answers 400/500 with a
+        full fault envelope), else the raw text truncated. Password-redacted.
+
+        AMT's fault envelope opens with ~300 chars of namespace declarations, so
+        the old ``body[:300]`` slice discarded the actual reason (#216)."""
+        try:
+            detail = self._fault_detail(ET.fromstring(body))  # nosec B314 - trusted mgmt endpoint
+        except ET.ParseError:
+            detail = None
+        if detail is None:
+            detail = _text(body).strip()[:300] or "(empty body)"
+        return self._redact(detail)
+
+    def _fault_detail(self, root: ET.Element) -> str | None:
+        """``Reason (subcode X)`` from a SOAP fault anywhere under ``root``, or
+        ``None`` if there is no fault. Matches on local names so it survives the
+        prefix/namespace drift seen across AMT firmware versions. Prefers the
+        specific ``Code/Subcode/Value`` (e.g. ``e:TimedOut``) over the top-level
+        ``Sender``/``Receiver`` class."""
+        fault = next((el for el in root.iter() if _local(el.tag) == "Fault"), None)
         if fault is None:
-            return
-        reason = fault.find(f".//{{{_S}}}Text")
-        subcode = fault.find(f".//{{{_S}}}Subcode/{{{_S}}}Value")
-        detail = _first(
-            reason.text if reason is not None else None,
-            subcode.text if subcode is not None else None,
-            "unknown SOAP fault",
-        )
-        raise WsmanError(f"AMT WS-Man fault from {self.host}: {detail}")
+            return None
+        reason = next(((el.text or "").strip() for el in fault.iter()
+                       if _local(el.tag) == "Text" and (el.text or "").strip()), None)
+        subcode_el = next((el for el in fault.iter() if _local(el.tag) == "Subcode"), None)
+        subcode = None
+        if subcode_el is not None:
+            subcode = next(((el.text or "").strip() for el in subcode_el.iter()
+                            if _local(el.tag) == "Value" and (el.text or "").strip()), None)
+        if reason and subcode:
+            return f"{reason} (subcode {subcode})"
+        return reason or subcode or "unknown SOAP fault"
 
     def _redact(self, text: str) -> str:
         return text.replace(self._passwd, _REDACTION) if self._passwd else text
@@ -267,13 +294,6 @@ def _bracket(host: str) -> str:
 
 def _text(body: bytes) -> str:
     return body.decode("utf-8", "replace")
-
-
-def _first(*values: str | None) -> str:
-    for v in values:
-        if v:
-            return v
-    return ""
 
 
 def _body_child(root: ET.Element) -> ET.Element:
