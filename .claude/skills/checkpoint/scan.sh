@@ -63,7 +63,10 @@ SECRET_PAT='(password|passwd|secret|api[_-]?key|token)[[:space:]]*[:=][[:space:]
 # calvin = the universal Dell factory-default iDRAC password (docs/tests use it as
 # THE example); admin/password/changeme are stock placeholders — none is a per-box
 # secret to rotate, so they stay out of the way of a real leak.
-SECRET_EXCL='<pw>|<secret|placeholder|redact|example|BASE32SECRET|your[_-]|xxxx+|IPMI_PASSWORD env|KVM_PILOT_|\$\{|\$[A-Z]|os\.environ|"calvin"|"admin"|"password"|"changeme"|"test"'
+# AMT RFB/KVM test fixtures: tests pass fake kvm_password=/amt_kvm_password= args
+# ("rfbpass"/"rfb-only"/"Abcd123!") — the real RFB password lives only in the
+# gitignored config, never committed, so these literals are always fixtures.
+SECRET_EXCL='<pw>|<secret|placeholder|redact|example|BASE32SECRET|your[_-]|xxxx+|IPMI_PASSWORD env|KVM_PILOT_|\$\{|\$[A-Z]|os\.environ|"calvin"|"admin"|"password"|"changeme"|"test"|"rfbpass"|"rfb-only"|Abcd123|"secret"'
 SECRETS="$( { git diff HEAD 2>/dev/null; git log -p -n 25 2>/dev/null; } \
   | grep -E '^\+' | grep -EI "$SECRET_PAT" | grep -vEI "$SECRET_EXCL" | sort -u || true )"
 echo "SECRET_SCAN (working diff + last 25 commits): $( [ -n "$SECRETS" ] && echo "$(echo "$SECRETS" | wc -l | tr -d ' ') possible literal(s) — INSPECT + ROTATE if real" || echo "clean" )"
