@@ -203,11 +203,12 @@ class IderSession:
                 return 0
             stype = self._acc[8]
             value = _u32le(self._acc, 9)
-            if stype == 1 and (value & 1):      # REGS_AVAIL — (re)enable
+            if stype == 1 and (value & 1):        # REGS_AVAIL — (re)enable
                 self._send_enable_cd()
-            elif stype == 2:                     # REGS_STATUS — enabled bit
-                if value & 2:
-                    self._enabled.set()
+            elif stype == 2 and (value & 2):      # REGS_STATUS — enabled bit set
+                self._enabled.set()
+            elif stype == 3 and value == 1:       # REGS_TOGGLE — enable accepted (real HW's ack)
+                self._enabled.set()
             return 13
         if cmd == _ERROR:
             if len(self._acc) < 11:
@@ -216,6 +217,7 @@ class IderSession:
         if cmd == _COMMAND:
             if len(self._acc) < 28:
                 return 0
+            self._enabled.set()                    # the host is driving the CD -> it's live
             device_flags = self._acc[14]
             feature = self._acc[9]
             cdb = self._acc[16:28]
@@ -252,16 +254,30 @@ class IderSession:
             body = bytes([0] * 12 + [0x87, (sense << 4) & 0xff, 3, 0, 0, 0, device, 0x51, sense, asc, asq])
         self._send(_SENSE, body, completed=True)
 
-    def _data_to_host(self, device: int, data: bytes, dma: int) -> None:
+    def _data_to_host(self, device: int, data: bytes, dma: int, completed: bool = True) -> None:
+        # The 26-byte sub-header carries the emulated ATA task-file. Only the FINAL
+        # transfer of a command carries the completion status trailer (0x85…0x50);
+        # intermediate chunks of a multi-block read must NOT, or the host sees the
+        # command finish early and its I/O stalls (found live: kernel read-ahead of
+        # a >readbfr READ(10) hung the mount).
         dmalen = 0 if dma else len(data)
-        head = bytes([0, len(data) & 0xff, (len(data) >> 8) & 0xff, 0, 0xb4 if dma else 0xb5, 0, 2, 0,
-                      dmalen & 0xff, (dmalen >> 8) & 0xff, device, 0x58, 0x85, 0, 3, 0, 0, 0, device,
-                      0x50, 0, 0, 0, 0, 0, 0])
-        self._send(_DATA_TO_HOST, head + data, completed=True, dma=bool(dma))
+        prefix = [0, len(data) & 0xff, (len(data) >> 8) & 0xff, 0, 0xb4 if dma else 0xb5, 0, 2, 0,
+                  dmalen & 0xff, (dmalen >> 8) & 0xff, device, 0x58]
+        trailer = [0x85, 0, 3, 0, 0, 0, device, 0x50, 0, 0, 0, 0, 0, 0] if completed \
+            else [0] * 14
+        self._send(_DATA_TO_HOST, bytes(prefix + trailer) + data, completed=completed, dma=bool(dma))
 
     # -- ATAPI command handling (CD-ROM only) --------------------------
 
     def _handle_scsi(self, cdb: bytes, feature: int, device_flags: int) -> None:
+        # The ME exposes BOTH a virtual floppy (device select bit 0x10 clear) and
+        # a virtual CD (bit set) on every IDE-R session. We emulate only the CD, so
+        # answer any floppy-slot command with 'medium not present' — otherwise the
+        # host's probe of the empty floppy gets CD data and its ATA I/O stalls
+        # (found live: a devflags=0x00 READ(10) hung the mount before any CD read).
+        if not (device_flags & 0x10):
+            self._end_response(1, 0x02, 0xA0, 0x3a, 0x00)  # ASC 0x3a = medium not present
+            return
         dev = _DEV_CD
         dma = feature & 1
         op = cdb[0]
@@ -357,7 +373,7 @@ class IderSession:
             if not chunk:
                 break
             remaining -= len(chunk)
-            self._data_to_host(dev, chunk, dma)
+            self._data_to_host(dev, chunk, dma, completed=(remaining == 0))
 
 
 def _u16le(buf: bytes, p: int) -> int:
