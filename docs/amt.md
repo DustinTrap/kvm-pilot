@@ -51,6 +51,7 @@ three, all **pure-stdlib** (no `python-amt`, no external VNC lib):
 |---|---|---|---|
 | `Power`, `SystemInfo`, `BootConfig` | WS-Man (SOAP 1.2 over HTTP Digest) | 16992 (TLS 16993) | [`wsman.py`](../src/kvm_pilot/drivers/amt/wsman.py) |
 | `SerialConsole` (SOL) | AMT serial-over-LAN via `amtterm` | 16994 | [`driver.py`](../src/kvm_pilot/drivers/amt/driver.py) |
+| `VirtualMedia` (IDE-R) | AMT IDE-Redirect (binary redirection + digest) | 16994 (TLS 16995) | [`ider.py`](../src/kvm_pilot/drivers/amt/ider.py), [`redir.py`](../src/kvm_pilot/drivers/amt/redir.py) |
 | `Video` + `HID` | RFB / KVM-redirection (VNC) | 5900 (standard-port) | [`rfb.py`](../src/kvm_pilot/drivers/amt/rfb.py) |
 
 ### WS-Man (power / inventory / boot)
@@ -81,6 +82,36 @@ console` drops into an interactive SOL session; `serial_read`/`serial_write` bac
 a PTY-driven session for scripted use. The password is passed via the
 `AMT_PASSWORD` environment variable — **never** on argv (so it can't leak via
 `ps`). Missing `amtterm` raises `CapabilityError` with an install hint.
+
+### Virtual media (IDE-R) — boot from a local ISO
+
+`VirtualMedia` streams a local ISO to the host as a bootable ATAPI **CD-ROM**
+over AMT IDE-Redirect, with no physical media — the firmware-level equivalent of
+mounting an install disc. It rides the redirection channel (16994 / TLS 16995),
+which the shared session/auth layer opens with the same three-step handshake SOL
+and KVM use: `StartRedirectionSession` → `AuthenticateSession` **HTTP-Digest**
+over the admin credentials ([`redir.py`](../src/kvm_pilot/drivers/amt/redir.py)).
+Then [`ider.py`](../src/kvm_pilot/drivers/amt/ider.py) opens an IDE-R session and
+answers the host's ATAPI commands (`TEST UNIT READY`, `READ CAPACITY`,
+`READ(6/10/12)`, `MODE SENSE`, `GET CONFIGURATION`, `READ TOC`, …) from the ISO
+on a background thread while the host boots.
+
+```bash
+kvm-pilot amt enable-sol --profile dell-amt         # open the 16994 listener once
+kvm-pilot mount fedora.iso --profile dell-amt       # attach the ISO as a virtual CD
+kvm-pilot boot-device cd --profile dell-amt         # next boot -> CD
+kvm-pilot power reset --profile dell-amt            # reboot into the ISO
+```
+
+Notes and limits:
+- **CD-ROM images only** (bootable ISOs). The floppy/USB-R slots are reported
+  empty — USB-R is not implemented (#213).
+- The protocol follows the maintained reference (MeshCommander); the legacy
+  `amtider` tool speaks an older revision AMT 14 rejects, which is why it fails.
+- The session streams the image **live** from the client host and stays open
+  until `eject` / the driver closes — nothing is staged on the ME.
+- An ME firmware update resets the redirection listeners and can leave the ME
+  needing a full **power cycle** before `enable-sol` / IDE-R work again (#217).
 
 ### Remote SOL / KVM enablement (no MEBx trip)
 

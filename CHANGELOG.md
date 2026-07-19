@@ -6,6 +6,23 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **AMT `VirtualMedia` — IDE-R (boot a host from a local ISO)** (#213) — the one
+  capability deferred when the AMT driver landed. A new redirection-session layer
+  ([`redir.py`](src/kvm_pilot/drivers/amt/redir.py)) implements the binary
+  `StartRedirectionSession` + `AuthenticateSession` HTTP-Digest handshake shared
+  by SOL/KVM, and [`ider.py`](src/kvm_pilot/drivers/amt/ider.py) streams a local
+  ISO to the host as a bootable ATAPI CD-ROM (read-only CD emulation:
+  `TEST UNIT READY`, `READ CAPACITY`, `READ(6/10/12)`, `MODE SENSE`,
+  `GET CONFIGURATION`, `READ TOC`, `GET EVENT STATUS`). Wires up
+  `mount_iso`/`msd_connect`/`msd_disconnect` (auto-enabling
+  `Capability.VIRTUAL_MEDIA`, gated `amt.mount_iso`/`amt.eject`), so the existing
+  `mount`/`eject`/`media-list` CLI + MCP surfaces work. Pure-stdlib; protocol
+  ported from the maintained MeshCommander reference (not the legacy `amtider`,
+  which speaks an AMT 14-incompatible revision). **Live-validated on a Dell
+  Latitude 5411 (AMT 14.1.79):** in-OS mount + byte-perfect read (md5 match) and
+  an actual boot — the host booted an iPXE ISO from the redirected CD.
+
 ## [0.1.0b9] — 2026-07-18
 
 **Beta 9 — the Intel AMT / vPro driver, live-validated and brought to first-class
