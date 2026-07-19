@@ -49,10 +49,37 @@ driver or CLI dispatch, run what CI runs:
 - **Be honest about hardware.** If you've tested on real hardware, say which
   device and firmware in the PR. The compatibility table in the README should
   reflect what's actually been verified versus assumed.
-- **New docs pages must be registered.** The wiki publishes an explicit allowlist
-  (`PAGES` in `.github/scripts/build_wiki.py`), not a glob — add every new
-  `docs/*.md` there (or to `OPT_OUT` with a reason). CI enforces this
-  (`build_wiki.py --check`, #175).
+- **New docs pages must be registered.** See [Adding a doc](#adding-a-doc)
+  below — CI enforces every step (`build_wiki.py --check`, #175/#221).
+
+## Adding a doc
+
+Every doc has one obvious home (#221). Pick the row that matches what you're
+writing, name the file accordingly, and register it — CI fails the build until
+all three navigation surfaces agree.
+
+| You are writing... | Section | Naming |
+|---|---|---|
+| A task walkthrough (how to accomplish something) | Guides | `<topic>.md`, imperative topic (`unattended-install.md`); operator bring-up guides end in `-onboarding.md` |
+| What exists and how it behaves (a subsystem, driver, or surface) | Reference | named after the subsystem (`redfish.md`, `amt.md`, `cli.md`) |
+| A procedure executed against real hardware | Runbooks & test plans | `*-test-plan.md` (or `*-runbook.md`) |
+| A design decision or RFC | Design records | add to `decisions.md` if it's one decision; a new file only for a full RFC (`reflexes.md`) |
+| A dated session-level review narrative | Analysis (internal reports) | `docs/analysis/YYYY-MM-DD-slug.md` — the only subdirectory |
+
+Then, mechanically:
+
+1. Put the file flat in `docs/` (kebab-case). No new subdirectories —
+   structure lives in the navigation manifest, not the filesystem, because
+   published wheels and `llms.txt` consumers hold links to today's paths.
+2. Register it in `PAGES` in
+   [`build_wiki.py`](../.github/scripts/build_wiki.py) with its section
+   (or `OPT_OUT` with a reason). The wiki sidebar is generated from this.
+3. Link it from the matching section of [`docs/README.md`](README.md).
+4. Add it to the root `llms.txt` if it's agent-operating material, otherwise
+   to `LLMS_OPT_OUT` in `build_wiki.py` with a reason.
+
+`python .github/scripts/build_wiki.py --check` (run by CI) verifies all of it:
+registration, hub link, `llms.txt` membership, and dead relative links.
 
 ## Hardware reports welcome
 

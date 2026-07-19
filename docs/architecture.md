@@ -81,7 +81,7 @@ The reusable parts of today's HTTP layer (retry/backoff, secret redaction,
 urllib plumbing) become a generic `HttpTransport`; the PiKVM-specific pieces
 (the `X-KVMD-*` auth headers, TOTP-in-password, the `ok`/`result` envelope)
 become an `AuthStrategy` + response decoder. New transports (WebSocket JSON-RPC
-for JetKVM, optional IPMI) slot in without touching driver code.
+for JetKVM) slot in without touching driver code.
 
 ## Driver registry & families
 

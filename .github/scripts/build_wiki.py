@@ -10,6 +10,13 @@ namespace (``architecture.md`` -> ``architecture``, ``docs/README.md`` -> the
 wiki ``Home``), copies the diagrams alongside, and generates ``Home`` +
 ``_Sidebar`` navigation.
 
+``PAGES`` below is the **single navigation manifest** (#221): each page carries
+its section, the sidebar is generated from it, and ``--check`` (run in CI) fails
+if the other two navigation surfaces drift — every page must be linked from the
+``docs/README.md`` hub and be present in ``llms.txt`` (or deliberately opted
+out), and no page may contain a dead relative link. Adding a doc = add the file,
+register it here with a section, link it from the hub; CI enforces the rest.
+
 Run by ``.github/workflows/wiki-sync.yml``. Also runnable locally to preview the
 output without touching the wiki::
 
@@ -30,51 +37,86 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 REPO_URL = "https://github.com/DustinTrap/kvm-pilot"
 
-# (repo-relative source, wiki page filename, sidebar title). Order = sidebar order.
-# The wiki filename keeps the source stem so link rewriting is a plain ``.md``
-# strip; ``Home`` is the wiki's reserved landing page.
-PAGES: list[tuple[str, str, str | None]] = [
-    ("docs/README.md", "Home.md", None),
-    ("docs/getting-started.md", "getting-started.md", "Getting started"),
-    ("docs/architecture.md", "architecture.md", "Architecture"),
-    ("docs/driver-features.md", "driver-features.md", "Driver features"),
-    ("docs/test-plan.md", "test-plan.md", "Test plan"),
-    ("docs/cli.md", "cli.md", "CLI reference"),
-    ("docs/configuration.md", "configuration.md", "Configuration"),
-    ("docs/troubleshooting.md", "troubleshooting.md", "Troubleshooting & FAQ"),
-    ("docs/decisions.md", "decisions.md", "Design decisions"),
-    ("docs/reflexes.md", "reflexes.md", "Reflexes (RFC)"),
-    ("docs/redfish.md", "redfish.md", "Redfish reference"),
-    ("docs/amt.md", "amt.md", "Intel AMT vPro reference"),
-    ("docs/amt-onboarding.md", "amt-onboarding.md", "Intel AMT onboarding runbook"),
+# Sidebar section headings, in display order. Every PAGES entry (except Home)
+# names one of these; the sidebar is generated grouped by section.
+SECTIONS: list[str] = [
+    "Start here",
+    "Guides",
+    "Reference",
+    "Runbooks & test plans",
+    "Design records",
+    "Project",
+    "Analysis (internal reports)",
+]
+
+# (repo-relative source, wiki page filename, sidebar title, section).
+# THE navigation manifest (#221): sidebar order = PAGES order within a section;
+# ``--check`` holds docs/README.md and llms.txt to this list. The wiki filename
+# keeps the source stem so link rewriting is a plain ``.md`` strip; ``Home`` is
+# the wiki's reserved landing page (section None).
+PAGES: list[tuple[str, str, str | None, str | None]] = [
+    ("docs/README.md", "Home.md", None, None),
+    # Start here
+    ("docs/getting-started.md", "getting-started.md", "Getting started", "Start here"),
+    # Guides — task-oriented: how to accomplish something
+    ("docs/amt-onboarding.md", "amt-onboarding.md", "Intel AMT onboarding runbook", "Guides"),
+    ("docs/unattended-install.md", "unattended-install.md",
+     "Unattended Linux installs", "Guides"),
+    ("docs/firmware-update.md", "firmware-update.md", "Remote firmware update", "Guides"),
+    ("docs/troubleshooting.md", "troubleshooting.md", "Troubleshooting & FAQ", "Guides"),
+    # Reference — descriptive: what exists and how it behaves
+    ("docs/cli.md", "cli.md", "CLI reference", "Reference"),
+    ("docs/configuration.md", "configuration.md", "Configuration", "Reference"),
+    ("docs/driver-features.md", "driver-features.md", "Driver features", "Reference"),
+    ("docs/architecture.md", "architecture.md", "Architecture", "Reference"),
+    ("docs/redfish.md", "redfish.md", "Redfish reference", "Reference"),
+    ("docs/amt.md", "amt.md", "Intel AMT vPro reference", "Reference"),
+    ("docs/firmware-registry.md", "firmware-registry.md", "Firmware registry", "Reference"),
+    ("src/kvm_pilot/skill/SKILL.md", "skill.md", "Claude skill", "Reference"),
+    ("src/kvm_pilot/mcp/README.md", "mcp-server.md", "MCP server", "Reference"),
+    # Runbooks & test plans — procedures executed against real hardware
+    ("docs/test-plan.md", "test-plan.md", "Test plan", "Runbooks & test plans"),
     ("docs/hardware-test-plan-ilo-idrac.md", "hardware-test-plan-ilo-idrac.md",
-     "Hardware test plan: iLO / iDRAC"),
-    ("docs/firmware-registry.md", "firmware-registry.md", "Firmware registry"),
-    ("docs/firmware-update.md", "firmware-update.md", "Remote firmware update"),
-    ("docs/unattended-install.md", "unattended-install.md", "Unattended Linux installs"),
-    ("src/kvm_pilot/skill/SKILL.md", "skill.md", "Claude skill"),
-    ("src/kvm_pilot/mcp/README.md", "mcp-server.md", "MCP server"),
-    ("docs/CONTRIBUTING.md", "CONTRIBUTING.md", "Contributing"),
-    ("docs/plugin-development.md", "plugin-development.md", "Writing a first-class driver"),
-    ("docs/SECURITY.md", "SECURITY.md", "Security policy"),
-    # Analysis output: session-level review narratives (docs/analysis/).
-    # NB: the wiki filename must keep the source stem (link rewriting maps by stem).
+     "Hardware test plan: iLO / iDRAC", "Runbooks & test plans"),
+    # Design records — decisions and RFCs, not how-tos
+    ("docs/decisions.md", "decisions.md", "Design decisions", "Design records"),
+    ("docs/reflexes.md", "reflexes.md", "Reflexes (RFC)", "Design records"),
+    # Project — contributing, extending, security
+    ("docs/CONTRIBUTING.md", "CONTRIBUTING.md", "Contributing", "Project"),
+    ("docs/plugin-development.md", "plugin-development.md",
+     "Writing a first-class driver", "Project"),
+    ("docs/SECURITY.md", "SECURITY.md", "Security policy", "Project"),
+    # Analysis — dated session-level review narratives (docs/analysis/), demoted
+    # to the last sidebar section (#209). NB: the wiki filename must keep the
+    # source stem (link rewriting maps by stem).
     ("docs/analysis/2026-07-01-deep-review.md", "2026-07-01-deep-review.md",
-     "Analysis: 2026-07-01 deep review"),
+     "2026-07-01 deep review", "Analysis (internal reports)"),
     ("docs/analysis/2026-07-03-rm1pe-firmware-and-encoder.md",
      "2026-07-03-rm1pe-firmware-and-encoder.md",
-     "Analysis: 2026-07-03 RM1PE firmware + encoder"),
+     "2026-07-03 RM1PE firmware + encoder", "Analysis (internal reports)"),
     ("docs/analysis/2026-07-08-perf-a13-a14.md",
      "2026-07-08-perf-a13-a14.md",
-     "Analysis: 2026-07-08 a13→a14 performance"),
+     "2026-07-08 a13→a14 performance", "Analysis (internal reports)"),
     ("docs/analysis/2026-07-08-e2e-leaner-cut.md",
      "2026-07-08-e2e-leaner-cut.md",
-     "Analysis: 2026-07-08 a13→a14 end-to-end tasks"),
+     "2026-07-08 a13→a14 end-to-end tasks", "Analysis (internal reports)"),
 ]
 
 # Docs that intentionally never publish to the wiki (repo-relative). Empty today;
 # add a path here (with a reason) instead of leaving it silently unregistered.
 OPT_OUT: frozenset[str] = frozenset()
+
+# Pages deliberately absent from llms.txt — it is a curated agent-facing subset,
+# not a mirror of PAGES. Everything else registered above must appear there
+# (``--check`` enforces membership; the prose stays hand-written).
+LLMS_OPT_OUT: frozenset[str] = frozenset({
+    "docs/README.md",  # the hub duplicates llms.txt's own role as a doc map
+    "docs/reflexes.md",  # draft RFC, post-GA scope — not agent operating material
+    "docs/analysis/2026-07-01-deep-review.md",  # dated internal narratives
+    "docs/analysis/2026-07-03-rm1pe-firmware-and-encoder.md",
+    "docs/analysis/2026-07-08-perf-a13-a14.md",
+    "docs/analysis/2026-07-08-e2e-leaner-cut.md",
+})
 
 # Link/image markdown: capture the ``[label]`` and the ``(target)`` separately.
 _LINK = re.compile(r"(!?\[[^\]]*\])\(([^)]+)\)")
@@ -283,7 +325,7 @@ def build(out: Path) -> None:
         shutil.rmtree(out)
     out.mkdir(parents=True)
 
-    for src_rel, wiki_name, _ in PAGES:
+    for src_rel, wiki_name, _, _ in PAGES:
         src = ROOT / src_rel
         if not src.exists():
             raise SystemExit(f"missing doc source: {src_rel}")
@@ -303,23 +345,24 @@ def build(out: Path) -> None:
         (out / HCL_PAGE).write_text(render_hcl(), encoding="utf-8")
         hcl_built = True
 
-    # Sidebar navigation, in PAGES order (Home first, then the guides).
-    # Internal analysis narratives (title prefix "Analysis: ") are grouped
-    # under their own heading so the user-facing nav stays clean (#209).
-    lines = ["### kvm-pilot docs", "", "- [[Home]]"]
-    analysis: list[str] = []
-    for _, wiki_name, title in PAGES:
-        if title is None:
+    # Sidebar navigation: Home first, then one heading per SECTIONS entry with
+    # its pages in PAGES order. The generated HCL page rides under Reference.
+    by_section: dict[str, list[str]] = {}
+    for _, wiki_name, title, section in PAGES:
+        if title is None or section is None:
             continue
-        if title.startswith("Analysis: "):
-            short = title.removeprefix("Analysis: ")
-            analysis.append(f"- [[{short}|{Path(wiki_name).stem}]]")
-        else:
-            lines.append(f"- [[{title}|{Path(wiki_name).stem}]]")
+        by_section.setdefault(section, []).append(f"- [[{title}|{Path(wiki_name).stem}]]")
     if hcl_built:
-        lines.append(f"- [[Hardware compatibility|{Path(HCL_PAGE).stem}]]")
-    if analysis:
-        lines += ["", "#### Analysis (internal reports)", ""] + analysis
+        by_section.setdefault("Reference", []).append(
+            f"- [[Hardware compatibility|{Path(HCL_PAGE).stem}]]"
+        )
+    unknown = set(by_section) - set(SECTIONS)
+    if unknown:
+        raise SystemExit(f"PAGES section(s) not in SECTIONS: {sorted(unknown)}")
+    lines = ["### kvm-pilot docs", "", "- [[Home]]"]
+    for section in SECTIONS:
+        if section in by_section:
+            lines += ["", f"#### {section}", ""] + by_section[section]
     (out / "_Sidebar.md").write_text("\n".join(lines) + "\n", encoding="utf-8")
 
     print(f"built {len(PAGES)} pages{' + HCL' if hcl_built else ''} + sidebar into {out}")
@@ -328,7 +371,7 @@ def build(out: Path) -> None:
 def unregistered_docs() -> list[str]:
     """Repo docs pages missing from ``PAGES`` (the wiki publishes an allowlist,
     not a glob, so an unregistered page silently never syncs — #175)."""
-    registered = {src for src, _, _ in PAGES}
+    registered = {p[0] for p in PAGES}
     candidates = sorted(
         p.relative_to(ROOT).as_posix()
         for pattern in ("docs/*.md", "docs/analysis/*.md")
@@ -337,20 +380,89 @@ def unregistered_docs() -> list[str]:
     return [p for p in candidates if p not in registered and p not in OPT_OUT]
 
 
+def _page_links(src_rel: str) -> list[str]:
+    """Every markdown link target in a page, resolved to a repo-relative posix
+    path (anchor stripped). External/absolute/in-page targets are skipped."""
+    text = (ROOT / src_rel).read_text(encoding="utf-8")
+    out = []
+    for m in _LINK.finditer(text):
+        target = m.group(2)
+        if re.match(r"^(https?:|#|mailto:|/)", target):
+            continue
+        path, _, _ = target.partition("#")
+        if not path:
+            continue
+        out.append(posixpath.normpath(posixpath.join(posixpath.dirname(src_rel), path)))
+    return out
+
+
+def hub_missing_links() -> list[str]:
+    """The ``docs/README.md`` hub must link every registered page (#221) and
+    must not link a missing file — the hub is the human nav, PAGES the truth."""
+    hub = "docs/README.md"
+    linked = set(_page_links(hub))
+    problems = [
+        f"{hub}: dead link to {path}" for path in sorted(linked)
+        if not (ROOT / path).exists()
+    ]
+    problems += [
+        f"{hub}: missing link to {src} (every PAGES entry must be in the hub)"
+        for src, _, _, _ in PAGES
+        if src != hub and src not in linked
+    ]
+    return problems
+
+
+def llms_coverage() -> list[str]:
+    """``llms.txt`` is the agent-facing doc map: every raw URL in it must point
+    at a real repo file, and every PAGES source must be listed or in
+    ``LLMS_OPT_OUT`` (#221)."""
+    llms = ROOT / "llms.txt"
+    text = llms.read_text(encoding="utf-8")
+    raw_paths = re.findall(
+        r"https://raw\.githubusercontent\.com/DustinTrap/kvm-pilot/main/([^)\s]+)", text
+    )
+    problems = [
+        f"llms.txt: dead link to {path}" for path in sorted(set(raw_paths))
+        if not (ROOT / path).exists()
+    ]
+    listed = set(raw_paths)
+    problems += [
+        f"llms.txt: missing {src} (list it, or add to LLMS_OPT_OUT with a reason)"
+        for src, _, _, _ in PAGES
+        if src not in listed and src not in LLMS_OPT_OUT
+    ]
+    return problems
+
+
+def dead_relative_links() -> list[str]:
+    """Relative link targets in every registered page must exist in the repo."""
+    return [
+        f"{src}: dead link to {path}"
+        for src, _, _, _ in PAGES
+        for path in sorted(set(_page_links(src)))
+        if not (ROOT / path).exists()
+    ]
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__)
     mode = ap.add_mutually_exclusive_group(required=True)
     mode.add_argument("--out", type=Path, help="output directory for wiki pages")
     mode.add_argument(
         "--check", action="store_true",
-        help="fail if a docs page is not registered in PAGES (CI parity guard, #175)",
+        help="fail if the docs navigation surfaces drift: unregistered pages "
+        "(#175), hub/llms.txt coverage, dead relative links (#221)",
     )
     args = ap.parse_args()
     if args.check:
-        missing = unregistered_docs()
-        for path in missing:
-            print(f"{path}: not registered in PAGES (add it there, or to OPT_OUT with a reason)")
-        raise SystemExit(1 if missing else 0)
+        problems = [
+            f"{p}: not registered in PAGES (add it there, or to OPT_OUT with a reason)"
+            for p in unregistered_docs()
+        ] + hub_missing_links() + llms_coverage() + dead_relative_links()
+        for problem in problems:
+            print(problem)
+        raise SystemExit(1 if problems else 0)
     build(args.out)
 
 

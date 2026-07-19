@@ -24,7 +24,7 @@ exploits against third-party devices or live hosts in a public report.
 - **Do not expose a KVM device directly to the internet.** Put it behind a VPN
   or an authenticated reverse proxy. The PiKVM/GLKVM web stack is not hardened
   for direct public exposure.
-- **Use TOTP/2FA** where the device supports it (`pip install
+- **Use TOTP/2FA** where the device supports it (`pip install --pre
   "kvm-pilot[totp]"`). `verify_ssl` defaults to `False` because these devices
   ship self-signed certificates; set it to `True` and pin a real certificate if
   your environment allows.

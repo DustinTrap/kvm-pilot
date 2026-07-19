@@ -109,7 +109,10 @@ Optimize for the next person reading this, not for cleverness.
   `kvm-pilot-mcp`); `src/kvm_pilot/skill/SKILL.md` — the bundled Claude skill. Both
   ship in the wheel (see the batteries-included rule above).
 - The GitHub wiki is auto-generated from `docs/` by `.github/workflows/wiki-sync.yml`
-  (via `.github/scripts/build_wiki.py`) — edit the docs, never the wiki.
+  (via `.github/scripts/build_wiki.py`) — edit the docs, never the wiki. `PAGES`
+  in that script is the **single navigation manifest** (#221): it defines each
+  page's sidebar section, and `--check` (CI) fails if `docs/README.md` or
+  `llms.txt` drift from it. New doc → follow "Adding a doc" in docs/CONTRIBUTING.md.
 
 ## Dev workflow (Python ≥ 3.11)
 ```bash

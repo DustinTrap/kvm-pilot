@@ -18,6 +18,8 @@ from test_mcp_server import EXPECTED_TOOLS
 _ROOT = Path(__file__).resolve().parents[1]
 _README = _ROOT / "README.md"
 _SKILL = _ROOT / "src" / "kvm_pilot" / "skill" / "SKILL.md"
+_GETTING_STARTED = _ROOT / "docs" / "getting-started.md"
+_MCP_README = _ROOT / "src" / "kvm_pilot" / "mcp" / "README.md"
 
 # Version literals allowed to differ from __about__.__version__: the yanked
 # first alpha, which the README warns readers away from by name.
@@ -71,4 +73,83 @@ def test_skill_tool_list_matches_server_surface():
     assert not phantom, (
         f"SKILL.md 'tools it exposes' names things that are not registered "
         f"tools (stale or typo): {sorted(phantom)}"
+    )
+
+
+# The install command is duplicated across every self-sufficient surface (the
+# shipped SKILL.md / mcp README must work offline, README is the PyPI page).
+# This guard turns a many-file drift into one failure — it will fire usefully
+# at GA, when `--pre` stops being the working command everywhere at once.
+_INSTALL_CMD = "pip install --pre kvm-pilot"
+_INSTALL_DOCS = (_README, _GETTING_STARTED, _SKILL, _MCP_README)
+# A bare `pip install kvm-pilot` may appear only when *warning* that it does
+# nothing on a pre-release line, as the named batteries-included doctrine
+# ("`pip install kvm-pilot` ships everything", CLAUDE.md), or as a VCS install
+# (`@ git+...`, which ignores pre-release gating) — never as a working
+# release-install instruction. These words mark the allowed contexts.
+_BARE_OK_WORDS = ("deliberately", "pre-release", "nothing", "ships everything", "git+")
+
+
+def _current_doc_files() -> list[Path]:
+    """Docs that describe the present. Dated records (decisions.md entries,
+    docs/analysis/ narratives) quote history verbatim and are never edited to
+    track the current command line."""
+    historical = {_ROOT / "docs" / "decisions.md"}
+    return [
+        p for p in sorted(_ROOT.glob("docs/*.md")) if p not in historical
+    ] + [_README, _SKILL, _MCP_README]
+
+
+def test_install_command_consistent():
+    """The working install command appears verbatim on every install surface,
+    and a bare (broken) install is only ever shown as a warning."""
+    for doc in _INSTALL_DOCS:
+        assert _INSTALL_CMD in doc.read_text(encoding="utf-8"), (
+            f"{doc.relative_to(_ROOT)}: missing the canonical install command "
+            f"{_INSTALL_CMD!r}"
+        )
+    bare = re.compile(r'pip install "?kvm-pilot')
+    for doc in _current_doc_files():
+        # Collapse whitespace so a command wrapped across a line break (as
+        # markdown prose does) still matches.
+        flat = " ".join(doc.read_text(encoding="utf-8").split())
+        for m in bare.finditer(flat):
+            window = flat[max(0, m.start() - 120): m.end() + 120]
+            assert any(w in window for w in _BARE_OK_WORDS), (
+                f"{doc.relative_to(_ROOT)}: shows `pip install kvm-pilot` "
+                f"without --pre as if it works (context: ...{window}...) — "
+                f"use {_INSTALL_CMD!r}, or mark it as the deliberate "
+                f"no-pre-release warning"
+            )
+
+
+def _mcp_add_snippet(path: Path) -> str:
+    """The `claude mcp add kvm-pilot ... kvm-pilot-mcp` command block."""
+    text = path.read_text(encoding="utf-8")
+    m = re.search(
+        r"^(claude mcp add kvm-pilot.*?^\s*kvm-pilot-mcp\s*$)",
+        text, re.MULTILINE | re.DOTALL,
+    )
+    assert m, f"{path.relative_to(_ROOT)}: no `claude mcp add kvm-pilot` snippet"
+    return m.group(1).strip()
+
+
+def test_mcp_add_snippet_consistent():
+    """The MCP registration command stays identical across its three homes.
+
+    README and getting-started must match byte-for-byte (both show a human's
+    first contact). SKILL.md deliberately demos `KVM_PILOT_MCP_DRY_RUN=1`
+    (agent rehearsal posture) where the other two demo the safest first rung
+    `KVM_PILOT_MCP_READ_ONLY=1` — that one env gate is the only allowed
+    difference; everything else (server name, `-s user` scope, profile env,
+    launcher) is pinned.
+    """
+    canonical = _mcp_add_snippet(_GETTING_STARTED)
+    assert _mcp_add_snippet(_README) == canonical, (
+        "README.md's `claude mcp add` snippet differs from getting-started.md"
+    )
+    skill = _mcp_add_snippet(_SKILL)
+    assert skill.replace("KVM_PILOT_MCP_DRY_RUN", "KVM_PILOT_MCP_READ_ONLY") == canonical, (
+        "SKILL.md's `claude mcp add` snippet differs from getting-started.md "
+        "beyond the deliberate DRY_RUN-vs-READ_ONLY trust-ladder gate"
     )

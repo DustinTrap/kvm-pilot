@@ -6,6 +6,13 @@ real BMCs. Tracks epic #200; capture findings on #29 (real-BMC validation) and t
 support matrix (#96). Pairs with the synthetic coverage in
 `tests/test_redfish_boot.py` / `tests/redfish_emulator.py`.
 
+> **Status:** the **R710/iDRAC6 leg was executed 2026-07-14** — the IPMI driver
+> (#62, shipped in v0.1.0b7) validated live end-to-end (power, boot-device,
+> sensors, SEL, SOL console; results on #206 and the
+> [Hardware-Compatibility list](https://github.com/DustinTrap/kvm-pilot/wiki/Hardware-Compatibility)).
+> The **DL380 G9 / iLO4 Redfish leg (#29) is still open** — the runbook below
+> remains the procedure for it, and a reusable template for similar boxes.
+
 > **Read the firmware-era caveat first — it decides which box is testable over Redfish.**
 
 ## Firmware reality (important)
@@ -13,11 +20,11 @@ support matrix (#96). Pairs with the synthetic coverage in
 | Box | BMC | Redfish? | Path |
 |---|---|---|---|
 | **HPE DL380 G9** | **iLO 4** (fw ≥ 2.30 for DMTF Redfish 1.0; 2.5x+ preferred) | **Yes** (older Redfish — exactly what the driver's feature-detect + quirk handling targets) | `--driver redfish` ✅ |
-| **Dell R710** | **iDRAC 6** (11th-gen; there is no iDRAC7 for R710) | **No** — iDRAC6 predates Redfish (WS-MAN/IPMI/racadm only) | Redfish will 404 at `/redfish/v1`; use **IPMI (#62, not yet built)** |
+| **Dell R710** | **iDRAC 6** (11th-gen; there is no iDRAC7 for R710) | **No** — iDRAC6 predates Redfish (WS-MAN/IPMI/racadm only) | Redfish will 404 at `/redfish/v1`; use the **IPMI driver** (`driver = "ipmi"`, #62 — shipped v0.1.0b7, live-validated on this exact box 2026-07-14) |
 
-So tonight: **full Redfish run on the DL380 G9**; on the R710 the goal is to
-**confirm clean detection of "no Redfish"** and record it as the motivating case
-for the IPMI driver (#62). If the R710's iDRAC was flashed to something newer, or
+So: **full Redfish run on the DL380 G9**; on the R710, **confirm clean detection
+of "no Redfish"**, then run the same phases through the IPMI driver (see the
+R710 section below). If the R710's iDRAC was flashed to something newer, or
 it's actually a 12th-gen board, re-check — but plan for iDRAC6 = no Redfish.
 
 ## Prerequisites
@@ -44,9 +51,8 @@ verify_ssl = false         # iLO4 ships a self-signed cert; pin with ssl_ca_file
 
 [hosts.idrac-r710]
 host = "10.0.1.BB"        # iDRAC IP
-driver = "redfish"
+driver = "ipmi"            # iDRAC6 has no Redfish; shells out to ipmitool
 user = "root"
-verify_ssl = false
 ```
 
 Then per session: `export KVM_PILOT_PASSWD='...'` (or pass `--ask-passwd`).
@@ -145,16 +151,28 @@ uv run python -c "from kvm_pilot import wol; wol.send_magic_packet('AA:BB:CC:DD:
 
 ---
 
-## R710 / iDRAC6 — expected "no Redfish" path
+## R710 / iDRAC6 — the IPMI path (executed 2026-07-14)
+
+iDRAC6 has no Redfish (a probe at `/redfish/v1` fails with 404 / connection
+reset) — the box runs through the **IPMI driver** (#62, `driver = "ipmi"`,
+shells out to the system `ipmitool`). The same phase structure applies:
 
 ```bash
-uv run kvm-pilot info --profile idrac-r710
+P=idrac-r710
+uv run kvm-pilot healthcheck   --profile $P     # intake gate
+uv run kvm-pilot info          --profile $P     # model from FRU Board Product (#206)
+uv run kvm-pilot power-state   --profile $P
+uv run kvm-pilot sensors       --profile $P     # temps/fans/PSU via SDR
+uv run kvm-pilot logs          --profile $P     # SEL
+uv run kvm-pilot boot-device pxe --profile $P --yes   # then cd/hdd/none, as Phase B
+uv run kvm-pilot power reset   --profile $P --yes     # as Phase C
+uv run kvm-pilot console       --profile $P            # SOL; exit with ~. (#208)
 ```
-**Expected:** a clean failure resolving `/redfish/v1` (404 / connection reset) —
-iDRAC6 has no Redfish. Record the exact error. This is the motivating case for the
-**IPMI driver (#62)**: `ipmitool -H <idrac> -U root -P calvin chassis power status`
-and `chassis bootdev pxe|cd|disk options=efiboot` would provide power + boot-device
-there. Until #62 lands, the R710 is controlled via IPMI/racadm directly, not kvm-pilot.
+
+All of the above were **live-validated on the R710 (14 pass / 0 fail) on
+2026-07-14**, including a SOL boot capture and an F11 boot-menu drive. Quirks
+found: iDRAC6 maps SOL to **COM2** (`ttyS1` on the host), and the console is
+text-only — no graphical/GUI installer phases over SOL.
 
 ---
 
@@ -174,16 +192,17 @@ For each box, record:
 
 ## Results table (fill in)
 
-| Check | DL380 G9 (iLO4) | R710 (iDRAC6) |
+| Check | DL380 G9 (iLO4) | R710 (iDRAC6, via IPMI — 2026-07-14) |
 |---|---|---|
-| Reachable / healthcheck | | |
-| info + redfish_version | | |
-| capabilities | | (expect: n/a — no Redfish) |
-| boot-device --show (allowable, mode) | | n/a |
-| set once: pxe / cd / hdd | | n/a |
-| set persistent / legacy | | n/a |
-| clear (none) | | n/a |
-| power on/off/reset/cycle | | (IPMI, #62) |
-| virtual media | | n/a |
+| Reachable / healthcheck | | ✅ |
+| info + redfish_version | | ✅ (no Redfish; model via FRU) |
+| capabilities | | ✅ (IPMI set) |
+| boot-device --show (allowable, mode) | | ✅ |
+| set once: pxe / cd / hdd | | ✅ |
+| set persistent / legacy | | ✅ |
+| clear (none) | | ✅ |
+| power on/off/reset/cycle | | ✅ |
+| virtual media | | n/a (not exposed via IPMI) |
 | WoL (host NIC) | | |
-| Notes / quirks | | |
+| SOL console | n/a (Redfish: descriptor only) | ✅ (COM2/`ttyS1`, text-only) |
+| Notes / quirks | | 14/0; details on #206 + the HCL page |

@@ -28,6 +28,10 @@ install with `pip install --pre kvm-pilot` (CLI `kvm-pilot`, MCP server
 
 - [Architecture](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/architecture.md): driver-plugin design, capability protocols
 - [Redfish driver reference](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/redfish.md)
+- [Intel AMT / vPro driver reference](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/amt.md): WS-Man power/boot/inventory, SOL serial, firmware-level RFB KVM
+- [Intel AMT onboarding runbook](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/amt-onboarding.md): bring an AMT box online — provision, healthcheck, enable listeners, hazards
+- [Hardware reliability test plan](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/test-plan.md): the reusable full-fleet sweep procedure feeding the support matrix
+- [Writing a first-class driver](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/plugin-development.md): the driver quality bar with a Definition-of-Done checklist
 - [Firmware registry](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/firmware-registry.md) and [remote firmware update](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/firmware-update.md)
 - [Unattended Linux installs](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/unattended-install.md)
 - [Hardware test plan (iLO/iDRAC)](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/hardware-test-plan-ilo-idrac.md)
