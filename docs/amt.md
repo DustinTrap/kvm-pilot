@@ -4,6 +4,11 @@ Implementation notes for [`drivers/amt/`](../src/kvm_pilot/drivers/amt/) (#211),
 grounded in Intel's AMT SDK (WS-Man / CIM classes), the RFB/VNC protocol spec,
 and the `amtterm` SOL client.
 
+> **Just want to bring a box online?** Start with the
+> **[AMT onboarding runbook](amt-onboarding.md)** — expectations, the ordered
+> bring-up steps, the firmware-update hazard, and troubleshooting. This page is
+> the *how it's built* reference.
+
 > **Status:** **live-validated on a Dell Latitude 5411 (AMT 14.1.67).** WS-Man
 > Power / SystemInfo / single-use BootConfig, remote SOL + KVM enablement, and a
 > full **1920×1080 BIOS/POST screenshot over KVM redirection** were all exercised

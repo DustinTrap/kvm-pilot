@@ -46,6 +46,7 @@ PAGES: list[tuple[str, str, str | None]] = [
     ("docs/reflexes.md", "reflexes.md", "Reflexes (RFC)"),
     ("docs/redfish.md", "redfish.md", "Redfish reference"),
     ("docs/amt.md", "amt.md", "Intel AMT vPro reference"),
+    ("docs/amt-onboarding.md", "amt-onboarding.md", "Intel AMT onboarding runbook"),
     ("docs/hardware-test-plan-ilo-idrac.md", "hardware-test-plan-ilo-idrac.md",
      "Hardware test plan: iLO / iDRAC"),
     ("docs/firmware-registry.md", "firmware-registry.md", "Firmware registry"),

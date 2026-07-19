@@ -27,6 +27,7 @@ on every push to `main` — edit the files here, never the wiki directly).
 - [Reflexes (RFC)](reflexes.md) — the post-GA edge-autonomy playbook runner: act locally on known steps, escalate surprises to the agent ([#117](https://github.com/DustinTrap/kvm-pilot/issues/117)).
 - [Redfish reference](redfish.md) — the BMC driver: hypermedia navigation, auth, and firmware quirks.
 - [Intel AMT / vPro reference](amt.md) — the AMT driver: WS-Man power/boot/inventory, SOL serial, and RFB KVM-redirection (firmware-level BIOS/GRUB screenshot + HID) ([#211](https://github.com/DustinTrap/kvm-pilot/issues/211)).
+- [Intel AMT onboarding runbook](amt-onboarding.md) — the operator/agent guide to bringing an AMT box online: expectations, the ordered bring-up steps (provision → healthcheck → enable listeners), the ME-firmware-update hazard, and symptom→fix troubleshooting.
 - [Firmware registry](firmware-registry.md) — the firmware-currency check, the community registry data model, and the GitHub-based single-source-of-truth + ingestion design (#80 follow-up).
 - [Remote firmware update](firmware-update.md) — the GL `/api/upgrade/*` surface, the reliability/risk model, and the gated `firmware-update` command (#92).
 - [Unattended Linux installs](unattended-install.md) — prefer text mode + SSH over driving a graphical installer via KVM HID: the per-distro boot-arg matrix (Anaconda `inst.sshd`/`inst.text`, d-i network-console, Subiquity autoinstall, linuxrc `ssh=1`) and the SSH handoff ([#129](https://github.com/DustinTrap/kvm-pilot/issues/129)).

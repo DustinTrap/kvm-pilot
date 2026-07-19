@@ -135,6 +135,20 @@ the *operator* surfaces. Both matter. Update all of:
   bring-up, honest caveats, sources). Model on `docs/redfish.md` / `docs/amt.md`.
   Register it in `.github/scripts/build_wiki.py` `PAGES` or it **never syncs to
   the wiki** (a test enforces this).
+- **`docs/<kind>-onboarding.md`** — the **operator onboarding / runbook**
+  (distinct from the reference above, which is "how it's built"). This is the
+  "what to expect + the critical steps to bring this hardware online, easy for
+  the next person or agent" doc. Model on
+  [`docs/amt-onboarding.md`](amt-onboarding.md). It MUST cover: what the device
+  is and its honest capability/limitation expectations; prerequisites; the
+  ordered bring-up steps (config profile → `healthcheck` intake gate → any
+  listener/feature enablement → verify capabilities); a symptom→fix
+  troubleshooting table seeded with the real failures the driver hit during live
+  bring-up; the security posture; and the hazards that need physical hands
+  (e.g. AMT's ME-firmware-update wedge needing a G3 power cycle). Register it in
+  `PAGES` too. **Every hardware type needs one** — GLKVM, Redfish (iLO), IPMI
+  (iDRAC6), PiKVM included; backfilling the drivers that predate this rule is
+  tracked in [#220](https://github.com/DustinTrap/kvm-pilot/issues/220).
 - **`docs/driver-features.md`** — the per-capability table (reliability + testing
   level). "Where this page and the ledger disagree, the ledger wins" — don't
   claim a maturity level the ledger doesn't back.
@@ -219,8 +233,10 @@ A driver is **first-class** when all of these are true:
 - [ ] Added to `tests/test_driver_contract.py`.
 - [ ] Error-path parity with the mature drivers (auth, transport, redaction, refusal, teardown).
 
-**Docs** — reference page (+ wiki `PAGES`), driver-features, architecture, README,
-SKILL.md, mcp/README.md, decisions.md, configuration.md, firmware-registry.md, cli.md.
+**Docs** — reference page (+ wiki `PAGES`), **operator onboarding/runbook page
+(`docs/<kind>-onboarding.md`, + wiki `PAGES`)**, driver-features, architecture,
+README, SKILL.md, mcp/README.md, decisions.md, configuration.md,
+firmware-registry.md, cli.md.
 
 **Reliability & matrices**
 - [ ] Healthcheck checks + `known_quirks()`.
