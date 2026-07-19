@@ -122,7 +122,10 @@ class _FakeAmtIder:
         struct.pack_into("<H", reply, 16, 8192)                          # readbfr
         conn.sendall(bytes(reply))
         assert self._recv_msg(conn)[0] == 0x48                           # ENABLE_FEATURES
-        self._send(conn, 0x49, bytes([2]) + struct.pack("<I", 0x02))     # REGS_STATUS: enabled
+        # Real AMT acks the enable with a REGS_TOGGLE (type 3, value 1), NOT a
+        # REGS_STATUS (type 2) — the latter only arrives once the host touches the
+        # CD. Gating start() on type 2 tore down a working session on live hw.
+        self._send(conn, 0x49, bytes([3]) + struct.pack("<I", 0x01))     # REGS_TOGGLE: enable accepted
 
     def _drive_scsi(self, conn) -> None:
         # READ_CAPACITY (0x25): expect a DATA_TO_HOST with the last-block number.
@@ -294,6 +297,35 @@ def test_read10_serves_data_and_rejects_out_of_range(tmp_path):
         s._handle_scsi(bytes([0x28, 0]) + struct.pack(">I", 100) + bytes([0])
                        + struct.pack(">H", 1) + bytes([0]), 0, 0x10)
         assert s._chan.sent[-1][0] == 0x51
+    finally:
+        s._iso.close()
+
+
+def test_floppy_slot_reports_no_media(tmp_path):
+    # The ME exposes a floppy slot (device-select bit 0x10 clear) too; we emulate
+    # only the CD, so every floppy command must return 'medium not present' (0x51
+    # sense), never CD data — a floppy READ served as CD hung the host live.
+    s = _capture_session(tmp_path)
+    try:
+        s._handle_scsi(bytes([0x28, 0]) + struct.pack(">I", 0) + bytes([0])
+                       + struct.pack(">H", 1) + bytes([0]), feature=0, device_flags=0x00)
+        assert len(s._chan.sent) == 1
+        assert s._chan.sent[-1][0] == 0x51                       # sense, not 0x54 data
+    finally:
+        s._iso.close()
+
+
+def test_read10_multichunk_marks_only_last_complete(tmp_path):
+    # A read larger than readbfr (8192) splits into chunks; ONLY the last carries
+    # the completion bit (attrs byte 0x02), else the host's I/O stalls (found live).
+    s = _capture_session(tmp_path, blocks=8)          # 16 KiB -> two 8192-byte chunks
+    try:
+        s._handle_scsi(bytes([0x28, 0]) + struct.pack(">I", 0) + bytes([0])
+                       + struct.pack(">H", 8) + bytes([0]), 0, 0x10)
+        frames = [f for f in s._chan.sent if f[0] == 0x54]
+        assert len(frames) == 2
+        assert not (frames[0][3] & 0x02)              # intermediate chunk: NOT completed
+        assert frames[-1][3] & 0x02                   # final chunk: completed
     finally:
         s._iso.close()
 
