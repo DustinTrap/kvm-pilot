@@ -32,6 +32,7 @@ from typing import TYPE_CHECKING, Any
 from ...errors import CapabilityError, ConnectionError, KVMPilotError
 from ...safety import SafetyPolicy
 from ..base import CapabilityMixin, PowerMixin
+from .ider import IderSession
 from .wsman import Wsman, WsmanError, amt, cim, escape, findtext
 
 if TYPE_CHECKING:
@@ -96,8 +97,11 @@ class AmtDriver(PowerMixin, CapabilityMixin):
         self._user = user
         self._passwd = passwd
         self._tls = tls
+        self._verify_ssl = verify_ssl
+        self._ssl_ca_file = ssl_ca_file
         self._sol_port = sol_port
         self._kvm_port = kvm_port
+        self._ider: IderSession | None = None
         # The KVM/RFB password is a separate MEBx credential; fall back to the
         # WS-Man admin password when it isn't configured separately.
         self._kvm_password = kvm_password if kvm_password is not None else passwd
@@ -138,8 +142,13 @@ class AmtDriver(PowerMixin, CapabilityMixin):
         )
 
     def close(self) -> None:
-        """Tear down the SOL + RFB sessions if open (WS-Man itself is stateless)."""
+        """Tear down the SOL + RFB + IDE-R sessions if open (WS-Man is stateless)."""
         self.serial_close()
+        if self._ider is not None:
+            try:
+                self._ider.stop()
+            finally:
+                self._ider = None
         hid = self._hid
         self._hid = None
         if hid is not None:
@@ -749,6 +758,65 @@ class AmtDriver(PowerMixin, CapabilityMixin):
                 os.close(fd)
             except OSError:
                 pass
+
+    # -- VirtualMedia (IDE-R virtual CD-ROM) ----------------------------
+    #
+    # IDE-R streams a local ISO to the host as a bootable ATAPI CD-ROM over the
+    # redirection channel (:mod:`.ider`, port 16994/16995). Unlike Redfish/PiKVM
+    # the image isn't staged on the device — we serve it live, so the session (a
+    # background thread) stays open until msd_disconnect()/close(). To boot it:
+    # mount_iso(), set_boot_device('cd'), then power_reset. EXPERIMENTAL:
+    # emulator-tested only; live boot-from-ISO is unverified (#213/#217).
+
+    def mount_iso(self, source: str, image_name: str | None = None, cdrom: bool = True) -> str:
+        """Attach ``source`` (an ISO) as a virtual CD-ROM via AMT IDE-R. Gated.
+
+        The session streams the image live and stays open in the background;
+        pair with ``set_boot_device('cd')`` + a reset to boot from it."""
+        if not cdrom:
+            raise CapabilityError(
+                "AMT IDE-R redirects a bootable CD/DVD image only; USB mass-storage "
+                "(USB-R) is not implemented (#213)."
+            )
+        if not self.safety.guard("amt.mount_iso", f"Attach IDE-R virtual CD {source!r} to {self.host}"):
+            return image_name or source  # dry-run
+        if self._ider is not None:
+            self._ider.stop()
+            self._ider = None
+        ider = IderSession(
+            self.host, self._user, self._passwd, source,
+            port=(16995 if self._tls else self._sol_port), tls=self._tls,
+            verify_ssl=self._verify_ssl, ssl_ca_file=self._ssl_ca_file, timeout=self._timeout,
+        )
+        ider.start()
+        self._ider = ider
+        return image_name or source
+
+    def msd_connect(self) -> None:
+        """Assert the IDE-R media is attached and serving (attach happens on
+        mount_iso for AMT; there is no separate 'insert' step)."""
+        if self._ider is None or not self._ider.alive:
+            raise CapabilityError("no IDE-R session is active on this host; call mount_iso() first")
+
+    def msd_disconnect(self) -> None:
+        """Detach the IDE-R virtual media and stop the streaming session. Gated."""
+        if self._ider is None:
+            return
+        if not self.safety.guard("amt.eject", f"Detach IDE-R virtual media from {self.host}"):
+            return
+        self._ider.stop()
+        self._ider = None
+
+    def get_msd_state(self) -> dict:
+        """Report the IDE-R virtual-media state (there is no ME-side image store —
+        the image is streamed live from this host)."""
+        active = self._ider is not None and self._ider.alive
+        return {
+            "driver": "amt-ider",
+            "connected": active,
+            "image": self._ider.iso_path if self._ider is not None else None,
+            "note": "IDE-R streams the image live from this host; nothing is stored on the ME.",
+        }
 
     # -- Video + HID (KVM redirection / RFB) ----------------------------
     #
