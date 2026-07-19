@@ -115,5 +115,8 @@ warn_unused_ignores = false
 #   B107 hardcoded_password - the documented PiKVM default credential ("admin")
 #   B110 try_except_pass - secret redaction must never raise
 #   B310 urllib urlopen  - the core REST/vision calls; scheme is http(s) from config
+#   B405 import ElementTree - all XML parsed is trusted device output (AMT WS-Man /
+#         Redfish); the parse sites are already `# nosec B314`. The import warning
+#         is redundant with those, so it's skipped project-wide.
 exclude_dirs = ["tests"]
-skips = ["B101", "B107", "B110", "B310"]
+skips = ["B101", "B107", "B110", "B310", "B405"]

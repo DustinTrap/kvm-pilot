@@ -6,6 +6,8 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.0b10] — 2026-07-19
+
 ### Added
 - **AMT `VirtualMedia` — IDE-R (boot a host from a local ISO)** (#213) — the one
   capability deferred when the AMT driver landed. A new redirection-session layer
@@ -22,6 +24,21 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   which speaks an AMT 14-incompatible revision). **Live-validated on a Dell
   Latitude 5411 (AMT 14.1.79):** in-OS mount + byte-perfect read (md5 match) and
   an actual boot — the host booted an iPXE ISO from the redirected CD.
+- **AMT operator onboarding runbook** ([`docs/amt-onboarding.md`](docs/amt-onboarding.md),
+  #220) — a bring-up guide: expectations, provisioning + the ordered
+  `enable-sol`/listener steps, the ME-firmware-update-wedge / power-cycle hazard,
+  and a symptom→fix troubleshooting table. An operator onboarding doc is now a
+  first-class-driver requirement (`plugin-development.md`).
+
+### Fixed
+- **AMT WS-Man HTTP-error faults now surface the SOAP `Reason` + `Subcode`** (#216)
+  — they were truncated to the first 300 chars (just the XML namespace preamble),
+  hiding the actual reason (e.g. `e:TimedOut`), which had made an ME-wedge incident
+  undiagnosable.
+
+### Changed
+- Redacted device serial numbers from the bundled run-ledger (`test_runs.jsonl`)
+  and the AMT test fixtures (privacy).
 
 ## [0.1.0b9] — 2026-07-18
 
