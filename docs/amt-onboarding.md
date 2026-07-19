@@ -106,7 +106,7 @@ driver = "amt"
 passwd = "…"                # the ME/MEBx admin password
 amt_port = 16992            # 16993 if you provisioned TLS
 amt_tls = false
-amt_kvm_password = "Abcd1@ef"   # KVM/RFB password — EXACTLY 8 chars, upper/lower/digit/special
+amt_kvm_password = "Chang3M!"   # EXAMPLE — set your own KVM/RFB password: EXACTLY 8 chars, upper/lower/digit/special
 ```
 
 The **`amt_kvm_password` is separate** from the ME admin password and must be
