@@ -83,6 +83,8 @@ DESTRUCTIVE_OPS: set[str] = {
     "amt.serial_console",
     "amt.enable_sol",   # opens the SOL/IDE-R management listener (16994/16995)
     "amt.enable_kvm",   # opens KVM redirection (5900) — can disable user-consent
+    "amt.mount_iso",    # attaches an IDE-R virtual CD the host can boot from
+    "amt.eject",        # detaches IDE-R virtual media
     # HID input changes target state too: keystrokes and clicks land on a live
     # console (rm -rf is one type_text away). Mouse *moves* stay ungated.
     "hid.ctrl_alt_delete",
@@ -186,6 +188,8 @@ OP_EFFECT: dict[str, EffectClass] = {
     "amt.serial_console": EffectClass.HID_INPUT,  # SOL can inject keystrokes
     "amt.enable_sol": EffectClass.CONFIG_MUTATION,
     "amt.enable_kvm": EffectClass.CONFIG_MUTATION,
+    "amt.mount_iso": EffectClass.CONFIG_MUTATION,
+    "amt.eject": EffectClass.CONFIG_MUTATION,
     # HID input
     "hid.type_text": EffectClass.HID_INPUT,
     "hid.press_key": EffectClass.HID_INPUT,
