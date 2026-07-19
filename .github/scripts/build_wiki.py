@@ -73,6 +73,20 @@ PAGES: list[tuple[str, str, str | None, str | None]] = [
     ("docs/amt.md", "amt.md", "Intel AMT vPro reference", "Reference"),
     ("docs/firmware-registry.md", "firmware-registry.md", "Firmware registry", "Reference"),
     ("src/kvm_pilot/skill/SKILL.md", "skill.md", "Claude skill", "Reference"),
+    # The skill's playbooks (#222): progressive-disclosure references bundled
+    # beside SKILL.md and re-served at runtime by the MCP `doctrine` tool.
+    ("src/kvm_pilot/skill/references/interfaces.md", "interfaces.md",
+     "Skill playbook: interfaces", "Reference"),
+    ("src/kvm_pilot/skill/references/recovery.md", "recovery.md",
+     "Skill playbook: recovery", "Reference"),
+    ("src/kvm_pilot/skill/references/setup.md", "setup.md",
+     "Skill playbook: setup & gates", "Reference"),
+    ("src/kvm_pilot/skill/references/linux-install.md", "linux-install.md",
+     "Skill playbook: Linux installs", "Reference"),
+    ("src/kvm_pilot/skill/references/target-context.md", "target-context.md",
+     "Skill playbook: target context", "Reference"),
+    ("src/kvm_pilot/skill/references/library.md", "library.md",
+     "Skill playbook: Python library", "Reference"),
     ("src/kvm_pilot/mcp/README.md", "mcp-server.md", "MCP server", "Reference"),
     # Runbooks & test plans — procedures executed against real hardware
     ("docs/test-plan.md", "test-plan.md", "Test plan", "Runbooks & test plans"),

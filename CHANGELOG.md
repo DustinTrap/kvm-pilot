@@ -6,6 +6,31 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **MCP `doctrine` tool — mid-session doctrine re-anchor** (#222). A read-only,
+  offline tool that re-serves the bundled skill's playbooks from the installed
+  package: no `topic` lists topics, `topic="recovery"` returns that playbook's
+  full text. Exists because the skill file is read once at session start and is
+  the first thing a long session compacts away — the MCP server is the one
+  surface guaranteed present when the recovery ladder is needed most.
+
+### Changed
+- **Bundled skill restructured for long sessions** (#222): `SKILL.md` (457
+  lines) is now a lean core — the rules that must survive a long session,
+  the intake gate, the memorizable 5-rung recovery shape, interface quick
+  picks, and a "read the playbook at need-time" map — with the detailed
+  playbooks split into `skill/references/` (`interfaces`, `recovery`, `setup`,
+  `linux-install`, `target-context`, `library`), all shipped in the wheel and
+  mirrored to the wiki. Re-reading a reference at the moment it applies
+  re-anchors the doctrine fresh in context instead of relying on a faded
+  one-shot read.
+- **Recovery order now rides with the failure** (#222): the healthcheck
+  `recovery-path` CRITICAL remediation and the MCP `snapshot` unavailable
+  error both carry the one-line remote-first ladder (WoL → in-band SSH →
+  KVM-side recovery → Intel AMT → physical) and point at `doctrine`
+  (topic `recovery`), so the escalation order resurfaces regardless of what
+  the model still remembers.
+
 ## [0.1.0b10] — 2026-07-19
 
 ### Added

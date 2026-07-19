@@ -18,6 +18,10 @@ from test_mcp_server import EXPECTED_TOOLS
 _ROOT = Path(__file__).resolve().parents[1]
 _README = _ROOT / "README.md"
 _SKILL = _ROOT / "src" / "kvm_pilot" / "skill" / "SKILL.md"
+_SKILL_REFS = _ROOT / "src" / "kvm_pilot" / "skill" / "references"
+# The skill's install/MCP-enablement doctrine moved to a reference file (#222);
+# the guards follow the content, not the filename.
+_SKILL_SETUP = _SKILL_REFS / "setup.md"
 _GETTING_STARTED = _ROOT / "docs" / "getting-started.md"
 _MCP_README = _ROOT / "src" / "kvm_pilot" / "mcp" / "README.md"
 
@@ -47,7 +51,7 @@ def test_readme_version_literals_match_package_version():
 
 
 def _skill_listed_tools() -> set[str]:
-    text = _SKILL.read_text(encoding="utf-8")
+    text = _SKILL_SETUP.read_text(encoding="utf-8")
     start = text.index("**The tools it exposes**")
     end = text.index("**Approval posture", start)
     section = text[start:end]
@@ -57,7 +61,7 @@ def _skill_listed_tools() -> set[str]:
 
 
 def test_skill_tool_list_matches_server_surface():
-    """SKILL.md's "tools it exposes" list == the registered MCP tools.
+    """The skill's "tools it exposes" list == the registered MCP tools.
 
     EXPECTED_TOOLS is itself asserted against the live server's list_tools()
     in test_mcp_server, so this transitively pins the skill doc to the real
@@ -68,11 +72,12 @@ def test_skill_tool_list_matches_server_surface():
     missing = EXPECTED_TOOLS - listed
     phantom = listed - EXPECTED_TOOLS
     assert not missing, (
-        f"SKILL.md 'tools it exposes' is missing MCP tools: {sorted(missing)}"
+        f"skill references/setup.md 'tools it exposes' is missing MCP tools: "
+        f"{sorted(missing)}"
     )
     assert not phantom, (
-        f"SKILL.md 'tools it exposes' names things that are not registered "
-        f"tools (stale or typo): {sorted(phantom)}"
+        f"skill references/setup.md 'tools it exposes' names things that are "
+        f"not registered tools (stale or typo): {sorted(phantom)}"
     )
 
 
@@ -81,7 +86,7 @@ def test_skill_tool_list_matches_server_surface():
 # This guard turns a many-file drift into one failure — it will fire usefully
 # at GA, when `--pre` stops being the working command everywhere at once.
 _INSTALL_CMD = "pip install --pre kvm-pilot"
-_INSTALL_DOCS = (_README, _GETTING_STARTED, _SKILL, _MCP_README)
+_INSTALL_DOCS = (_README, _GETTING_STARTED, _SKILL_SETUP, _MCP_README)
 # A bare `pip install kvm-pilot` may appear only when *warning* that it does
 # nothing on a pre-release line, as the named batteries-included doctrine
 # ("`pip install kvm-pilot` ships everything", CLAUDE.md), or as a VCS install
@@ -95,9 +100,11 @@ def _current_doc_files() -> list[Path]:
     docs/analysis/ narratives) quote history verbatim and are never edited to
     track the current command line."""
     historical = {_ROOT / "docs" / "decisions.md"}
-    return [
-        p for p in sorted(_ROOT.glob("docs/*.md")) if p not in historical
-    ] + [_README, _SKILL, _MCP_README]
+    return (
+        [p for p in sorted(_ROOT.glob("docs/*.md")) if p not in historical]
+        + sorted(_SKILL_REFS.glob("*.md"))
+        + [_README, _SKILL, _MCP_README]
+    )
 
 
 def test_install_command_consistent():
@@ -148,8 +155,9 @@ def test_mcp_add_snippet_consistent():
     assert _mcp_add_snippet(_README) == canonical, (
         "README.md's `claude mcp add` snippet differs from getting-started.md"
     )
-    skill = _mcp_add_snippet(_SKILL)
+    skill = _mcp_add_snippet(_SKILL_SETUP)
     assert skill.replace("KVM_PILOT_MCP_DRY_RUN", "KVM_PILOT_MCP_READ_ONLY") == canonical, (
-        "SKILL.md's `claude mcp add` snippet differs from getting-started.md "
-        "beyond the deliberate DRY_RUN-vs-READ_ONLY trust-ladder gate"
+        "the skill's setup.md `claude mcp add` snippet differs from "
+        "getting-started.md beyond the deliberate DRY_RUN-vs-READ_ONLY "
+        "trust-ladder gate"
     )

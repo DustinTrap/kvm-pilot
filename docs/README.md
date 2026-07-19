@@ -38,7 +38,14 @@ Descriptive: what exists and how it behaves.
 - [Redfish reference](redfish.md) — the BMC driver: hypermedia navigation, auth, and firmware quirks.
 - [Intel AMT / vPro reference](amt.md) — the AMT driver: WS-Man power/boot/inventory, SOL serial, and RFB KVM-redirection (firmware-level BIOS/GRUB screenshot + HID) ([#211](https://github.com/DustinTrap/kvm-pilot/issues/211)).
 - [Firmware registry](firmware-registry.md) — the firmware-currency check, the community registry data model, and the GitHub-based single-source-of-truth + ingestion design (#80 follow-up).
-- [Claude skill](../src/kvm_pilot/skill/SKILL.md) — the bundled skill for driving `kvm-pilot` from Claude.
+- [Claude skill](../src/kvm_pilot/skill/SKILL.md) — the bundled skill for driving `kvm-pilot` from Claude: the core rules plus a map of when to read each playbook.
+  Its playbooks (read at need-time; also re-served mid-session by the MCP `doctrine` tool, [#222](https://github.com/DustinTrap/kvm-pilot/issues/222)):
+  [interfaces](../src/kvm_pilot/skill/references/interfaces.md) —
+  [recovery](../src/kvm_pilot/skill/references/recovery.md) —
+  [setup & gates](../src/kvm_pilot/skill/references/setup.md) —
+  [Linux installs](../src/kvm_pilot/skill/references/linux-install.md) —
+  [target context](../src/kvm_pilot/skill/references/target-context.md) —
+  [Python library](../src/kvm_pilot/skill/references/library.md).
 - [MCP server](../src/kvm_pilot/mcp/README.md) — the bundled Model Context Protocol server (`kvm-pilot-mcp`).
 - [Hardware-Compatibility list](https://github.com/DustinTrap/kvm-pilot/wiki/Hardware-Compatibility) — generated from the community run ledger: what has actually been exercised live, per device + firmware + capability.
 

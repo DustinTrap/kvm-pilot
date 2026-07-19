@@ -294,6 +294,16 @@ def check_ssh_reachable(driver: Any) -> CheckResult | None:
     )
 
 
+# The remote-first recovery ladder (#222) — the single code copy of the
+# doctrine's ordering. Interpolated wherever a failure should carry the next
+# step; the full playbook is the skill's references/recovery.md, re-served by
+# the MCP `doctrine` tool (topic 'recovery').
+RECOVERY_ORDER = (
+    "Wake-on-LAN -> in-band SSH -> KVM-side recovery (recover-hid / "
+    "appliance reboot) -> Intel AMT -> physical"
+)
+
+
 def check_recovery_path(driver: Any) -> CheckResult | None:
     """Is there ANY out-of-band reset if the guest hangs? (Stable posture.)
 
@@ -357,7 +367,9 @@ def check_recovery_path(driver: Any) -> CheckResult | None:
         detail="No out-of-band reset: ATX reports enabled=false and no GPIO power "
         "channels are defined. A hung guest cannot be recovered remotely.",
         remediation="Wire the ATX cable to the host front-panel power/reset header, "
-        "or provision a GPIO/Redfish/IPMI reset path.",
+        "or provision a GPIO/Redfish/IPMI reset path. Until one exists, if the "
+        f"guest hangs the remote-first recovery order is: {RECOVERY_ORDER} "
+        "(full playbook: the MCP `doctrine` tool, topic 'recovery').",
     )
 
 

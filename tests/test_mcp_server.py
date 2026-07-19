@@ -54,6 +54,7 @@ EXPECTED_ANNOTATIONS = {
     "ssh_discover": READ,
     "appliance_status": READ,
     "access_paths": READ,
+    "doctrine": READ,
     "power": DESTRUCTIVE,
     "wake": DESTRUCTIVE,
     "set_boot_device": DESTRUCTIVE,
@@ -224,6 +225,25 @@ def test_healthcheck_tool_returns_report(config_file):
     assert parsed["driver"] == "fake"
     assert parsed["worst"] in {"OK", "INFO", "WARNING", "CRITICAL"}
     assert any(r["id"] == "recovery-path" for r in parsed["results"])
+
+
+def test_doctrine_serves_bundled_playbooks(config_file):
+    """#222: ``doctrine`` re-serves the packaged skill so a session that never
+    loaded the skill file — or compacted past it — can re-anchor in-band."""
+
+    async def interact(session):
+        listing = await session.call_tool("doctrine", {})
+        recovery = await session.call_tool("doctrine", {"topic": "recovery"})
+        bogus = await session.call_tool("doctrine", {"topic": "nope"})
+        return listing, recovery, bogus
+
+    listing, recovery, bogus = run_session(server_env(config_file), interact)
+    topics = result_json(listing)["topics"]
+    assert {"core", "recovery", "interfaces", "setup"} <= set(topics)
+    text = result_json(recovery)["text"]
+    assert "Wake-on-LAN" in text  # the ladder's first rung is the payload
+    assert bogus.isError
+    assert "recovery" in bogus.content[0].text  # refusal names the valid topics
 
 
 def test_power_errors_without_operator_gate(config_file):

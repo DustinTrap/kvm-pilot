@@ -16,10 +16,11 @@ description: >-
   (keyboard/mouse/media), and gated power; the CLI for
   logs/capabilities/firmware/events and scripting; the Python library for MSD
   mode switching; and SSH for appliance maintenance the tool can't do.
-  See the interface matrix in the skill body.** Beta — core read paths are
-  live-verified on GL-RM1PE; other device/capability combos remain unverified.
-  Treat anything not in the support matrix as unverified and confirm
-  destructive steps with the user.
+  The full interface matrix and the detailed playbooks live in `references/`
+  beside this file — read each one at the moment it applies.** Beta — core
+  read paths are live-verified on GL-RM1PE; other device/capability combos
+  remain unverified. Treat anything not in the support matrix as unverified
+  and confirm destructive steps with the user.
 ---
 
 # kvm-pilot skill
@@ -37,421 +38,108 @@ This skill is a thin wrapper over the installable `kvm-pilot` package. The code
 lives in the package, not here — install it and import it rather than copying
 client logic into a script.
 
-## Choosing an interface — best tool per action
+## How to use this skill — read the playbook at need-time
 
-kvm-pilot is reachable through several interfaces, and **no single one is best
-for everything.** Pick per action, and run more than one at once when the work
-is independent (see [Multitasking](#multitasking--use-interfaces-in-parallel)).
-This is the operator-side complement to the sensing hierarchy (#13, prefer
-structured/text over vision) and the actuation-channel hierarchy (#81, hand off
-KVM HID+vision → SSH once the target OS is reachable — see **Recovery order —
-remote before physical**, below).
+The detailed playbooks live in `references/` next to this file, split so you
+can read exactly the one the moment calls for instead of holding all of them
+in mind. **When one of these situations comes up, (re)read its file — even if
+you read it hours ago. A fresh read at need-time beats a faded memory,
+especially late in a long session:**
 
-| Action | Best interface | Notes / fallback |
-|---|---|---|
-| See the screen as a model-visible image | **MCP** `snapshot` | Returns a real image content block — no screenshot-file round-trip. CLI `snapshot` writes a file. The JSON payload carries `signal` (`hdmi_signal` — the authoritative picture-present flag — plus online/resolution/fps/`streamer_idle`) and `unchanged_since_last_snapshot` — a byte-identical frame when the screen should have changed means stale/cached pixels: check `signal` + `logs` before trusting or acting on it. |
-| Classify boot/run phase | **MCP** `classify_screen` | Uses the server's vision backend if configured; **with no server key it falls back to caller-side** — hands you the screenshot + prompt to classify yourself (a `[json, image]` result). CLI: `classify` / `watch`. |
-| Wait for a boot/run phase | **MCP** `wait_for_state` or CLI `watch` | Bounded server-side wait (≤ 300 s per call — chain calls for long installs; the timeout result carries the last observed state). Success returns the final `frame_ref` for a follow-up `mouse` click. Phases the cheap gates can't resolve need server-side vision — with no server key it errors fast: poll `classify_screen` (caller-side) instead. |
-| Preflight audit (run first) | **MCP** `healthcheck` or CLI `healthcheck` | The intake gate — see below. |
-| Device info / host power state | **MCP** `info` / `power_state`, or CLI | Either works. |
-| List what the driver supports | **MCP** `capabilities` or CLI `capabilities` | Structural/offline — no network, no preflight. Use it to pick the right interface up front. |
-| **Read the device/host event log** | **MCP** `logs` or **CLI `logs`** | The text diagnostic when video/streamer/power looks wrong — it names a fault (e.g. a stuck encoder behind a `snapshot` 503) a screenshot can't. |
-| Type / press a key / send a shortcut on the host console | **MCP** `type_text` / `press_key` / `send_shortcut` / `ctrl_alt_delete`, or CLI `type` / `key` | HID input, gated by effect: needs `KVM_PILOT_MCP_ALLOW_HID` + per-call approval; a reboot chord (Ctrl+Alt+Del, SysRq) needs `ALLOW_POWER`. |
-| Move / click the mouse (installers, BIOS, desktops) | **MCP** `mouse` | Absolute positioning; `percent` coords by default. A click must carry `observed_frame_ref` from a recent `snapshot` (refused if the host rebooted since). Needs `KVM_PILOT_MCP_ALLOW_HID`. |
-| See what media is already on the KVM | **MCP** `list_virtual_media` or CLI `media-list` | Read-only MSD inventory. **Check this before asking the user to download or upload an ISO** — the image may already be in storage from an earlier install; mount it instead of round-tripping gigabytes. The reply's `host_visible_as` (when present) is the device name the target's boot menu shows for truly presented media — match it to confirm readiness and to pick the correct boot entry instead of guessing. |
-| Mount / eject install media | **MCP** `mount_iso` / `eject`, or CLI `mount` / `eject` | Virtual media (ISO path or URL). MCP needs `KVM_PILOT_MCP_ALLOW_MEDIA` + approval. |
-| **Set the next boot device** (PXE/CD/HDD/BIOS) | **MCP `set_boot_device`** (gated CONFIG) or CLI `boot-device` | Redfish / IPMI / AMT. AMT is **single-use only** and its source override is **write-only** — confirm it by watching the boot, not by reading it back. |
-| **Screenshot BIOS/POST/GRUB on a laptop** the capture-KVM can't see boot | **`snapshot` with `--driver amt`** (MCP or CLI) | Intel AMT renders the firmware framebuffer *below* the OS — the one driver that sees pre-boot on a laptop. **Graphical screens only** (not legacy VGA text mode; a reset right after the request means "unsupported display mode"). |
-| **Attach a text serial console (SOL)** | **CLI `console`** (IPMI or AMT) | Watch BIOS/GRUB/kernel over serial when serial-redirect is on. No MCP serial tool. |
-| **Enable AMT SOL/KVM redirection** (open the listeners) | **CLI `amt enable-sol` / `enable-kvm`**, or **MCP `amt_enable`** (gated CONFIG) | Over WS-Man, no MEBx trip. `--no-consent` (CLI) / `consent_off` (MCP, needs the extra `ALLOW_CONSENT_OFF` gate) disables the on-screen user-consent prompt. Clear a wedged single KVM session with `amt reset-kvm`. |
-| firmware-update, events | **CLI only** | The MCP server does not expose these. |
-| Contribute firmware currency to the registry (file the report) | **MCP `file_firmware_report`** or CLI `firmware-check` (auto-files) | Files a GitHub issue via the `gh` CLI when the registry is behind — an external write: MCP needs `KVM_PILOT_MCP_ALLOW_EXTERNAL_WRITE` + approval; `dry_run=true` previews (#190). |
-| MSD mode switching | **Python library only** | Not in MCP or CLI. |
-| Change **host** power (on/off/cycle/reset) | **MCP `power`** (gated) or CLI `power` / `power-cycle` | Destructive — confirm each step. MCP `power` is operator-enabled + per-call approval. |
-| Reboot the **KVM appliance** (clear a wedged encoder) | **MCP `appliance_reboot`** (gated `KVM_PILOT_MCP_ALLOW_APPLIANCE` + confirm) or SSH to the appliance | Drops KVM control ~60 s; target power untouched — never automate it. Restarting just `kvmd` or inspecting `/etc/kvmd` is still SSH-to-the-appliance only. |
-| Check if the **target host** is reachable / run commands on it once its OS is up | **MCP `ssh_reachable` / `ssh_exec`**, or CLI `ssh-check` / `ssh-exec` (in-band) | Prefer SSH over KVM keystrokes once the OS is up. Configure the target's IP/host/FQDN via `ssh_host` (≠ the KVM's address); `ssh_exec` is gated (operator opt-in `KVM_PILOT_MCP_ALLOW_SSH`). See "Recovery order" below. |
-| Bootstrap SSH during an install (set up the cheap channel over the expensive one) | **CLI `ssh-bootstrap`** | Once an installer is up, switches to a text console, reads the DHCP IP off the screen, starts `sshd`, and hands off to SSH. **Plans by default** — pass `--execute` to run it; add a `--command` that installs a key/password for a usable channel. Guided/conservative (aborts if the console can't be confirmed); not an MCP tool. |
-| View the screen when `snapshot` fails | **WebRTC/Janus stream or the vendor web UI** | The only way to see a unit that streams H.264 at its native resolution. |
-
-**Host vs. appliance — keep these straight.** The `power` tool/CLI acts on the
-**managed host** (the machine the KVM controls). Rebooting the **KVM appliance
-itself** — e.g. to clear a stuck video encoder — is a separate, separately-gated
-act: MCP `appliance_reboot` (`KVM_PILOT_MCP_ALLOW_APPLIANCE` + confirm) or SSH
-into the *appliance* and `reboot`; restarting just `kvmd` remains SSH-only. And
-the appliance's address is **not** the managed host's address — they are
-separate machines with separate IPs.
-
-**Recovery order — remote before physical.** When the host is wedged or its screen
-is black and you can't power-cycle it through the KVM (`recovery-path` is CRITICAL
-— no ATX/GPIO wired), do **not** jump to asking the user to physically intervene.
-
-**First, read the symptoms.** *No video signal (`hdmi_signal` false) **and** HID not
-reaching the target **and** the host doesn't answer on the network* is the signature
-of a machine that **suspended or powered off on idle** (GNOME/Fedora auto-suspend is
-a common cause) — not a KVM fault. A stale/`incomplete` ARP entry for its last-known
-IP (`arp -a`) confirms it was up recently and is now down.
-
-Prefer remote recovery, in this order:
-1. **Wake-on-LAN — try this FIRST; it's cheap, low-risk, and non-invasive.** A
-   single UDP magic packet does nothing if the host is already up or WoL is off, and
-   wakes it instantly if it merely suspended (the common case above). Get the MAC
-   from `arp -a`; broadcast `6×0xFF` + `MAC×16` to UDP ports 9 and 7, then poll
-   `hdmi_signal` and ping for ~60–100 s. **Do not** burn time on HID re-enumeration
-   or appliance restarts before ruling WoL out — it is a diagnostic, not a last
-   resort.
-2. **SSH into the target host OS** (in-band) — once it's awake and on the network,
-   this is the fastest, most reliable lever (far better than typing through KVM HID).
-   Probe with `ssh_reachable` / `ssh-check`, then act with `ssh_exec` / `ssh-exec`.
-   **Ask the user for the target's IP / hostname / FQDN** (`ssh_host`) — it's a
-   different machine from the KVM; note its DHCP lease can change across a reinstall.
-3. **Clear a KVM-side fault** — `recover-hid` (HID gadget), then an **appliance
-   reboot** (SSH) for a wedged encoder — but only once WoL/ping have shown the host
-   is actually up while video/HID are stuck.
-4. **On a business Intel laptop/desktop, use Intel AMT/vPro** (`--driver amt`) — the
-   out-of-band lever *below* the OS, independent of the capture-KVM. It gives power
-   (reset the wedged host), a firmware **BIOS/POST/GRUB screenshot** the HDMI-capture
-   KVM can't see on a laptop, and SOL — precisely the pre-boot surface a capture-KVM
-   is blind to. Provision AMT in MEBx first; then `amt enable-sol`/`enable-kvm` open
-   the listeners over WS-Man with no further MEBx trip.
-5. Only after remote options are exhausted, suggest **physical intervention**
-   (press the power button) or **wiring the ATX cable** for future remote control.
-
-> **Keep managed hosts awake.** GNOME/Fedora Workstation auto-suspends on idle (even
-> at the login screen), which drops video, HID, *and* the network at once. On any
-> host that must stay remotely reachable (e.g. one you'll manage via Cockpit/SSH),
-> disable idle suspend as part of intake — `systemctl mask sleep.target
-> suspend.target hibernate.target hybrid-sleep.target`.
-
-> **Network sweep is opt-in and risky.** If the user doesn't know the target's
-> address, you may *offer* to scan a network range for SSH — but say plainly it's
-> noisy and only acceptable on networks they own, get them to confirm the range
-> first, and never sweep by default.
-
-**Reading a failed `snapshot`:**
-- **HTTP 503 / "Service Unavailable"** → the video subsystem is down. Pull `logs`
-  and look for encoder errors; a stuck encoder often clears with an **appliance
-  reboot** (SSH).
-- **A tiny/empty frame while `has_video_signal` is True** → the JPEG path can't
-  encode the current mode, typically **H.264 at the panel's native resolution**.
-  Use the WebRTC stream, or drop the host to 1080p, to see the screen.
-- **A black/blank screen while `power_state`/`powered_on` reads True** → on a
-  device whose capability profile marks power readings **not trusted** (no ATX
-  board), `powered_on: true` can be an HDMI/EDID artifact, not proof the OS is up —
-  `is_powered_on` fails *open*. **Don't trust it.** Disambiguate by what the
-  snapshot actually shows **and** an **SSH reachability check to the target host**
-  (is its OS answering on the network?), not "verify visually" alone — visual
-  checks are exactly what fails on a black screen.
-
-Symptom-first fixes for these and more (GLKVM API 404, approval cancel,
-dark-host recovery):
-[Troubleshooting & FAQ](https://github.com/DustinTrap/kvm-pilot/blob/main/docs/troubleshooting.md).
-
-### Enabling the MCP server
-
-**The tools it exposes**, all named `mcp__kvm-pilot__<tool>`:
-- Read-only: `info`, `power_state`, `capabilities`, `support_matrix` (what's
-  been exercised live per device+firmware, plus its derived maturity — check it
-  before trusting a capability that matters), `healthcheck`, `logs`,
-  `snapshot` (model-visible JPEG), `classify_screen` (boot/run phase — uses a
-  server-side vision backend if configured, else falls back to caller-side
-  classification), `wait_for_state` (bounded server-side wait for a phase,
-  ≤ 300 s per call), `boot_options` (current boot-source override + the
-  device's allowable targets), `ssh_reachable`, `list_virtual_media` (MSD
-  storage inventory — check it before requesting an ISO download/upload),
-  `appliance_status` (the KVM appliance's own OS diagnostics over
-  appliance-SSH), `access_paths` (which independent recovery paths are live —
-  the lockout-exposure view), and `ssh_discover` (CIDR scan — RISKY/opt-in,
-  needs `confirm=true`, user-owned networks only)
-- **Destructive act tools** — each needs the operator to opt the tool's *effect*
-  in via an env flag **and** a per-invocation approval (a human elicitation, or
-  `confirm=true` under a standing policy):
-  - `power` — on/off/cycle/reset (`KVM_PILOT_MCP_ALLOW_POWER`)
-  - `wake` — Wake-on-LAN magic packet to the managed host, the out-of-band
-    power-on path when ATX isn't wired (`ALLOW_POWER`)
-  - `type_text` / `press_key` / `send_shortcut` / `mouse` — HID input
-    (`KVM_PILOT_MCP_ALLOW_HID`); a reboot chord in `send_shortcut` needs `ALLOW_POWER`
-  - `calibrate_mouse` — measure & store this host's pointer correction
-    (pointer moves only, ~10-30 s on a static screen; `ALLOW_HID`, one
-    approval for the whole run)
-  - `ctrl_alt_delete` — a reboot, so it needs `ALLOW_POWER` (not the HID gate)
-  - `mount_iso` / `eject` — virtual media (`KVM_PILOT_MCP_ALLOW_MEDIA`)
-  - `set_boot_device` — boot-source override (pxe/cd/hdd/usb/bios…, one-time
-    or persistent) on Redfish/IPMI/AMT devices (`KVM_PILOT_MCP_ALLOW_CONFIG`)
-  - `amt_enable` — open the Intel AMT SOL (`feature='sol'`) or KVM 5900
-    (`feature='kvm'`) redirection listener over WS-Man (`KVM_PILOT_MCP_ALLOW_CONFIG`);
-    `consent_off=true` disables the on-screen user-consent prompt and needs the
-    **second** gate `KVM_PILOT_MCP_ALLOW_CONSENT_OFF`
-  - `ssh_exec` — run a command over SSH (`KVM_PILOT_MCP_ALLOW_SSH`)
-  - `appliance_reboot` — reboot the **KVM appliance itself** to clear a wedged
-    encoder; target power untouched, drops KVM control ~60 s
-    (`KVM_PILOT_MCP_ALLOW_APPLIANCE`)
-  - `file_firmware_report` — file the firmware-registry report as a GitHub
-    issue (`KVM_PILOT_MCP_ALLOW_EXTERNAL_WRITE`; an external write, not a
-    device op)
-
-**Approval posture in chat clients:** an elicitation-capable chat client raises
-a human approval prompt per act call, and sending a new chat message **cancels
-the pending prompt**. The signature is act results with `approved: false` +
-`approver: null` and `denied_reason: "approval cancel"` (or `"denied by
-approver"` after a mis-click) while read-only tools keep working. That is an
-approval-delivery problem, not a device fault — the action never reached the
-target. Do **not** silently retry into repeated cancellations: relay the
-result's `remediation` field to the user. Their options: answer the approval
-prompt before typing the next message, or (operator decision) set
-`KVM_PILOT_MCP_ELICIT=off` in the server env and reconnect, making the
-`ALLOW_*` effect gate + per-call `confirm=true` the standing authorization —
-at the cost of per-call human approval.
-
-Every tool takes an optional `profile` argument to pick a device from
-`~/.config/kvm-pilot/config.toml`; omit it to use the server's default profile.
-
-**To use it:** look for `mcp__kvm-pilot__*` tools (e.g. `mcp__kvm-pilot__snapshot`).
-If they're absent, `pip install --pre kvm-pilot` (which provides `kvm-pilot-mcp`),
-then register the server and tell the user to restart the session so the tools
-load:
-
-```bash
-# pip install --pre kvm-pilot   installs the CLI, the MCP server, and its deps
-claude mcp add kvm-pilot -s user \
-    -e KVM_PILOT_PROFILE=<profile> -e KVM_PILOT_MCP_DRY_RUN=1 -- \
-    kvm-pilot-mcp
-claude mcp list          # expect: kvm-pilot ... ✔ Connected
-```
-
-**Scope gotcha:** `-s local` registers the server under the **current
-directory's** project scope — launch the agent from a different directory and
-the tools silently don't load. Use `-s user` (or a committed repo `.mcp.json`)
-so it's available wherever you start. Point it at a config-file **profile**
-(`KVM_PILOT_PROFILE`) so the device password lives in
-`~/.config/kvm-pilot/config.toml`, not the MCP host config; every tool also
-takes a `profile` argument to retarget. Keep `KVM_PILOT_MCP_DRY_RUN=1` until the
-user trusts a flow on their hardware — destructive calls are logged, not sent.
-Every destructive tool is **disabled** until the operator opts its effect class
-in via the server's own `env` (`KVM_PILOT_MCP_ALLOW_POWER` / `_ALLOW_HID` /
-`_ALLOW_MEDIA` / `_ALLOW_SSH`), and even then each call needs per-invocation
-approval (never "always allow"). Full operator guide:
-[MCP server README](https://github.com/DustinTrap/kvm-pilot/blob/main/src/kvm_pilot/mcp/README.md).
-
-## Multitasking — use interfaces in parallel
-
-The interfaces don't contend; run independent work concurrently to cut latency
-and cross-check signals:
-
-- **Parallel intake.** Gather `healthcheck` + `info` + `capabilities` + `logs`
-  (+ `firmware-check`) at once rather than serially.
-- **Cross-signal during long waits.** While a vision wait (`wait_for_state` /
-  CLI `watch`) waits for a boot
-  phase, tail `logs`/`events` alongside it, so a text signal can confirm or
-  contradict the pixel read (the operator-side of #13's sensing hierarchy).
-- **Mix channels.** The in-session MCP image path and a CLI `events`/`logs`
-  stream can run together — different transports, no conflict.
-- **Never parallelize state changes.** Serialize anything destructive (power,
-  media, keystrokes) behind a single confirm gate; concurrency is for read-only
-  observation only.
-
-## Installing Linux? Switch to text mode + SSH first
-
-When the task is a Linux install through the KVM, do **not** click through the
-graphical installer (coordinates are unreliable, #128/#129). Before the
-installer boots, edit the boot entry over HID — `e` at GRUB / `Tab` at syslinux
-(`press_key`/`send_shortcut` + `type_text`) — append the distro's text+SSH args,
-boot (`Ctrl+X`/`Enter`), and finish over SSH:
-
-| Family | Append / do |
+| Situation | Read |
 |---|---|
-| Fedora/RHEL/Rocky/Alma | `inst.sshd inst.text` (+`inst.lang=en_US`; `inst.ks=<url>` for fully automatic) |
-| Debian / Ubuntu-legacy d-i | `anna/choose_modules=network-console network-console/password=<pw>` — SSH in as `installer` |
-| Ubuntu Server (Subiquity) | live sshd already running; `autoinstall ds=nocloud-net;s=<url>` for hands-off |
-| openSUSE/SLES | `ssh=1 ssh.password=<pw>`, then run `yast.ssh` in the session |
-| Arch / Alpine | none — live-ISO shell: `passwd` + start `sshd` |
+| Picking how to do an action (screen, HID, media, boot control, logs, SSH) — the full per-action interface matrix, multitasking rules, CLI command set | [references/interfaces.md](references/interfaces.md) |
+| Host dark / wedged / unreachable; a snapshot failed or can't be trusted; before ever asking the user to physically intervene | [references/recovery.md](references/recovery.md) |
+| Installing the package, registering the MCP server, the full tool list + effect gates, approval cancel/denied handling, first-run orientation | [references/setup.md](references/setup.md) |
+| Any OS install through the KVM | [references/linux-install.md](references/linux-install.md) |
+| An installer or answer file asks for locale, keyboard, or timezone | [references/target-context.md](references/target-context.md) |
+| Driving the Python library directly; worked examples | [references/library.md](references/library.md) |
 
-After boot: discover the DHCP IP (`ssh-bootstrap` OCRs it off the console; or
-DHCP leases), verify `ssh_reachable(host=…)`, then drive via `ssh_exec`. Already
-stuck in a GUI installer? `kvm-pilot ssh-bootstrap` retrofits the channel (see
-the interface table). Caution: installer sshd is weakly authenticated (Anaconda
-`inst.sshd` = passwordless root) — LAN-you-own only, set credentials immediately.
-Full matrix + rationale:
-[docs/unattended-install.md](https://github.com/DustinTrap/kvm-pilot/blob/main/docs/unattended-install.md).
+No file access, or the session has compacted since you read this? The MCP
+server serves the same content: call the read-only `doctrine` tool — no
+arguments lists the topics; `topic="recovery"` returns that playbook.
 
-## Setup
+## The rules that must survive a long session
 
-**First-time user? Offer a quick orientation.** If this looks like a first run —
-no `~/.config/kvm-pilot/config.toml` (or it has no `[hosts.*]` profile), the user
-is asking how to get started, or you're setting up credentials for the first time —
-proactively share two or three tips and point them to the
-[getting-started guide](https://github.com/DustinTrap/kvm-pilot/blob/main/docs/getting-started.md):
-start with a **read-only status report**, keep **`KVM_PILOT_MCP_DRY_RUN=1`** on
-until they trust a flow, run **`healthcheck` first**, and **name the machine you
-mean** ("the connected server behind the KVM at `<ip>`", not the KVM appliance
-itself). Don't repeat this for a user who is clearly already experienced.
+1. **Confirm every destructive step with the user** — power, reset, media,
+   keystrokes, clicks — unless they have explicitly approved unattended
+   operation *in this session*. Most device+capability combos are unverified;
+   check the `support_matrix` tool before trusting one that matters.
+2. **Never pass an allow-all confirm callback** (e.g. `lambda op, d: True`) —
+   and note that *omitting* `confirm` is also unattended (the library default
+   allows everything so plain scripts work). Actively pass
+   `interactive_confirm` or a callback that relays each question to the user;
+   the ask-first duty sits with you, not the library.
+3. **Rehearse first**: `dry_run=True` (library) / `KVM_PILOT_MCP_DRY_RUN=1`
+   (MCP) on any flow the user hasn't already trusted on their hardware.
+4. **Never parallelize state changes.** Concurrency is for read-only
+   observation only; serialize anything destructive behind a single confirm.
+5. **A vision classification must never trigger a destructive action on its
+   own.**
 
-```bash
-pip install --pre kvm-pilot               # CLI + this skill + the MCP server
-pip install --pre "kvm-pilot[totp]"       # add if the device has 2FA enabled
-```
+## First contact: run the healthcheck — the intake gate
 
-It's a pre-release, so `--pre` (or pinning the exact current version) is required — a bare
-`pip install kvm-pilot` deliberately picks up no pre-release. A single install brings
-the `kvm-pilot` CLI, the `kvm-pilot-mcp` server, and this skill file. For the
-latest unreleased tree, install from git:
+The moment you connect to a KVM — before you drive it, and before you record
+it as a managed profile — run the device healthcheck (MCP `healthcheck` tool,
+or `kvm-pilot healthcheck --profile <name>`). It audits the KVM appliance
+*itself* (readiness/recovery, security posture, firmware currency) and is the
+safety net for the whole tool (#80). Treat it as a severity-tiered gate:
+surface every `WARNING`/`CRITICAL` to the user with its implication, and a
+`CRITICAL` **blocks** — do not proceed to a destructive or multi-step flow
+until the user explicitly decides to continue. The highest-value finding is
+`recovery-path` — whether *any* out-of-band reset exists (ATX wired / GPIO /
+Redfish / IPMI) if the guest hangs; the operator must learn this *before*
+committing to a remote install, not mid-outage. **Read-only intake
+(`info`/`capabilities`/`snapshot`) does not auto-run it** — run it yourself on
+first contact; a clean `info` does not mean the device was vetted.
 
-```bash
-pip install "kvm-pilot[totp,ws] @ git+https://github.com/DustinTrap/kvm-pilot"
-```
+## Host vs. appliance — keep these straight
 
-Credentials resolve from `KVM_PILOT_HOST` / `KVM_PILOT_USER` / `KVM_PILOT_PASSWD`
-(or a `--profile` in `~/.config/kvm-pilot/config.toml` — full reference:
-[docs/configuration.md](https://github.com/DustinTrap/kvm-pilot/blob/main/docs/configuration.md)).
-For Claude vision set `ANTHROPIC_API_KEY`; for a local VLM, point at its `/v1`
-URL and model.
+The `power` tool/CLI acts on the **managed host** (the machine the KVM
+controls). Rebooting the **KVM appliance itself** — e.g. to clear a stuck video
+encoder — is a separate, separately-gated act: MCP `appliance_reboot`
+(`KVM_PILOT_MCP_ALLOW_APPLIANCE` + confirm) or SSH into the *appliance* and
+`reboot`; restarting just `kvmd` remains SSH-only. And the appliance's address
+is **not** the managed host's address — they are separate machines with
+separate IPs.
 
-**GLKVM devices:** the PiKVM REST API is disabled by default on GL firmware.
-The user must enable it in `/etc/kvmd/nginx-kvmd.conf` on the device first, or
-every call returns 404. A firmware upgrade can revert it.
+## Recovery order — memorize the shape, read the playbook when it happens
 
-## First contact: run the healthcheck (preflight) — do this first
+When the host is dark or wedged, prefer remote recovery, in this order:
 
-**The moment you connect to a KVM — before you drive it, and before you record
-it as a "managed" profile — run the device healthcheck.** This is the intake
-gate, not an optional extra: it audits the KVM appliance *itself* (readiness /
-recovery, security posture, firmware currency) and is the safety net for the
-whole tool (issue #80). A preventable KVM-side fault during a remote
-power/boot/install can brick or strand a machine you can't physically reach.
+1. **Wake-on-LAN first** — cheap, non-invasive, and instantly wakes a host
+   that idle-suspended (the most common cause of "went dark"). It is a
+   diagnostic, not a last resort.
+2. **In-band SSH to the target OS** — once it answers, the fastest and most
+   reliable lever; prefer it over KVM keystrokes.
+3. **KVM-side recovery** — `recover-hid`, then an appliance reboot for a
+   wedged encoder — only once WoL/ping show the host is up while video/HID
+   are stuck.
+4. **Intel AMT/vPro on business machines** — power, firmware-level
+   BIOS/POST/GRUB screenshot, and SOL, all below the OS.
+5. **Physical intervention** — only after the remote options are exhausted.
 
-- **How:** MCP — call the `healthcheck` tool. CLI — `kvm-pilot healthcheck
-  --profile <name>`. Library — `run_healthcheck(driver)` from `kvm_pilot`.
-- **Treat it as a severity-tiered gate.** Surface every `WARNING`/`CRITICAL` to
-  the user with its implication; a `CRITICAL` **blocks** — do not proceed to a
-  destructive or multi-step flow until the user explicitly decides to continue.
-- **The highest-value finding is `recovery-path`** — whether *any* out-of-band
-  reset exists (ATX wired / GPIO / Redfish / IPMI) if the guest hangs. On GLKVM
-  units the ATX is frequently unwired, leaving only in-guest levers; the operator
-  must learn this *before* committing to a remote install, not mid-outage.
-- **Coverage caveat (know this):** destructive CLI subcommands auto-run the gate
-  (`--skip-healthcheck` / `KVM_PILOT_SKIP_HEALTHCHECK=1` bypasses it), but
-  **read-only intake — `info`/`capabilities`/`snapshot` — does _not_ auto-run it
-  yet.** So on first contact you must run `healthcheck` yourself; don't assume a
-  clean `info` means the device was vetted.
+The full playbook — symptom signatures, how to read a failed snapshot,
+keep-awake, network-sweep rules — is
+[references/recovery.md](references/recovery.md). Re-read it *at that moment*
+rather than working from memory; it is also served by the MCP `doctrine` tool
+(topic "recovery").
 
-## Use the library, not raw HTTP
+## Interface quick picks
 
-**First contact: rehearse with `dry_run=True`.** Dry-run short-circuits before
-anything else — destructive calls are logged and skipped (the confirm callback
-is never invoked), so the whole flow can be validated without changing the
-machine's state:
+The full per-action matrix is
+[references/interfaces.md](references/interfaces.md). The picks needed most:
 
-```python
-from kvm_pilot import KVMClient
-
-kvm = KVMClient("192.168.8.1", "admin", "secret", dry_run=True)
-kvm.mount_iso("https://example.com/distro.iso")   # logged, not sent
-kvm.hard_cycle()                                  # logged, not sent
-```
-
-**Real run: gate every destructive step on explicit approval.**
-`interactive_confirm` prompts on stdin and *fails closed* (denies) when there
-is no TTY. In an agent context, ask the user in chat before each destructive
-step and wire their answer into the callback:
-
-```python
-from kvm_pilot import KVMClient
-from kvm_pilot.safety import interactive_confirm
-from kvm_pilot.vision import ScreenAnalyzer, make_backend
-
-kvm = KVMClient("192.168.8.1", "admin", "secret", confirm=interactive_confirm)
-analyzer = ScreenAnalyzer(kvm, make_backend("anthropic"))   # or "local"
-
-kvm.mount_iso("https://example.com/distro.iso")   # gate: asks before mounting
-kvm.hard_cycle()                                  # gate: asks before power off/on
-analyzer.wait_for_state("grub_menu", timeout=120)
-kvm.press_key("Enter")                            # keystroke injection is gated too
-analyzer.wait_for_state("installer_complete", timeout=1800)
-```
-
-**Never pass an allow-all confirm callback** (e.g. `lambda op, d: True`) unless
-the user has explicitly approved unattended destructive operation in this
-session. And note that **omitting `confirm` is also unattended** — the library
-default allows everything so plain scripts work — so actively pass
-`interactive_confirm` (or a callback that relays the question to the user);
-the ask-first duty sits with you, not the library.
-
-## Safety
-
-Destructive operations — power off/reset, virtual-media connect/disconnect and
-image uploads, keyboard/mouse injection (`type_text`, `press_key`, shortcuts,
-clicks), GPIO, Redfish resets — are gated by `SafetyPolicy`
-(`kvm_pilot.safety.DESTRUCTIVE_OPS` is the explicit, auditable set):
-
-- `dry_run=True` short-circuits **first**: the call is logged and skipped and
-  the confirm callback is never invoked, so dry runs never prompt or block.
-- The `confirm` callback runs only for calls that would really be sent;
-  returning `False` blocks the call with `SafetyError`.
-
-When acting on a user's real hardware, remember most device+capability combos
-are still unverified (check the `support_matrix` MCP tool or the
-Hardware-Compatibility wiki page) — confirm each destructive step with the user
-first unless they have explicitly said otherwise.
-
-## Target context — whose locale, keyboard, and timezone? (#79)
-
-The machine behind the KVM is not the machine the operator is sitting at. When
-a flow asks for **language/locale, keyboard layout, or timezone** — an OS
-installer's first screens, first-boot setup, or any answer file you generate —
-**ask the user whether their local context applies to the target before
-answering.** The target may be in another region (colo, remote DC, another
-country) or destined for a different keyboard layout than the operator's laptop.
-
-- Offer the operator's detected values as the **default-but-confirmable**
-  answer, never a silent assumption. Detect them from `$LANG`,
-  `localectl` / `timedatectl` (Linux), or `defaults read -g AppleLocale` +
-  `readlink /etc/localtime` (macOS).
-- One question covers the flow: *"Use this machine's settings (`en_US.UTF-8`,
-  `us`, `America/Los_Angeles`) for the target, or configure it differently?"*
-  Reuse the answer for every later locale/keyboard/timezone prompt in the same
-  install rather than re-asking.
-- **Keyboard layout also affects your own typing.** kvm-pilot sends text as HID
-  scancodes translated with a US keymap (library default `keymap="en-us"`;
-  the MCP and CLI act tools don't expose a keymap option), and the target
-  decodes scancodes per *its* configured layout. If the user picks a non-US
-  layout for the target, later `type_text` symbols/passwords can land wrong —
-  prefer `press_key` navigation, or hand off to SSH once it's up.
-
-## CLI
-
-The CLI covers the **full surface** and is the only interface for
-`firmware-check`/`firmware-update`, `events`, and `ssh-bootstrap`
-(see the interface matrix above — `watch` has an MCP twin,
-`wait_for_state`, and keyboard/mouse/media/boot-config all have MCP act
-tools). Use the MCP server for the visual loop (`snapshot`/`classify`)
-and the gated act/power tools inside an agent session; use the CLI for
-everything else and for one-off checks when no MCP host is in the loop.
-
-The full command set (see [docs/cli.md](https://github.com/DustinTrap/kvm-pilot/blob/main/docs/cli.md)
-for the reference table): `kvm-pilot info | capabilities | benchmark | route |
-host-exec | healthcheck | firmware-check | firmware-update | snapshot | sensors |
-logs | ssh-check | ssh-exec | ssh-discover | ssh-bootstrap | boot-progress |
-power | power-cycle | boot-device | wake | console | type | key | mouse-move | click | calibrate-mouse | media-list | mount |
-eject | keep-awake | recover-hid | appliance | paths | classify | watch |
-events | test-report`. Run
-`healthcheck` on first contact (see above); it also auto-runs ahead of destructive
-subcommands. `firmware-check` reports firmware currency and, where a device knows
-its vendor's latest, **auto-files** the registry contribution as a GitHub issue
-(needs the `gh` CLI; `--no-file-report` to opt out, `--dry-run` to preview).
-`test-report` probes the device and appends an evidence row to the run ledger
-(#99) — read-only probes always; destructive only via `--include` + `--attest`.
-`--dry-run` logs destructive
-actions without sending them (it short-circuits before any prompt, so it is
-safe in automation); `--yes` skips the interactive y/N confirmation on a real
-run. See `kvm-pilot --help`.
-
-## Worked examples
-
-In the repository (the `examples/` directory is **not shipped inside the pip
-package**):
-
-- [`examples/unattended_install.py`](https://github.com/DustinTrap/kvm-pilot/blob/main/examples/unattended_install.py) — mount an ISO and drive an OS install by watching the screen.
-- [`examples/bios_audit.py`](https://github.com/DustinTrap/kvm-pilot/blob/main/examples/bios_audit.py) — hard-cycle into firmware setup and OCR what's on screen.
-- [`examples/power_cycle_verify.py`](https://github.com/DustinTrap/kvm-pilot/blob/main/examples/power_cycle_verify.py) — hard power-cycle and verify the host comes back.
-
-All three default to the safe path (dry run and/or interactive confirmation);
-copy that pattern, not an allow-all one.
+- **See the screen**: MCP `snapshot` — returns a model-visible image plus
+  `signal` (`hdmi_signal` is the authoritative picture-present flag) and a
+  `frame_ref` for follow-up mouse clicks. A byte-identical repeat frame is
+  flagged as possibly stale — verify via `signal` + `logs` before acting on it.
+- **Diagnose "video/power looks wrong"**: MCP/CLI `logs` — the text log names
+  a fault (e.g. a stuck encoder behind a `snapshot` 503) a screenshot can't.
+- **Wait for a boot phase**: MCP `wait_for_state` (bounded ≤ 300 s per call;
+  chain calls for long installs) or CLI `watch`.
+- **Media**: check `list_virtual_media` **before** asking the user to download
+  or upload an ISO — it may already be in storage.
+- **Once the target OS is up**: prefer `ssh_reachable`/`ssh_exec` over KVM
+  keystrokes (the actuation-channel hierarchy, #81).
+- **Firmware, events, serial console (SOL), SSH bootstrap**: CLI only.

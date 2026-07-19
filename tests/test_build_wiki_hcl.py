@@ -106,7 +106,11 @@ def test_unattended_install_page_ships_on_both_surfaces(build_wiki, tmp_path):
     page = (out / "unattended-install.md").read_text()
     assert "inst.sshd inst.text" in page      # the matrix made it to the wiki
     assert "network-console" in page
-    assert "inst.sshd" in (out / "skill.md").read_text()   # compact rule shipped
+    # The compact rule ships on the in-wheel agent surface — since #222 it
+    # lives in the skill's linux-install playbook, and the core SKILL.md must
+    # route readers to it.
+    assert "inst.sshd" in (out / "linux-install.md").read_text()
+    assert "linux-install" in (out / "skill.md").read_text()
     assert "Unattended Linux installs" in (out / "_Sidebar.md").read_text()
 
 

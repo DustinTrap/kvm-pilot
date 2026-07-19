@@ -17,7 +17,13 @@ install with `pip install --pre kvm-pilot` (CLI `kvm-pilot`, MCP server
 
 - [README](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/README.md): overview, install, quickstart, sensing and safety model, compatibility
 - [Getting started (agents + MCP)](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/getting-started.md): enable the MCP server, trust ladder, credentials, first prompts
-- [Agent operating doctrine (bundled skill)](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/src/kvm_pilot/skill/SKILL.md): interface matrix, recovery order, reading failed snapshots, unattended installs
+- [Agent operating doctrine (bundled skill)](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/src/kvm_pilot/skill/SKILL.md): the core rules + when to read each playbook; also re-served mid-session by the MCP doctrine tool
+- [Skill playbook: interfaces](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/src/kvm_pilot/skill/references/interfaces.md): per-action interface matrix, multitasking rules, CLI command set
+- [Skill playbook: recovery](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/src/kvm_pilot/skill/references/recovery.md): remote-first recovery order (WoL first), reading failed snapshots, keep-awake
+- [Skill playbook: setup & gates](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/src/kvm_pilot/skill/references/setup.md): install, MCP registration, full tool list, effect gates, approval posture
+- [Skill playbook: Linux installs](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/src/kvm_pilot/skill/references/linux-install.md): text-mode + SSH-first install doctrine, per-distro boot args
+- [Skill playbook: target context](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/src/kvm_pilot/skill/references/target-context.md): locale/keyboard/timezone of the machine behind the KVM
+- [Skill playbook: Python library](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/src/kvm_pilot/skill/references/library.md): dry-run rehearsal, confirm gating, worked examples
 - [MCP server reference](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/src/kvm_pilot/mcp/README.md): every tool with annotations, effect gates, approval/receipt lifecycle, env vars
 - [CLI reference](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/cli.md): every subcommand, required capability, gating
 - [Configuration](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/configuration.md): config file, profiles, every KVM_PILOT_* env var, precedence

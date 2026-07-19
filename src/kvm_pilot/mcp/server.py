@@ -11,7 +11,7 @@ SAFETY MODEL (see the co-located README.md for the operator-facing version):
   * The read-only tools (``info``, ``healthcheck``, ``capabilities``,
     ``support_matrix``, ``power_state``, ``logs``, ``snapshot``,
     ``classify_screen``, ``wait_for_state``, ``list_virtual_media``,
-    ``ssh_reachable``, ``ssh_discover``) run with a
+    ``ssh_reachable``, ``ssh_discover``, ``doctrine``) run with a
     deny-all confirm callback and carry a ``readOnlyHint`` tool annotation
     (``ssh_discover`` additionally requires ``confirm=true`` — an active
     network scan is read-only but not harmless).
@@ -53,6 +53,7 @@ import threading
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, nullcontext
+from importlib.resources import files
 from typing import TYPE_CHECKING, Literal, cast
 
 import anyio
@@ -69,8 +70,14 @@ from kvm_pilot.calibrate import (
 )
 from kvm_pilot.config import HostConfig
 from kvm_pilot.drivers import Capability, KVMDriver, make_driver_from_config
-from kvm_pilot.errors import CapabilityError, KVMPilotError, VisionError
+from kvm_pilot.errors import (
+    CapabilityError,
+    KVMPilotError,
+    UnavailableError,
+    VisionError,
+)
 from kvm_pilot.errors import TimeoutError as KVMTimeoutError
+from kvm_pilot.health import RECOVERY_ORDER
 from kvm_pilot.mcp import act
 from kvm_pilot.safety import EffectClass, allow_all, deny_all, shortcut_effect
 from kvm_pilot.vision import (
@@ -409,6 +416,58 @@ def support_matrix(
     }
 
 
+# -- doctrine (#222): mid-session re-anchor on the bundled operating doctrine --
+
+
+def _doctrine_topics() -> dict:
+    """Topic name -> Traversable for SKILL.md (``core``) and each reference."""
+    root = files("kvm_pilot").joinpath("skill")
+    topics = {"core": root.joinpath("SKILL.md")}
+    for entry in root.joinpath("references").iterdir():
+        if entry.name.endswith(".md"):
+            topics[entry.name[:-3]] = entry
+    return topics
+
+
+def _md_title(text: str) -> str:
+    for line in text.splitlines():
+        if line.startswith("# "):
+            return line[2:].strip()
+    return ""
+
+
+@mcp.tool(annotations=_READ)
+def doctrine(topic: str | None = None) -> dict:
+    """Re-serve the bundled operating doctrine (read-only; offline, no device I/O).
+
+    The skill's playbooks ship inside this package; this tool re-serves them so
+    a session that never loaded the skill file — or has long since compacted it
+    away — can re-anchor on the written doctrine instead of a faded memory of
+    it. Call with no ``topic`` to list the topics; call with one for that
+    playbook's full text. Read ``recovery`` the moment a host goes dark or a
+    snapshot fails, and ``interfaces`` before picking how to do an action you
+    haven't done this session.
+    """
+    topics = _doctrine_topics()
+    if topic is None:
+        return {
+            "topics": {
+                name: _md_title(entry.read_text(encoding="utf-8"))
+                for name, entry in sorted(topics.items())
+            },
+            "note": (
+                "call again with topic=<name> for the full text; 'recovery' is "
+                "the one to read when a host is dark or wedged"
+            ),
+        }
+    entry = topics.get(topic)
+    if entry is None:
+        raise ToolError(
+            f"unknown doctrine topic {topic!r}. Valid topics: {', '.join(sorted(topics))}"
+        )
+    return {"topic": topic, "text": entry.read_text(encoding="utf-8")}
+
+
 @mcp.tool(annotations=_READ)
 def power_state(profile: str | None = None) -> dict:
     """Return whether the host is powered on, plus ATX detail where the driver has it
@@ -450,7 +509,10 @@ def snapshot(profile: str | None = None):
     NOT trust them as ground truth; check ``signal`` and ``logs`` instead.
     """
     with _driver(profile, confirm=deny_all, capability=Capability.VIDEO) as (cfg, kvm):
-        img = cast("Video", kvm).snapshot()
+        try:
+            img = cast("Video", kvm).snapshot()
+        except UnavailableError as exc:
+            raise _video_unavailable_error(exc) from exc
         note = f"screen of host '{cfg.host}' via the '{cfg.driver}' driver"
         if _dry_run():
             note += " (dry-run session)"
@@ -473,6 +535,22 @@ def snapshot(profile: str | None = None):
             except KVMPilotError:
                 payload["signal"] = None  # snapshot worked; a state probe must not fail it
         return [json.dumps(payload), Image(data=img, format="jpeg")]
+
+
+def _video_unavailable_error(exc: KVMPilotError) -> ToolError:
+    """Decorate a video-subsystem 503 with the next step (#222).
+
+    The failure often arrives long after the model's last doctrine read, so
+    the message carries the recovery ladder instead of assuming it's
+    remembered. Shared by every tool that captures a frame.
+    """
+    return ToolError(
+        f"snapshot unavailable: {exc} — the video subsystem (streamer/encoder) "
+        "is down, which does not by itself mean the host is. Check `logs` for "
+        "the named fault first. If the host itself is dark, the remote-first "
+        f"recovery order is: {RECOVERY_ORDER}; the `doctrine` tool "
+        "(topic 'recovery') has the full playbook."
+    )
 
 
 @mcp.tool(annotations=_READ_VISION)
@@ -509,6 +587,8 @@ def _classify_fallback(cfg: HostConfig, kvm: KVMDriver, hint: str, exc: VisionEr
     """
     try:
         img = cast("Video", kvm).snapshot()
+    except UnavailableError as e:
+        raise _video_unavailable_error(e) from e
     except Exception as e:  # noqa: BLE001 - no image means nothing to delegate
         raise ToolError(
             f"server-side vision unavailable ({exc}); a fallback snapshot also failed: {e}"
