@@ -344,12 +344,22 @@ def healthcheck(profile: str | None = None) -> dict:
     Read-only. Returns per-check findings with a tiered severity; a ``CRITICAL``
     (e.g. no out-of-band reset path) is what should gate a subsequent destructive
     op. The most valuable finding is ``recovery-path`` — whether a hung guest can
-    be reset at all when the KVM is remote.
+    be reset at all when the KVM is remote. Served through the preflight cache
+    (#225): stable posture may come from the last assessment, and a firmware
+    change since then adds a ``firmware-delta`` finding of what cleared/regressed.
     """
-    with _driver(profile, confirm=deny_all, capability=Capability.SYSTEM_INFO) as (cfg, kvm):
-        from kvm_pilot.health import run_healthcheck
+    # preflight=False: this tool IS the audit — the implicit driver-build
+    # preflight would run the same checks a second time.
+    with _driver(
+        profile, confirm=deny_all, capability=Capability.SYSTEM_INFO, preflight=False
+    ) as (cfg, kvm):
+        from kvm_pilot.health import HealthCache, note_session_audited, preflight
 
-        return {**_provenance(cfg), **run_healthcheck(kvm).to_dict()}
+        # enforce=False: an explicitly requested health *report* must report,
+        # never raise — enforcement stays on the destructive paths.
+        report = preflight(kvm, cache=HealthCache(), enforce=False)
+        note_session_audited(kvm)
+        return {**_provenance(cfg), **report.to_dict()}
 
 
 @mcp.tool(annotations=_READ)

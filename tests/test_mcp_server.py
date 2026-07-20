@@ -94,6 +94,9 @@ def server_env(config_file: Path, **extra: str) -> dict[str, str]:
     }
     env["KVM_PILOT_CONFIG"] = str(config_file)
     env["KVM_PILOT_PROFILE"] = "fakebox"
+    # The conftest cache isolation is monkeypatched env — stripped above, so the
+    # spawned server would write the developer's real ~/.cache without this.
+    env["KVM_PILOT_HEALTH_CACHE"] = str(config_file.parent / "health-cache.json")
     env.update(extra)
     return env
 
@@ -225,6 +228,37 @@ def test_healthcheck_tool_returns_report(config_file):
     assert parsed["driver"] == "fake"
     assert parsed["worst"] in {"OK", "INFO", "WARNING", "CRITICAL"}
     assert any(r["id"] == "recovery-path" for r in parsed["results"])
+
+
+def test_healthcheck_tool_uses_preflight_cache(monkeypatch, config_file):
+    """#225: the explicit healthcheck runs through the preflight path — a repeat
+    call serves stable checks from the HealthCache (only volatile checks re-run)
+    and the audit satisfies the once-per-session preflight debounce."""
+    from kvm_pilot import health
+    from kvm_pilot.drivers import FakeDriver
+    from kvm_pilot.mcp import server as server_mod
+
+    monkeypatch.setattr("kvm_pilot.config.DEFAULT_CONFIG_PATH", config_file)
+
+    batches: list[int] = []
+    real = health.run_healthcheck
+
+    def counting(driver, checks=None, **kw):
+        batches.append(len(checks or []))
+        return real(driver, checks=checks, **kw)
+
+    monkeypatch.setattr(health, "run_healthcheck", counting)
+
+    first = server_mod.healthcheck("fakebox")
+    assert first["worst"] in {"OK", "INFO", "WARNING", "CRITICAL"}
+    assert len(batches) == 2  # stable batch + volatile batch, both live
+
+    second = server_mod.healthcheck("fakebox")
+    assert second["worst"] == first["worst"]
+    assert len(batches) == 3  # only the volatile batch re-ran; stable from cache
+
+    # The explicit audit counts as this session's preflight for the device.
+    assert health.preflight_once(FakeDriver(host="fakebox.local")) is None
 
 
 def test_doctrine_serves_bundled_playbooks(config_file):

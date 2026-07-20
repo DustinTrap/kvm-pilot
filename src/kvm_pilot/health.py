@@ -1599,6 +1599,15 @@ def reset_session_audit() -> None:
     _SESSION_AUDITED.clear()
 
 
+def note_session_audited(driver: Any) -> None:
+    """Record that this device was just audited outside :func:`preflight_once`.
+
+    An explicit healthcheck (#225) satisfies the once-per-session audit; without
+    this, the next tool call would immediately re-probe the same device.
+    """
+    _SESSION_AUDITED.add(_session_key(driver))
+
+
 def preflight_once(
     driver: Any,
     *,
