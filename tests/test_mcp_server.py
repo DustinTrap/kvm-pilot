@@ -55,6 +55,7 @@ EXPECTED_ANNOTATIONS = {
     "appliance_status": READ,
     "access_paths": READ,
     "doctrine": READ,
+    "session": READ,
     "power": DESTRUCTIVE,
     "wake": DESTRUCTIVE,
     "set_boot_device": DESTRUCTIVE,
@@ -228,6 +229,77 @@ def test_healthcheck_tool_returns_report(config_file):
     assert parsed["driver"] == "fake"
     assert parsed["worst"] in {"OK", "INFO", "WARNING", "CRITICAL"}
     assert any(r["id"] == "recovery-path" for r in parsed["results"])
+
+
+def test_session_posture_journal_and_breadcrumb(config_file):
+    """#223: the re-anchor tool — clean posture before any act; after a gated
+    power act and a wait, the journal and the last-wait breadcrumb appear."""
+
+    async def interact(session):
+        fresh = await session.call_tool("session", {})
+        await session.call_tool("power", {"action": "off", "confirm": True})
+        await session.call_tool("wait_for_state", {"phase": "power_off", "timeout": 10})
+        resumed = await session.call_tool("session", {})
+        return fresh, resumed
+
+    env = server_env(config_file, KVM_PILOT_MCP_ALLOW_POWER="1")
+    fresh, resumed = run_session(env, interact)
+
+    first = result_json(fresh)
+    assert first["server"] == {
+        "read_only": False, "dry_run": False,
+        "approval_posture": "interactive", "profile_allowlist": None,
+    }
+    assert first["gates"] == {
+        "power": True, "hid": False, "media": False, "config": False,
+        "appliance": False, "external_write": False, "ssh": False,
+        "consent_off": False,
+    }
+    assert first["recent_acts"] == []
+    assert first["target"]["host"] == "fakebox.local"
+    assert first["target"]["driver"] == "fake"
+    assert first["target"]["frame_generation"] == 0
+    assert first["target"]["last_wait"] is None
+
+    second = result_json(resumed)
+    acts = second["recent_acts"]
+    # power bypasses the receipt pipeline (pre-act-layer tool, #234), so its
+    # journal entry is a "dispatched" record rather than a consumed receipt.
+    assert [a["event"] for a in acts] == ["dispatched"]
+    assert acts[0]["tool"] == "power" and acts[0]["op"] == "power.off"
+    assert acts[0]["dry_run"] is False
+    # The power act bumped the frame generation; the wait left its breadcrumb.
+    assert second["target"]["frame_generation"] >= 1
+    wait = second["target"]["last_wait"]
+    assert wait["phase"] == "power_off" and wait["reached"] is True
+    # Gate posture never names the enabling env vars (#224).
+    assert "KVM_PILOT" not in json.dumps(second["gates"])
+    assert "KVM_PILOT" not in json.dumps(second["recent_acts"])
+
+
+def test_session_never_refuses(config_file):
+    """An empty allowlist locks down targets — the posture report still answers."""
+
+    async def interact(session):
+        return await session.call_tool("session", {})
+
+    result = run_session(server_env(config_file, KVM_PILOT_MCP_PROFILES=""), interact)
+    assert result.isError is False
+    payload = result_json(result)
+    assert payload["gates"]  # posture still served
+    assert payload["server"]["profile_allowlist"] == []
+    assert "error" in payload["target"]
+
+
+def test_gate_closed_tool_denial_stays_mum(config_file):
+    """#224 end-to-end: a closed-gate act denial carries no ALLOW_* incantation."""
+
+    async def interact(session):
+        return await session.call_tool("type_text", {"text": "hi", "confirm": True})
+
+    payload = result_json(run_session(server_env(config_file), interact))
+    assert payload["approved"] is False and payload["outcome"] == "gate_closed"
+    assert "KVM_PILOT" not in payload["denied_reason"]
 
 
 def test_healthcheck_tool_uses_preflight_cache(monkeypatch, config_file):
@@ -1280,7 +1352,8 @@ def _fwc_env(monkeypatch, config_file, tmp_path, *, registry_latest="V1.9.1 rele
 
 def test_file_firmware_report_gate_closed_is_denial_not_error(config_file, tmp_path, monkeypatch):
     """Registry behind + gate unset: the reconcile half runs, the write half is
-    a same-path denial naming the operator flag — never a raised error."""
+    a same-path denial naming the effect — never a raised error, and never the
+    enabling env var (#224: refusals stay mum on the incantation)."""
     from kvm_pilot.mcp import server
     _fwc_env(monkeypatch, config_file, tmp_path)
     monkeypatch.delenv("KVM_PILOT_MCP_ALLOW_EXTERNAL_WRITE", raising=False)
@@ -1288,7 +1361,8 @@ def test_file_firmware_report_gate_closed_is_denial_not_error(config_file, tmp_p
     out = _run_tool(server.file_firmware_report(_StubContext(), confirm=True))
     assert out["registry_behind"] is True
     assert out["approved"] is False
-    assert "KVM_PILOT_MCP_ALLOW_EXTERNAL_WRITE" in out["denied_reason"]
+    assert "external_write" in out["denied_reason"]
+    assert "KVM_PILOT" not in out["denied_reason"]
 
 
 def test_file_firmware_report_registry_current_short_circuits(config_file, tmp_path, monkeypatch):

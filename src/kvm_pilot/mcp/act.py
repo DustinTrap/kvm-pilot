@@ -37,6 +37,7 @@ import secrets
 import threading
 import time
 import uuid
+from collections import deque
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -124,6 +125,43 @@ def enforce_allowlist(profile: str | None) -> str | None:
             "(KVM_PILOT_MCP_PROFILES); refusing (configured targets are not a fallback)"
         )
     return effective
+
+
+def gate_summary() -> dict[str, bool]:
+    """Effect-gate posture by friendly class name (#223).
+
+    Deliberately no env-var names: the posture (which effects are enabled) is
+    fine to report — an agent learns it piecemeal from refusals anyway — but the
+    enabling incantation stays out-of-band, operator-only. Soft/hard power and
+    HID input/control share flags, so they collapse to one name each.
+    ``ssh`` and ``consent_off`` are direct-flag gates with no ``EffectClass``;
+    the READ_ONLY force-close (#196) is replicated for them here.
+    """
+    read_only = env_flag("KVM_PILOT_MCP_READ_ONLY")
+    return {
+        "power": gate_enabled(EffectClass.POWER_SOFT),
+        "hid": gate_enabled(EffectClass.HID_INPUT),
+        "media": gate_enabled(EffectClass.MEDIA),
+        "config": gate_enabled(EffectClass.CONFIG_MUTATION),
+        "appliance": gate_enabled(EffectClass.APPLIANCE_RESET),
+        "external_write": gate_enabled(EffectClass.EXTERNAL_WRITE),
+        "ssh": not read_only and env_flag("KVM_PILOT_MCP_ALLOW_SSH"),
+        "consent_off": not read_only and env_flag("KVM_PILOT_MCP_ALLOW_CONSENT_OFF"),
+    }
+
+
+def allowlist_names() -> list[str] | None:
+    """The profile allowlist as data (None = no allowlist configured)."""
+    if "KVM_PILOT_MCP_PROFILES" not in os.environ:
+        return None
+    return sorted(
+        p.strip() for p in os.environ["KVM_PILOT_MCP_PROFILES"].split(",") if p.strip()
+    )
+
+
+def approval_posture() -> str:
+    """How act approvals are decided on this server (#223, for `session`)."""
+    return "interactive" if _elicit_posture_on() else "pre-authorized"
 
 
 # --------------------------------------------------------------------------- #
@@ -265,15 +303,17 @@ async def approve_or_deny(ctx: Context | None, inv: InvocationContext, *, confir
 
 
 async def _decide(ctx: Context | None, inv: InvocationContext, *, confirm: bool) -> Approval:
-    # Guarantee (a): the effect class must be operator-enabled.
+    # Guarantee (a): the effect class must be operator-enabled. Stay-mum (#224):
+    # never hand the agent the enabling env var to relay — the operator guide
+    # (the server README) documents it out-of-band.
     if not gate_enabled(inv.effect):
-        flag = EFFECT_ENABLE_FLAG.get(inv.effect)
         return Approval(
             False,
             reason=(
-                f"effect '{inv.effect}' is disabled on this server. Only the operator can "
-                f"enable it, by setting {flag} in the server's own environment before "
-                "starting it — it cannot be enabled from within an agent session."
+                f"effect '{inv.effect}' is disabled on this server. Only the operator "
+                "can enable it, in the server's own environment before starting it "
+                "(see the kvm-pilot MCP server README) — it cannot be enabled from "
+                "within an agent session."
             ),
             outcome=Outcome.GATE_CLOSED,
         )
@@ -530,6 +570,44 @@ def receipt_state(receipt_id: str) -> str | None:
         return _RECEIPTS.get(receipt_id)
 
 
+# Agent-readable act journal (#223): a bounded in-memory tail of *terminal*
+# audit events, served by the `session` tool so a compacted session can ask
+# "what has this server already done". The operator's `kvm_pilot.mcp.audit`
+# logger stays the complete, authoritative trail; this is a convenience view.
+# Same lifecycle as receipts: a server restart empties it, by design.
+_JOURNAL: deque[dict[str, Any]] = deque(maxlen=50)
+# "issued"/"approved" are interim states of the same invocation — journaling
+# terminals only keeps it at one line per act.
+_JOURNAL_EVENTS = frozenset(
+    {"denied", "consumed", "expired", "mismatched", "replayed", "dispatch-exception"}
+)
+
+
+def journal_tail(limit: int = 15) -> list[dict[str, Any]]:
+    """The most recent terminal act events, oldest first."""
+    with _gen_lock:
+        return list(_JOURNAL)[-limit:]
+
+
+def journal_event(host: str, tool: str, op: str, *, dry_run: bool) -> None:
+    """Journal a dispatch that bypasses the receipt pipeline (#223).
+
+    ``power``/``ssh_exec``/``appliance_reboot``/``set_boot_device``/``amt_enable``
+    predate the act layer (own gate + confirm, no receipts, no ``_audit_event``).
+    Until they migrate onto it, this keeps the session journal complete;
+    journal-only by design — the operator audit logger is the receipt
+    pipeline's contract.
+    """
+    entry = {
+        "ts": datetime.now(UTC).isoformat(timespec="seconds"),
+        "event": "dispatched", "host": host, "tool": tool, "op": op,
+        "effect": None, "outcome": "dispatched", "dry_run": dry_run,
+        "invocation": None,
+    }
+    with _gen_lock:
+        _JOURNAL.append(entry)
+
+
 def _audit_event(
     event: str,
     inv: InvocationContext,
@@ -538,6 +616,21 @@ def _audit_event(
     outcome: str | None = None,
     error: str | None = None,
 ) -> None:
+    if event in _JOURNAL_EVENTS:
+        entry = {
+            "ts": datetime.now(UTC).isoformat(timespec="seconds"),
+            "event": event,
+            "host": inv.host,
+            "tool": inv.tool,
+            "op": inv.op,
+            "effect": str(inv.effect),
+            "outcome": outcome or event,
+            "dry_run": inv.dry_run,
+            # Prefix only — enough to cross-reference the operator audit trail.
+            "invocation": inv.invocation_id[:8],
+        }
+        with _gen_lock:
+            _JOURNAL.append(entry)
     record: dict[str, Any] = {
         "event": event,
         "invocation_id": inv.invocation_id,
@@ -690,6 +783,24 @@ def frame_age(ref: str) -> float | None:
     with _gen_lock:
         minted = _FRAME_MINTED.get(ref)
     return None if minted is None else max(0.0, time.monotonic() - minted)
+
+
+# Last wait_for_state result per host (#223): the resume breadcrumb for a
+# multi-hour install — "you were waiting for installer_complete". In-memory
+# only, deliberately: a restart voids all session state (receipts, generations,
+# frame ages), and a persisted breadcrumb would be a confident-but-stale anchor.
+_LAST_WAIT: dict[str, dict[str, Any]] = {}
+
+
+def note_wait(host: str, record: dict[str, Any]) -> None:
+    """Record the outcome of a wait_for_state call for the `session` tool."""
+    with _gen_lock:
+        _LAST_WAIT[host] = record
+
+
+def last_wait(host: str) -> dict[str, Any] | None:
+    with _gen_lock:
+        return _LAST_WAIT.get(host)
 
 
 # Last content hash returned per host — the #141 staleness tell: a byte-identical

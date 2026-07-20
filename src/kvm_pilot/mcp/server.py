@@ -53,6 +53,7 @@ import threading
 import time
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager, nullcontext
+from datetime import UTC, datetime
 from importlib.resources import files
 from typing import TYPE_CHECKING, Literal, cast
 
@@ -478,6 +479,57 @@ def doctrine(topic: str | None = None) -> dict:
     return {"topic": topic, "text": entry.read_text(encoding="utf-8")}
 
 
+def _cached_firmware(cfg: HostConfig) -> str | None:
+    """Last-assessed firmware from the on-disk HealthCache — offline, best-effort."""
+    try:
+        from kvm_pilot.health import HealthCache
+
+        return HealthCache().last_assessed(f"{cfg.driver}@{cfg.host}")
+    except Exception:  # noqa: BLE001 - a posture read must never fail the tool
+        return None
+
+
+@mcp.tool(annotations=_READ)
+def session(profile: str | None = None) -> dict:
+    """Report this server's current operating posture (read-only; offline, no
+    device I/O — answers even when the device is down).
+
+    Call this after a context compaction, when resuming a long flow, or before
+    planning act calls: it names the target, dry-run/read-only state, which
+    effect gates are open (by class name only — opening one is operator-only,
+    out of band), the approval posture, the recent act journal, and the last
+    ``wait_for_state`` result for the target. All journal/wait state is
+    in-memory: a server restart empties it (and voids receipts and frame refs),
+    so an empty journal after a restart is expected, not evidence nothing
+    happened. Pair with ``healthcheck`` for device health and ``doctrine`` for
+    the operating playbooks.
+    """
+    out: dict = {
+        "server": {
+            "read_only": _read_only_mode(),
+            "dry_run": _dry_run(),
+            "approval_posture": act.approval_posture(),
+            "profile_allowlist": act.allowlist_names(),
+        },
+        "gates": act.gate_summary(),
+        "recent_acts": act.journal_tail(),
+    }
+    try:
+        act.enforce_allowlist(profile)
+        cfg = resolve_host(profile or os.environ.get("KVM_PILOT_PROFILE"))
+        out["target"] = {
+            "profile": profile or os.environ.get("KVM_PILOT_PROFILE"),
+            "host": cfg.host,
+            "driver": cfg.driver,
+            "firmware_last_assessed": _cached_firmware(cfg),
+            "frame_generation": act.generation(cfg.host),
+            "last_wait": act.last_wait(cfg.host),
+        }
+    except Exception as exc:  # noqa: BLE001 - a re-anchor tool never refuses
+        out["target"] = {"error": str(exc)}
+    return out
+
+
 @mcp.tool(annotations=_READ)
 def power_state(profile: str | None = None) -> dict:
     """Return whether the host is powered on, plus ATX detail where the driver has it
@@ -748,6 +800,18 @@ async def wait_for_state(
                     pass
 
             start = time.monotonic()
+            started_at = datetime.now(UTC).isoformat(timespec="seconds")
+
+            def _breadcrumb(reached: bool) -> None:
+                # #223: the resume anchor a compacted session asks `session` for.
+                act.note_wait(cfg.host, {
+                    "phase": phase, "reached": reached, "timeout_s": timeout,
+                    "started_at": started_at,
+                    "ended_at": datetime.now(UTC).isoformat(timespec="seconds"),
+                    "elapsed_s": round(time.monotonic() - start, 1),
+                    "last_observed": last[0].to_dict()["phase"] if last else None,
+                })
+
             # Hold the display awake AND (on GL) keep the on-demand encoder warm for
             # the wait, so the poll loop can't DPMS-sleep (#161) or 503 on a cold
             # streamer (#142); drivers lacking either no-op via nullctx.
@@ -758,6 +822,7 @@ async def wait_for_state(
                     state = analyzer.wait_for_state(
                         phase, timeout=timeout, hint=hint, on_poll=_note)
             except KVMTimeoutError as exc:
+                _breadcrumb(False)
                 out = {
                     **_provenance(cfg), "reached": False, "waited_for": phase,
                     "timeout_s": timeout, "detail": str(exc),
@@ -765,6 +830,7 @@ async def wait_for_state(
                 if last:
                     out["last"] = last[0].to_dict()
                 return out
+            _breadcrumb(True)
             return {
                 **_provenance(cfg), "reached": True, "waited_for": phase,
                 "elapsed_s": round(time.monotonic() - start, 1),
@@ -879,6 +945,7 @@ def power(
         profile, confirm=allow_all, capability=Capability.POWER, enforce_health=True
     ) as (cfg, kvm):
         getattr(kvm, _POWER_ACTIONS[action])()
+        act.journal_event(cfg.host, "power", f"power.{action}", dry_run=_dry_run())
         if _dry_run():
             return {
                 **_provenance(cfg), "requested": action, "dry_run": True,
@@ -942,6 +1009,7 @@ def set_boot_device(
         profile, confirm=allow_all, capability=Capability.BOOT_CONFIG, enforce_health=True
     ) as (cfg, kvm):
         result = cast("BootConfig", kvm).set_boot_device(device, once=once, uefi=uefi)
+        act.journal_event(cfg.host, "set_boot_device", f"boot.{device}", dry_run=_dry_run())
         return {
             **_provenance(cfg), "requested": device, "once": once, "uefi": uefi,
             "dry_run": _dry_run(), "boot": result,
@@ -978,15 +1046,17 @@ def amt_enable(
             raise ToolError("consent_off applies only to feature='kvm'")
         if not _env_flag("KVM_PILOT_MCP_ALLOW_CONSENT_OFF"):
             raise ToolError(
-                "disabling AMT user-consent is disabled on this server. It lets anyone with the "
-                "AMT credentials watch and control the console with NO on-screen prompt, so it "
-                "needs a dedicated operator gate (KVM_PILOT_MCP_ALLOW_CONSENT_OFF, see README.md) "
-                "beyond ALLOW_CONFIG. It cannot be enabled from within an agent session."
+                "disabling AMT user-consent is disabled on this server. It lets anyone with "
+                "the AMT credentials watch and control the console with NO on-screen prompt, "
+                "so it needs its own dedicated operator gate beyond the config gate "
+                "(documented in the server's README.md). It cannot be enabled from within "
+                "an agent session."
             )
     with _driver(profile, confirm=allow_all, enforce_health=True) as (cfg, kvm):
         fn = getattr(kvm, "enable_sol" if feature == "sol" else "enable_kvm", None)
         if fn is None:
             raise ToolError("this driver has no AMT feature enablement (use the amt driver)")
+        act.journal_event(cfg.host, "amt_enable", f"amt.enable_{feature}", dry_run=_dry_run())
         if feature == "sol":
             fn()
         else:
@@ -1517,6 +1587,7 @@ def ssh_exec(
         ch = SSHChannel.from_config(cfg, confirm=allow_all, dry_run=_dry_run())
     except CapabilityError as exc:
         raise ToolError(str(exc)) from exc
+    act.journal_event(cfg.host, "ssh_exec", "ssh.exec", dry_run=_dry_run())
     return {**_provenance(cfg), **ch.ssh_exec(command)}
 
 
@@ -1573,6 +1644,7 @@ def appliance_reboot(confirm: bool = False, profile: str | None = None) -> dict:
         ch = ApplianceChannel.from_config(cfg, confirm=allow_all, dry_run=_dry_run())
     except CapabilityError as exc:
         raise ToolError(str(exc)) from exc
+    act.journal_event(cfg.host, "appliance_reboot", "appliance.reboot", dry_run=_dry_run())
     return {**_provenance(cfg), **ch.reboot()}
 
 

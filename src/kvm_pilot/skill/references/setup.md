@@ -58,7 +58,10 @@ every call returns 404. A firmware upgrade can revert it.
   the lockout-exposure view), `doctrine` (re-serve any topic of this operating
   doctrine — recovery, interfaces, setup, linux-install, target-context,
   library, or core — for mid-session re-anchoring; offline, no device I/O),
-  and `ssh_discover` (CIDR scan — RISKY/opt-in,
+  `session` (this server's current posture: dry-run/read-only state, which
+  effect gates are open by class name, the recent act journal, and the last
+  `wait_for_state` breadcrumb — call it first when resuming after a context
+  compaction), and `ssh_discover` (CIDR scan — RISKY/opt-in,
   needs `confirm=true`, user-owned networks only)
 - **Destructive act tools** — each needs the operator to opt the tool's *effect*
   in via an env flag **and** a per-invocation approval (a human elicitation, or

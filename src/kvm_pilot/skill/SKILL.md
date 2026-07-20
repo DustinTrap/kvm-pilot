@@ -57,7 +57,10 @@ especially late in a long session:**
 
 No file access, or the session has compacted since you read this? The MCP
 server serves the same content: call the read-only `doctrine` tool — no
-arguments lists the topics; `topic="recovery"` returns that playbook.
+arguments lists the topics; `topic="recovery"` returns that playbook. And when
+resuming a long flow, call `session` first: it reports what this server has
+already done (act journal), what it's allowed to do (open effect gates by
+name), and what you were last waiting for.
 
 ## The rules that must survive a long session
 

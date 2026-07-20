@@ -23,6 +23,9 @@ _ENV = (
     "KVM_PILOT_MCP_ALLOW_HID",
     "KVM_PILOT_MCP_ALLOW_POWER",
     "KVM_PILOT_MCP_ALLOW_MEDIA",
+    "KVM_PILOT_MCP_ALLOW_SSH",
+    "KVM_PILOT_MCP_ALLOW_CONSENT_OFF",
+    "KVM_PILOT_MCP_READ_ONLY",
     "KVM_PILOT_MCP_PROFILES",
     "KVM_PILOT_PROFILE",
     "KVM_PILOT_HOST",
@@ -360,3 +363,66 @@ def test_audit_records_every_terminal(monkeypatch, caplog):
     # Every record carries the invocation id — the audit trail's join key.
     assert all(json.loads(r.message)["invocation_id"] == inv.invocation_id
                for r in caplog.records if json.loads(r.message).get("event") != "denied")
+
+
+# -- session posture, act journal, wait breadcrumb (#223 / #224) --------------
+
+
+def test_gate_summary_names_only_and_read_only_forces_closed(monkeypatch):
+    _clear(monkeypatch)
+    monkeypatch.setenv("KVM_PILOT_MCP_ALLOW_POWER", "1")
+    monkeypatch.setenv("KVM_PILOT_MCP_ALLOW_SSH", "1")
+    summary = act.gate_summary()
+    assert summary["power"] is True and summary["ssh"] is True
+    assert summary["hid"] is False and summary["consent_off"] is False
+    # Friendly class names only — the enabling incantation stays out-of-band.
+    assert all("KVM_PILOT" not in k for k in summary)
+    monkeypatch.setenv("KVM_PILOT_MCP_READ_ONLY", "1")
+    assert not any(act.gate_summary().values())  # #196 force-close covers all
+
+
+def test_allowlist_names_absent_vs_set(monkeypatch):
+    _clear(monkeypatch)
+    assert act.allowlist_names() is None
+    monkeypatch.setenv("KVM_PILOT_MCP_PROFILES", "b, a,,")
+    assert act.allowlist_names() == ["a", "b"]
+
+
+def test_gate_closed_denial_stays_mum(monkeypatch):
+    """#224: the refusal names the effect, never the enabling env var."""
+    _clear(monkeypatch)
+    approval = asyncio.run(act.approve_or_deny(None, _inv(), confirm=True))
+    assert approval.approved is False
+    assert approval.outcome is act.Outcome.GATE_CLOSED
+    assert "KVM_PILOT" not in approval.reason
+    assert "hid_input" in approval.reason  # the friendly effect name survives
+
+
+def test_journal_records_terminals_once_and_is_bounded(monkeypatch):
+    _clear(monkeypatch)
+    act._JOURNAL.clear()
+    monkeypatch.setenv("KVM_PILOT_MCP_ALLOW_HID", "1")
+    inv = _inv()
+    approval = asyncio.run(act.approve_or_deny(None, inv, confirm=True))
+    receipt = act.issue_receipt(inv, approval)
+    act.verify_and_consume(receipt, inv)
+    tail = act.journal_tail()
+    # "approved"/"issued" are interim — exactly one terminal entry for the act.
+    assert [e["event"] for e in tail] == ["consumed"]
+    assert tail[0]["tool"] == "type_text" and tail[0]["host"] == "h"
+    assert tail[0]["invocation"] == inv.invocation_id[:8]
+    assert "KVM_PILOT" not in json.dumps(tail)
+
+    for _ in range(60):  # bound honored
+        act.verify_and_consume(receipt, inv)  # replays journal as terminals
+    assert len(act._JOURNAL) <= 50
+    assert act.journal_tail(limit=5)[-1]["event"] == "replayed"
+
+
+def test_wait_breadcrumb_round_trip():
+    act._LAST_WAIT.clear()
+    assert act.last_wait("h") is None
+    record = {"phase": "installer_complete", "reached": False}
+    act.note_wait("h", record)
+    assert act.last_wait("h") == record
+    assert act.last_wait("other") is None

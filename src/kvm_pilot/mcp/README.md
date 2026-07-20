@@ -48,6 +48,7 @@ client/driver code stays stdlib-only; `mcp` is imported only in this subpackage.
 | `appliance_reboot` | `destructiveHint` | Reboot the **KVM appliance** (not the target) to clear a wedged encoder — **disabled unless the operator opts in** (`KVM_PILOT_MCP_ALLOW_APPLIANCE`) + `confirm=true`. Drops KVM control ~60s; target power untouched. Never automate it |
 | `access_paths` | `readOnlyHint` | Which **independent recovery paths** are live for the device — the lockout-exposure view (#162): kvmd-REST / appliance-SSH / target-SSH / out-of-band power / console-HID, each labeled by failure *domain* so redundancy isn't oversold. `summary.out_of_band_live=false` means every path shares the appliance's fate — a fully hung appliance can't be recovered remotely |
 | `doctrine` | `readOnlyHint` | Re-serve the bundled operating doctrine from the installed package (#222) — offline, no device I/O. No `topic` lists the topics; `topic="recovery"` etc. returns that playbook's full text. For sessions that never loaded the skill file or compacted past it: re-read `recovery` when a host goes dark, `interfaces` before picking how to do an unfamiliar action |
+| `session` | `readOnlyHint` | This server's current operating posture (#223) — offline, no device I/O, never refuses. Reports read-only/dry-run state, approval posture, the profile allowlist, **which effect gates are open by class name** (never the enabling env vars — opening one stays operator-only, out of band), the recent act journal (bounded, in-memory: a restart empties it and voids receipts), the target's frame generation, and the last `wait_for_state` breadcrumb. The re-anchor call for a compacted or resumed session |
 
 ### Annotation profiles (#195)
 
@@ -61,7 +62,7 @@ per-invocation approvals below apply regardless of annotation.
 
 | Profile | readOnly | destructive | idempotent | openWorld | Tools |
 |---|---|---|---|---|---|
-| read | ✅ | — | ✅ | — | `info` `healthcheck` `capabilities` `support_matrix` `power_state` `boot_options` `logs` `snapshot` `list_virtual_media` `ssh_reachable` `ssh_discover` `appliance_status` `access_paths` `doctrine` |
+| read | ✅ | — | ✅ | — | `info` `healthcheck` `capabilities` `support_matrix` `power_state` `boot_options` `logs` `snapshot` `list_virtual_media` `ssh_reachable` `ssh_discover` `appliance_status` `access_paths` `doctrine` `session` |
 | read, open-world | ✅ | — | ✅ | ⚠️ | `classify_screen` — the *server-side vision backend* may be a cloud VLM (a local backend never leaves your network) |
 | read, open-world, timed | ✅ | — | — | ⚠️ | `wait_for_state` — same vision caveat, and a timed wait is not idempotent |
 | destructive | — | ⚠️ | — | — | `power` `wake` `set_boot_device` `amt_enable` `type_text` `press_key` `send_shortcut` `ctrl_alt_delete` `mouse` `ssh_exec` `appliance_reboot` — not safely repeatable (a second reset reboots again) |
