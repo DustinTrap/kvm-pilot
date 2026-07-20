@@ -66,7 +66,10 @@ SECRET_PAT='(password|passwd|secret|api[_-]?key|token)[[:space:]]*[:=][[:space:]
 # AMT RFB/KVM test fixtures: tests pass fake kvm_password=/amt_kvm_password= args
 # ("rfbpass"/"rfb-only"/"Abcd123!") — the real RFB password lives only in the
 # gitignored config, never committed, so these literals are always fixtures.
-SECRET_EXCL='<pw>|<secret|placeholder|redact|example|BASE32SECRET|your[_-]|xxxx+|IPMI_PASSWORD env|KVM_PILOT_|\$\{|\$[A-Z]|os\.environ|"calvin"|"admin"|"password"|"changeme"|"test"|"rfbpass"|"rfb-only"|Abcd123|"secret"'
+# AMT RFB password ILLUSTRATIONS in docs (amt-onboarding.md) are 8-char examples
+# always carrying the "EXACTLY 8 chars" rule comment (or an EXAMPLE / set-your-own
+# marker); the exclusion is case-sensitive, so match the doc's literal casing.
+SECRET_EXCL='<pw>|<secret|placeholder|redact|example|EXAMPLE|set your own|EXACTLY 8 chars|BASE32SECRET|your[_-]|xxxx+|IPMI_PASSWORD env|KVM_PILOT_|\$\{|\$[A-Z]|os\.environ|"calvin"|"admin"|"password"|"changeme"|"test"|"rfbpass"|"rfb-only"|Abcd123|"secret"'
 SECRETS="$( { git diff HEAD 2>/dev/null; git log -p -n 25 2>/dev/null; } \
   | grep -E '^\+' | grep -EI "$SECRET_PAT" | grep -vEI "$SECRET_EXCL" | sort -u || true )"
 echo "SECRET_SCAN (working diff + last 25 commits): $( [ -n "$SECRETS" ] && echo "$(echo "$SECRETS" | wc -l | tr -d ' ') possible literal(s) — INSPECT + ROTATE if real" || echo "clean" )"
