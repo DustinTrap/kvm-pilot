@@ -130,6 +130,31 @@ def test_install_command_consistent():
             )
 
 
+def test_skill_description_within_budget():
+    """The frontmatter description is the skill's only always-loaded part —
+    trigger-matching favors <=1024 chars; doctrine belongs in the body (#227)."""
+    text = _SKILL.read_text(encoding="utf-8")
+    m = re.match(r"---\n(.*?)\n---\n", text, re.DOTALL)
+    assert m, "SKILL.md must open with YAML frontmatter"
+    desc_lines = []
+    in_desc = False
+    for line in m.group(1).splitlines():
+        if line.startswith("description:"):
+            in_desc = True
+            continue
+        if in_desc:
+            if line.startswith("  "):
+                desc_lines.append(line.strip())
+            else:
+                break
+    description = " ".join(desc_lines)
+    assert description, "no description found in SKILL.md frontmatter"
+    assert len(description) <= 1024, (
+        f"SKILL.md description is {len(description)} chars (budget 1024) — "
+        "move doctrine into the body; keep the description trigger-focused"
+    )
+
+
 def test_install_skill_command_documented():
     """`kvm-pilot install-skill` (#226) is the one bridge between `pip install`
     and Claude Code actually discovering the skill — every install surface must

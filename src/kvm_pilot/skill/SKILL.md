@@ -1,26 +1,18 @@
 ---
 name: kvm-pilot
 description: >-
-  AI-driven bare-metal control of IP-KVMs (PiKVM, GL.iNet GLKVM GL-RM1 /
-  GL-RM1PE), server BMCs (Redfish iDRAC/iLO/XCC, pre-Redfish IPMI), and Intel
-  AMT/vPro laptops & desktops. Use whenever the user wants to remotely operate a
-  headless server or workstation — power on/off/cycle, mount an install ISO,
-  set the next boot device, enter BIOS/UEFI, type at a console, or watch the
-  screen to detect boot phase (POST, GRUB, installer, login, crash). Intel AMT
-  is the out-of-band answer for business laptops where an HDMI-capture KVM is
-  blind below the OS: it captures a firmware-level BIOS/POST/GRUB screenshot and
-  drives power/SOL beneath the OS. Backed by the `kvm-pilot` Python
-  package; vision runs on Claude or a local OpenAI-compatible VLM. **No single
-  interface is best for everything — pick per action: the bundled MCP server
-  (`kvm-pilot-mcp`) for the visual loop (snapshot/classify), gated act tools
-  (keyboard/mouse/media), and gated power; the CLI for
-  logs/capabilities/firmware/events and scripting; the Python library for MSD
-  mode switching; and SSH for appliance maintenance the tool can't do.
-  The full interface matrix and the detailed playbooks live in `references/`
-  beside this file — read each one at the moment it applies.** Beta — core
-  read paths are live-verified on GL-RM1PE; other device/capability combos
-  remain unverified. Treat anything not in the support matrix as unverified
-  and confirm destructive steps with the user.
+  AI-driven bare-metal control of headless machines through IP-KVMs (PiKVM,
+  GL.iNet GLKVM GL-RM1/RM1PE, BliKVM), server BMCs (Redfish iDRAC/iLO/XCC,
+  IPMI), and Intel AMT/vPro. Use whenever the user wants to remotely operate,
+  install, or recover a physical machine: power on/off/cycle, mount an install
+  ISO, set the next boot device, enter BIOS/UEFI, type or click at the console,
+  watch the screen for a boot phase (POST, GRUB, installer, login, crash), run
+  an unattended OS install, or diagnose a host that went dark. Also use when
+  choosing between the bundled MCP server (kvm-pilot-mcp), the kvm-pilot CLI,
+  the Python library, and SSH for a given action. Intel AMT is the out-of-band
+  answer for business laptops where an HDMI-capture KVM is blind below the OS.
+  Beta: treat device+capability combos absent from the support matrix as
+  unverified and confirm destructive steps with the user.
 ---
 
 # kvm-pilot skill
@@ -36,7 +28,9 @@ description: >-
 
 This skill is a thin wrapper over the installable `kvm-pilot` package. The code
 lives in the package, not here — install it and import it rather than copying
-client logic into a script.
+client logic into a script. Vision (screen classification) runs on Claude or
+any local OpenAI-compatible VLM — see
+[references/setup.md](references/setup.md).
 
 ## How to use this skill — read the playbook at need-time
 
