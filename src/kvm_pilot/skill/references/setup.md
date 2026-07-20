@@ -63,7 +63,9 @@ every call returns 404. A firmware upgrade can revert it.
   `session` (this server's current posture: dry-run/read-only state, which
   effect gates are open by class name, the recent act journal, and the last
   `wait_for_state` breadcrumb — call it first when resuming after a context
-  compaction), and `ssh_discover` (CIDR scan — RISKY/opt-in,
+  compaction), `events` (bounded collect of typed device events — the text
+  cross-check for a vision wait), `firmware_check` (read-only firmware
+  currency vs the registry), and `ssh_discover` (CIDR scan — RISKY/opt-in,
   needs `confirm=true`, user-owned networks only)
 - **Act tools (gated state-changers; the irreversible ones are additionally
   annotated destructive)** — each needs the operator to open the tool's

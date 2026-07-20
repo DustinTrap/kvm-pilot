@@ -97,6 +97,7 @@ if TYPE_CHECKING:
     from kvm_pilot.drivers.base import (
         HID,
         BootConfig,
+        Events,
         Logs,
         Power,
         SystemInfo,
@@ -1691,6 +1692,59 @@ def access_paths(profile: str | None = None) -> dict:
         from kvm_pilot.health import access_paths as _access_paths
 
         return {**_provenance(cfg), **_access_paths(kvm)}
+
+
+@mcp.tool(annotations=_READ)
+def events(count: int = 20, duration: float = 5.0, profile: str | None = None) -> dict:
+    """Collect typed device events from the kvmd stream (read-only, bounded).
+
+    MCP twin of CLI ``events`` minus follow mode (#233 — an endless stream
+    doesn't fit the synchronous stdio transport): returns up to ``count``
+    events or ``duration`` seconds' worth (capped 30 s), whichever first.
+    ``logs`` is the better first diagnostic; events add the live typed stream
+    (atx/msd/streamer state changes) to cross-check a vision wait against.
+    """
+    duration = max(0.5, min(duration, 30.0))
+    count = max(1, min(count, 200))
+    with _driver(profile, confirm=deny_all, capability=Capability.EVENTS) as (cfg, kvm):
+        collected: list[dict] = []
+        try:
+            for evt in cast("Events", kvm).watch_events(stream=True, timeout=duration):
+                collected.append(
+                    {"event_type": evt.get("event_type"), "event": evt.get("event", {})}
+                )
+                if len(collected) >= count:
+                    break
+        except ImportError as exc:  # websocket-client missing on the server
+            raise ToolError(str(exc)) from exc
+        return {
+            **_provenance(cfg), "events": collected, "count": len(collected),
+            "window_s": duration,
+        }
+
+
+@mcp.tool(annotations=_READ)
+def firmware_check(profile: str | None = None) -> dict:
+    """Report the device's firmware currency vs the bundled registry (read-only).
+
+    The read half of ``file_firmware_report`` (#233): reconciles the device's
+    reported firmware/update state against the registry SSoT and says whether
+    the registry is behind — nothing is filed, no gate is consulted. When
+    ``registry_behind`` is true, ``file_firmware_report`` contributes the
+    report (gated external write).
+    """
+    from kvm_pilot.firmware_registry import check_currency
+
+    with _driver(profile, confirm=deny_all, capability=Capability.SYSTEM_INFO) as (cfg, kvm):
+        fw, upd, submission = check_currency(kvm)
+        return {
+            **_provenance(cfg),
+            "vendor": (fw.get("vendor") or "").strip(),
+            "product": fw.get("product") or "",
+            "installed": fw.get("version"),
+            "device_reported_latest": (upd or {}).get("latest"),
+            "registry_behind": submission is not None,
+        }
 
 
 @mcp.tool(annotations=_REVERSIBLE_WRITE_REMOTE)

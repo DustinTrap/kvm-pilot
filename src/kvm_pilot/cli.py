@@ -1358,6 +1358,8 @@ _MCP_TWINS: dict[str, tuple[str, str]] = {
     "mouse-move": ("mouse", "frame_ref-anchored moves/clicks that refuse stale screens"),
     "click": ("mouse", "frame_ref-anchored clicks that refuse stale screens"),
     "ssh-exec": ("ssh_exec", "gated in-band exec with a typed outcome"),
+    "events": ("events", "bounded in-session collect, no follow-mode process to manage"),
+    "firmware-check": ("firmware_check", "same currency readout as structured output"),
 }
 
 

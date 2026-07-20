@@ -67,6 +67,8 @@ code (#229):
 | `appliance_status` | `readOnlyHint` | Read-only diagnostics from the **KVM appliance's own OS** over appliance-SSH (load, D-state video threads). Note: load is ~10 even when idle on these units, so it is not a health signal — use `healthcheck`'s `encoder-wedge` finding |
 | `appliance_reboot` | `destructiveHint` | Reboot the **KVM appliance** (not the target) to clear a wedged encoder — **disabled unless the operator opts in** (`KVM_PILOT_MCP_ALLOW_APPLIANCE`) + `confirm=true`. Drops KVM control ~60s; target power untouched. Never automate it |
 | `access_paths` | `readOnlyHint` | Which **independent recovery paths** are live for the device — the lockout-exposure view (#162): kvmd-REST / appliance-SSH / target-SSH / out-of-band power / console-HID, each labeled by failure *domain* so redundancy isn't oversold. `summary.out_of_band_live=false` means every path shares the appliance's fate — a fully hung appliance can't be recovered remotely |
+| `events` | `readOnlyHint` | Bounded collect of typed device events from the kvmd stream (#233): up to `count` events or `duration` seconds (≤30), whichever first — the MCP twin of CLI `events` minus follow mode (an endless stream doesn't fit stdio). Cross-checks a vision wait with a text signal |
+| `firmware_check` | `readOnlyHint` | The read half of `file_firmware_report` (#233): reconciles device-reported firmware/update state against the registry SSoT and reports `registry_behind` — nothing filed, no gate consulted |
 | `doctrine` | `readOnlyHint` | Re-serve the bundled operating doctrine from the installed package (#222) — offline, no device I/O. No `topic` lists the topics; `topic="recovery"` etc. returns that playbook's full text. For sessions that never loaded the skill file or compacted past it: re-read `recovery` when a host goes dark, `interfaces` before picking how to do an unfamiliar action. The same playbooks are also exposed as MCP **resources** (`kvm-pilot://doctrine/<topic>`, #231) for resource-capable clients |
 | `session` | `readOnlyHint` | This server's current operating posture (#223) — offline, no device I/O, never refuses. Reports read-only/dry-run state, approval posture, the profile allowlist, **which effect gates are open by class name** (never the enabling env vars — opening one stays operator-only, out of band), the recent act journal (bounded, in-memory: a restart empties it and voids receipts), the target's frame generation, and the last `wait_for_state` breadcrumb. The re-anchor call for a compacted or resumed session |
 
@@ -82,7 +84,7 @@ per-invocation approvals below apply regardless of annotation.
 
 | Profile | readOnly | destructive | idempotent | openWorld | Tools |
 |---|---|---|---|---|---|
-| read | ✅ | — | ✅ | — | `info` `healthcheck` `capabilities` `support_matrix` `power_state` `boot_options` `logs` `snapshot` `list_virtual_media` `ssh_reachable` `ssh_discover` `appliance_status` `access_paths` `doctrine` `session` |
+| read | ✅ | — | ✅ | — | `info` `healthcheck` `capabilities` `support_matrix` `power_state` `boot_options` `logs` `snapshot` `list_virtual_media` `ssh_reachable` `ssh_discover` `appliance_status` `access_paths` `doctrine` `session` `events` `firmware_check` |
 | read, open-world | ✅ | — | ✅ | ⚠️ | `classify_screen` — the *server-side vision backend* may be a cloud VLM (a local backend never leaves your network) |
 | read, open-world, timed | ✅ | — | — | ⚠️ | `wait_for_state` — same vision caveat, and a timed wait is not idempotent |
 | destructive | — | ⚠️ | — | — | `power` `wake` `set_boot_device` `amt_enable` `type_text` `press_key` `send_shortcut` `ctrl_alt_delete` `mouse` `ssh_exec` `appliance_reboot` — not safely repeatable (a second reset reboots again) |
@@ -171,13 +173,13 @@ for every driver.
 The MCP surface is deliberately small. For anything outside the table, pick the
 right interface (the skill's *Choosing an interface* matrix is the full guide):
 
-- **`firmware-update`, `events`** → the **CLI** (`kvm-pilot <cmd>`); no MCP
-  tool. (`firmware-check`'s report-filing half IS exposed as
-  `file_firmware_report`, #190; the currency readout itself rides along in its
-  result and in `healthcheck`.)
+- **`firmware-update`** → the **CLI** (`kvm-pilot firmware-update`); no MCP
+  tool. (Bounded `events` and the read-only `firmware_check` currency readout
+  ARE tools since #233; only follow-mode streaming stays CLI.)
 - **MSD mode switching** → the **Python library**.
-- **Serial console (SOL)** on AMT/IPMI → the **CLI** (`kvm-pilot console`); no MCP
-  serial tool. AMT/IPMI *feature enablement* other than the redirection listeners
+- **Serial console (SOL)** on AMT/IPMI → the **CLI** (`kvm-pilot console`); no
+  MCP serial tool — an interactive byte stream doesn't fit the synchronous
+  stdio transport, and won't (documented boundary, not a gap). AMT/IPMI *feature enablement* other than the redirection listeners
   (`amt_enable`) — e.g. re-provisioning — stays out of band.
 - **Disabling AMT KVM user-consent** → possible via `amt_enable(consent_off=true)`
   but only behind the dedicated `KVM_PILOT_MCP_ALLOW_CONSENT_OFF` gate; the

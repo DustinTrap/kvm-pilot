@@ -30,7 +30,9 @@ KVM HID+vision → SSH once the target OS is reachable — see
 | **Screenshot BIOS/POST/GRUB on a laptop** the capture-KVM can't see boot | **`snapshot` with `--driver amt`** (MCP or CLI) | Intel AMT renders the firmware framebuffer *below* the OS — the one driver that sees pre-boot on a laptop. **Graphical screens only** (not legacy VGA text mode; a reset right after the request means "unsupported display mode"). |
 | **Attach a text serial console (SOL)** | **CLI `console`** (IPMI or AMT) | Watch BIOS/GRUB/kernel over serial when serial-redirect is on. No MCP serial tool. |
 | **Enable AMT SOL/KVM redirection** (open the listeners) | **CLI `amt enable-sol` / `enable-kvm`**, or **MCP `amt_enable`** (gated CONFIG) | Over WS-Man, no MEBx trip. `--no-consent` (CLI) / `consent_off` (MCP, needs the extra `ALLOW_CONSENT_OFF` gate) disables the on-screen user-consent prompt. Clear a wedged single KVM session with `amt reset-kvm`. |
-| firmware-update, events | **CLI only** | The MCP server does not expose these. |
+| Watch typed device events (atx/msd/streamer changes) | **MCP** `events` (bounded collect) or CLI `events` (follow mode) | The text cross-check for a vision wait (#233). Follow-mode streaming is CLI-only. |
+| Check firmware currency vs the registry | **MCP** `firmware_check` (read-only) or CLI `firmware-check` | The CLI additionally auto-files the registry report; the MCP filing twin is `file_firmware_report` (gated external write). |
+| firmware-update | **CLI only** | The MCP server does not expose it. |
 | Contribute firmware currency to the registry (file the report) | **MCP `file_firmware_report`** or CLI `firmware-check` (auto-files) | Files a GitHub issue via the `gh` CLI when the registry is behind — an external write: MCP needs `KVM_PILOT_MCP_ALLOW_EXTERNAL_WRITE` + approval; `dry_run=true` previews (#190). |
 | MSD mode switching | **Python library only** | Not in MCP or CLI. |
 | Change **host** power (on/off/cycle/reset) | **MCP `power`** (gated) or CLI `power` / `power-cycle` | Destructive — confirm each step. MCP `power` is operator-enabled + per-call approval. |

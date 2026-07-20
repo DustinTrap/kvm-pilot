@@ -56,6 +56,8 @@ EXPECTED_ANNOTATIONS = {
     "access_paths": READ,
     "doctrine": READ,
     "session": READ,
+    "events": READ,
+    "firmware_check": READ,
     "power": DESTRUCTIVE,
     "wake": DESTRUCTIVE,
     "set_boot_device": DESTRUCTIVE,
@@ -300,6 +302,36 @@ def test_gate_closed_tool_denial_stays_mum(config_file):
     payload = result_json(run_session(server_env(config_file), interact))
     assert payload["approved"] is False and payload["outcome"] == "gate_closed"
     assert "KVM_PILOT" not in payload["denied_reason"]
+
+
+def test_events_tool_bounded_collect(monkeypatch, config_file):
+    """#233: the MCP events twin collects up to count and stops — never follows."""
+    from kvm_pilot.drivers.fake import FakeDriver
+    from kvm_pilot.mcp import server as server_mod
+
+    monkeypatch.setattr("kvm_pilot.config.DEFAULT_CONFIG_PATH", config_file)
+
+    def fake_watch(self, on_event=None, stream=True, timeout=None):
+        for i in range(10):
+            yield {"event_type": "atx_state", "event": {"n": i}}
+
+    monkeypatch.setattr(FakeDriver, "watch_events", fake_watch)
+    out = server_mod.events(count=3, profile="fakebox")
+    assert out["count"] == 3  # stopped at count, not all 10
+    assert [e["event"]["n"] for e in out["events"]] == [0, 1, 2]
+    assert out["events"][0]["event_type"] == "atx_state"
+
+
+def test_firmware_check_is_read_only_reconcile(monkeypatch, config_file, tmp_path):
+    """#233: the read half of file_firmware_report — reports currency, files
+    nothing, consults no gate."""
+    from kvm_pilot.mcp import server as server_mod
+
+    _fwc_env(monkeypatch, config_file, tmp_path)
+    out = server_mod.firmware_check("fakebox")
+    assert out["registry_behind"] is True  # the _fwc_env fixture registry is behind
+    assert "installed" in out and "device_reported_latest" in out
+    assert "filed" not in out and "approved" not in out  # read-only: no write half
 
 
 def test_healthcheck_tool_uses_preflight_cache(monkeypatch, config_file):

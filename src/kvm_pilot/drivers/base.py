@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import time
+from collections.abc import Callable, Generator
 from enum import StrEnum
 from typing import Protocol, runtime_checkable
 
@@ -120,9 +121,20 @@ class GPIO(Protocol):
 
 @runtime_checkable
 class Events(Protocol):
-    """Stream asynchronous device events."""
+    """Stream asynchronous device events.
 
-    def watch_events(self) -> object: ...
+    The real signature (PiKVM client, fake driver): yields event dicts, calls
+    ``on_event`` per event when given, ``timeout`` bounds the whole watch. Was
+    a bare ``() -> object`` stub until the MCP ``events`` tool (#233) needed
+    the protocol to be callable as documented.
+    """
+
+    def watch_events(
+        self,
+        on_event: Callable | None = None,
+        stream: bool = True,
+        timeout: float | None = None,
+    ) -> Generator[dict, None, None]: ...
 
 
 # -- sensing protocols -----------------------------------------------------
