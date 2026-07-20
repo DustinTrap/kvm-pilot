@@ -65,8 +65,9 @@ every call returns 404. A firmware upgrade can revert it.
   `wait_for_state` breadcrumb — call it first when resuming after a context
   compaction), and `ssh_discover` (CIDR scan — RISKY/opt-in,
   needs `confirm=true`, user-owned networks only)
-- **Destructive act tools** — each needs the operator to opt the tool's *effect*
-  in via an env flag **and** a per-invocation approval (a human elicitation, or
+- **Act tools (gated state-changers; the irreversible ones are additionally
+  annotated destructive)** — each needs the operator to open the tool's
+  *effect gate* **and** a per-invocation approval (a human elicitation, or
   `confirm=true` under a standing policy):
   - `power` — on/off/cycle/reset (`KVM_PILOT_MCP_ALLOW_POWER`)
   - `wake` — Wake-on-LAN magic packet to the managed host, the out-of-band

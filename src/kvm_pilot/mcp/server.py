@@ -23,7 +23,7 @@ SAFETY MODEL (see the co-located README.md for the operator-facing version):
     (#195: ``destructiveHint`` for the irreversible ones; the reversible media
     and external-write tools are annotated non-destructive but stay gated all
     the same) and are DISABLED until the operator opts the tool's
-    *effect class* in via an env flag in the server's own environment
+    *effect class* in via its effect gate in the server's own environment
     (``KVM_PILOT_MCP_ALLOW_POWER`` / ``_ALLOW_HID`` / ``_ALLOW_MEDIA`` /
     ``_ALLOW_SSH`` / ``_ALLOW_EXTERNAL_WRITE``). An effect class with no
     registered flag is fail-closed. On top of that each act call requires per-invocation
@@ -158,7 +158,7 @@ _POWER_ACTIONS = {
 }
 
 
-# Single source of truth for the operator env flags (shared with the act layer).
+# Single source of truth for the effect-gate env flags (shared with the act layer).
 _env_flag = act.env_flag
 
 
@@ -1499,7 +1499,7 @@ async def mount_iso(
     confirm: bool = False,
     profile: str | None = None,
 ) -> dict:
-    """Mount an ISO as virtual media on the host. DESTRUCTIVE (media).
+    """Mount an ISO as virtual media on the host. GATED act (media effect gate); reversible.
 
     ``source`` is a local path or an ``http(s)://`` URL; ``usb=true`` attaches as a
     USB flash drive instead of a CD-ROM. Needs ``KVM_PILOT_MCP_ALLOW_MEDIA`` +
@@ -1517,7 +1517,7 @@ async def mount_iso(
 
 @mcp.tool(annotations=_REVERSIBLE_WRITE)
 async def eject(ctx: Context, confirm: bool = False, profile: str | None = None) -> dict:
-    """Detach virtual media (the inverse of ``mount_iso``). DESTRUCTIVE (media).
+    """Detach virtual media (the inverse of ``mount_iso``). GATED act (media effect gate); reversible.
 
     Needs ``KVM_PILOT_MCP_ALLOW_MEDIA`` + per-invocation approval.
     """

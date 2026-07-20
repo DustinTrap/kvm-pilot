@@ -58,9 +58,9 @@ name), and what you were last waiting for.
 
 ## The rules that must survive a long session
 
-1. **Confirm every destructive step with the user** — power, reset, media,
-   keystrokes, clicks — unless they have explicitly approved unattended
-   operation *in this session*. Most device+capability combos are unverified;
+1. **Confirm every destructive or otherwise gated act with the user** — power,
+   reset, media, keystrokes, clicks — unless they have explicitly approved
+   unattended operation *in this session*. Most device+capability combos are unverified;
    check the `support_matrix` tool before trusting one that matters.
 2. **Never pass an allow-all confirm callback** (e.g. `lambda op, d: True`) —
    and note that *omitting* `confirm` is also unattended (the library default

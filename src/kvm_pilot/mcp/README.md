@@ -13,6 +13,26 @@ client/driver code stays stdlib-only; `mcp` is imported only in this subpackage.
 > for what actually has; issue #7). Treat every result as unverified, and strongly
 > consider running with dry-run enabled (below).
 
+## Terminology
+
+One name per concept, used consistently across the docs, the skill, and the
+code (#229):
+
+- **effect gate** — the `ALLOW_*` operator opt-in that enables an effect on
+  this server (opened out-of-band, in the server's own environment; never from
+  within an agent session).
+- **effect class** — the `EffectClass` taxonomy that classifies what an
+  operation *does* (a Ctrl+Alt+Del chord is a power effect, not HID), and so
+  which effect gate it needs.
+- **act tools** — all gated state-changers, reversible or not (HID, media,
+  power, boot config, SSH exec, appliance reset, external write).
+- **destructive** — the subset of act tools annotated `destructiveHint=true`
+  (irreversible); the reversible media/calibration/external-write tools are
+  act tools but not destructive.
+- **playbook** — the operating guidance bundled with the skill
+  (`skill/references/*.md`), re-served at runtime by the `doctrine` tool;
+  **topic** is only the `doctrine` parameter naming one.
+
 ## Tools
 
 | Tool | Annotations | What it does |
@@ -79,12 +99,14 @@ device-side (a leaked session can lock operators out of the BMC).
 
 ![The approval lifecycle: an act call must pass the ALLOW_* effect gate, then per-invocation approval (a human elicitation, or confirm=true under a standing policy). Approval mints an HMAC-signed, single-use, expiring receipt bound to the exact tool, arguments and host; dispatch verifies and consumes it before touching the device. Expired, replayed or argument-drifted receipts fail closed and must be re-approved.](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/approval-lifecycle.svg)
 
-The act tools (`type_text`, `press_key`, `send_shortcut`, `ctrl_alt_delete`)
-require **two** things, not one:
+Every act tool — the gated state-changers, from HID (`type_text`, `press_key`,
+`send_shortcut`, `ctrl_alt_delete`, `mouse`, `calibrate_mouse`) through media
+(`mount_iso`, `eject`) to the external write (`file_firmware_report`) —
+requires **two** things, not one:
 
-1. **Allowed** — the operator enabled the tool's *effect class* via an env flag in
+1. **Allowed** — the operator opened the tool's **effect gate** in
    the server's own environment, and the target profile is on `KVM_PILOT_MCP_PROFILES`
-   (if set). Tools are classified by **effect, not transport**: `ctrl_alt_delete`
+   (if set). Tools are classified by **effect class, not transport**: `ctrl_alt_delete`
    and a Ctrl+Alt+Del / Magic-SysRq chord are reboots, so they need
    `KVM_PILOT_MCP_ALLOW_POWER` — an agent can't reboot the box through the weaker
    HID gate by picking a different actuator.
@@ -249,7 +271,7 @@ kvm-pilot-mcp                    # start the stdio server (or: python -m kvm_pil
 | `KVM_PILOT_MCP_ALLOW_APPLIANCE` | **Operator-only** opt-in that enables `appliance_reboot` (rebooting the KVM appliance itself) (`1`/`true`/`yes`) |
 | `KVM_PILOT_MCP_ALLOW_EXTERNAL_WRITE` | **Operator-only** opt-in enabling writes to systems *outside* the managed device — currently `file_firmware_report` (files a GitHub issue via the `gh` CLI, which must be installed + authed in the server's environment) (#190) |
 | `KVM_PILOT_MCP_PROFILES` | **Fail-closed** allowlist of profile names the server may target (comma-separated). Unset = no allowlist; set-but-empty = allow nothing; a target not on the list is refused (never a fall-back to all configured hosts) |
-| `KVM_PILOT_MCP_ELICIT` | Set to `off` to force the pre-authorized posture (the `ALLOW_*` env gate + per-call `confirm=true` become the standing authorization) even for elicitation-capable clients; otherwise a per-invocation human approval is requested when the client supports it. The escape hatch when a chat client keeps cancelling pending approvals (`denied_reason: "approval cancel"`, see troubleshooting above) — trade-off: `off` disables per-call human approval, an operator decision |
+| `KVM_PILOT_MCP_ELICIT` | Set to `off` to force the pre-authorized posture (the `ALLOW_*` effect gate + per-call `confirm=true` become the standing authorization) even for elicitation-capable clients; otherwise a per-invocation human approval is requested when the client supports it. The escape hatch when a chat client keeps cancelling pending approvals (`denied_reason: "approval cancel"`, see troubleshooting above) — trade-off: `off` disables per-call human approval, an operator decision |
 | `KVM_PILOT_SSH_HOST` / `KVM_PILOT_SSH_USER` / `KVM_PILOT_SSH_PORT` / `KVM_PILOT_SSH_KEY` | The **managed host's** SSH target (a different machine from the KVM) for `ssh_reachable` / `ssh_exec`; also settable per-profile as `ssh_host` etc. |
 | `KVM_PILOT_MCP_READ_ONLY` | Least-privilege launch posture (#196): only read-only tools are registered (minus `ssh_discover`), every effect gate is force-closed regardless of `ALLOW_*`, and drivers are built deny-all. Wins over `ALLOW_*` and `DRY_RUN`. The recommended first rung of the trust ladder (`READ_ONLY` → `DRY_RUN` → per-effect `ALLOW_*`) |
 | `KVM_PILOT_MCP_DRY_RUN` | Build every driver with `dry_run=True`; destructive calls are logged, never sent |

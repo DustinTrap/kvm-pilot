@@ -2,7 +2,7 @@
 
 Two guarantees per act call, from the Armorer Labs security review:
 
-  (a) **allowed** — the effect class is operator-enabled (an env flag set in the
+  (a) **allowed** — the effect gate is open (an operator env flag set in the
       server's own environment) *and* the target profile is on the allowlist;
   (b) **approved at run time** — either a human approved this exact invocation via
       MCP elicitation (*interactive* posture), or a standing operator policy
@@ -54,7 +54,7 @@ from kvm_pilot.safety import EffectClass
 # Guarantee (a): the effect class is operator-enabled                         #
 # --------------------------------------------------------------------------- #
 
-# Each effect maps to the operator env flag that enables it (None = never gated).
+# Each effect class maps to its effect gate's env flag (None = never gated).
 # HID input and HID control share the HID flag; both power tiers share the power
 # flag (so Ctrl+Alt+Del, classified power_soft, needs ALLOW_POWER — it cannot be
 # reached via the weaker HID gate).
@@ -80,7 +80,7 @@ def gate_enabled(effect: EffectClass) -> bool:
     """True if the operator enabled this effect class (or it needs no gate).
 
     An effect with no ``EFFECT_ENABLE_FLAG`` entry is fail-closed: a new effect
-    class must get its own operator flag, never silently borrow another gate
+    class must get its own effect gate, never silently borrow another one
     (#190 — previously an unmapped effect fell back to the CONFIG flag).
 
     ``KVM_PILOT_MCP_READ_ONLY`` force-closes every effect gate regardless of
