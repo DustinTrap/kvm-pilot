@@ -101,7 +101,7 @@ def test_effect_classes_by_family():
     assert effect_of("atx.power_on") is EffectClass.POWER_SOFT
     assert effect_of("atx.reset_hard") is EffectClass.POWER_HARD
     assert effect_of("gpio.pulse") is EffectClass.POWER_HARD
-    assert effect_of("ssh.exec") is EffectClass.HID_CONTROL
+    assert effect_of("ssh.exec") is EffectClass.SSH_EXEC  # own gate, never HID's (#234)
 
 
 @pytest.mark.parametrize(

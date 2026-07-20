@@ -913,56 +913,52 @@ def _verify_power(
 
 
 @mcp.tool(annotations=_DESTRUCTIVE)
-def power(
+async def power(
+    ctx: Context,
     action: Literal["on", "off", "off-hard", "reset"],
     confirm: bool = False,
     profile: str | None = None,
 ) -> dict:
     """Change host power state. DESTRUCTIVE.
 
-    Disabled unless the server operator has enabled power control in the server's
-    own environment (see the co-located README.md). ``confirm=true`` is required as
-    a second factor. The result carries an honest effect report (#168):
-    ``verified`` is true/false when the driver has a trustworthy power signal
-    (Redfish PowerState, a wired ATX LED), and ``null`` — with the reason and
-    what to do instead — when it doesn't (GL units: ATX sensing lies). A power
-    action also invalidates prior ``snapshot`` frame refs (generation bump), so
-    a stale mouse click can't land on the post-reboot screen.
+    Gated by the power effect gate + per-invocation approval (elicitation, or
+    ``confirm=true`` under standing policy); denials come back through the same
+    path with a typed ``outcome`` (#234). The result carries an honest effect
+    report (#168): ``verified`` is true/false when the driver has a trustworthy
+    power signal (Redfish PowerState, a wired ATX LED), and ``null`` — with the
+    reason and what to do instead — when it doesn't. A power action also
+    invalidates prior ``snapshot`` frame refs (generation bump), so a stale
+    mouse click can't land on the post-reboot screen.
     """
-    if not _env_flag("KVM_PILOT_MCP_ALLOW_POWER"):
-        # Deliberately no copy-pasteable variable assignment here: the gate must be
-        # opened by the human operator in the server's environment, out of band —
-        # an agent must not be able to relay the exact incantation.
-        raise ToolError(
-            "power control is disabled on this server. Only the human operator can "
-            "enable it, by setting the power-enable environment variable (documented "
-            "in the server's README.md) in the MCP server's own environment before "
-            "starting it. It cannot be enabled from within an agent session."
-        )
-    if not confirm:
-        raise ToolError(f"power {action!r} was not confirmed")
-    with _driver(
-        profile, confirm=allow_all, capability=Capability.POWER, enforce_health=True
-    ) as (cfg, kvm):
+
+    def _run(cfg: HostConfig, kvm: KVMDriver) -> dict:
         getattr(kvm, _POWER_ACTIONS[action])()
-        act.journal_event(cfg.host, "power", f"power.{action}", dry_run=_dry_run())
         if _dry_run():
             return {
-                **_provenance(cfg), "requested": action, "dry_run": True,
-                "verified": None, "observed": None,
+                "requested": action, "verified": None, "observed": None,
                 "note": (
                     f"power {action}: DRY-RUN — logged only, nothing was sent to "
                     f"host '{cfg.host}' ({cfg.driver})"
                 ),
             }
-        # The screen must be presumed changed whether or not verification lands.
-        act.bump_generation(cfg.host)
         verified, observed, note = _verify_power(kvm, action)
         return {
-            **_provenance(cfg), "requested": action,
-            "verified": verified, "observed": observed, "note": note,
+            "requested": action, "verified": verified, "observed": observed,
+            "note": note,
             "detail": f"power {action}: requested on host '{cfg.host}' ({cfg.driver})",
         }
+
+    # Graceful off/on are soft; forced off and reset are hard. Both ride the
+    # power effect gate — the distinction is recorded on the receipt.
+    effect = (
+        EffectClass.POWER_HARD if action in ("off-hard", "reset") else EffectClass.POWER_SOFT
+    )
+    return await _act(
+        ctx, profile, tool="power", effect=effect, op=f"power.{action}",
+        transport="atx.power", args={"action": action}, confirm=confirm,
+        run=_run, detail=f"power {action}",
+        capability=Capability.POWER, enforce_health=True,
+    )
 
 
 @mcp.tool(annotations=_READ)
@@ -979,7 +975,8 @@ def boot_options(profile: str | None = None) -> dict:
 
 
 @mcp.tool(annotations=_DESTRUCTIVE)
-def set_boot_device(
+async def set_boot_device(
+    ctx: Context,
     device: Literal["pxe", "cd", "hdd", "usb", "bios", "diag", "none"],
     once: bool = True,
     uefi: bool = True,
@@ -988,36 +985,28 @@ def set_boot_device(
 ) -> dict:
     """Set the next-boot (or persistent) boot device via BootSourceOverride. CONFIG MUTATION.
 
-    Disabled unless the operator enabled config mutations in the server's own
-    environment (see the co-located README.md). ``confirm=true`` is required.
-    ``none`` clears the override; ``once=false`` makes it persistent; ``uefi=false``
-    selects legacy BIOS mode where the target exposes it. A target the BMC doesn't
+    Gated by the config effect gate + per-invocation approval; denials come
+    back through the same path with a typed ``outcome`` (#234). ``none`` clears
+    the override; ``once=false`` makes it persistent; ``uefi=false`` selects
+    legacy BIOS mode where the target exposes it. A target the BMC doesn't
     advertise fails fast (call ``boot_options`` first to see ``allowable``).
     """
-    if not _env_flag("KVM_PILOT_MCP_ALLOW_CONFIG"):
-        # As with power: the gate is opened by the human operator out of band, so
-        # no copy-pasteable variable is surfaced to the agent.
-        raise ToolError(
-            "boot-device control is disabled on this server. Only the human operator "
-            "can enable it, by setting the config-mutation enable environment variable "
-            "(documented in the server's README.md) in the MCP server's own environment "
-            "before starting it. It cannot be enabled from within an agent session."
-        )
-    if not confirm:
-        raise ToolError(f"set_boot_device {device!r} was not confirmed")
-    with _driver(
-        profile, confirm=allow_all, capability=Capability.BOOT_CONFIG, enforce_health=True
-    ) as (cfg, kvm):
-        result = cast("BootConfig", kvm).set_boot_device(device, once=once, uefi=uefi)
-        act.journal_event(cfg.host, "set_boot_device", f"boot.{device}", dry_run=_dry_run())
-        return {
-            **_provenance(cfg), "requested": device, "once": once, "uefi": uefi,
-            "dry_run": _dry_run(), "boot": result,
-        }
+    return await _act(
+        ctx, profile, tool="set_boot_device", effect=EffectClass.CONFIG_MUTATION,
+        op=f"boot.{device}", transport="bmc.boot_override",
+        args={"device": device, "once": once, "uefi": uefi}, confirm=confirm,
+        run=lambda _cfg, kvm: {
+            "requested": device, "once": once, "uefi": uefi,
+            "boot": cast("BootConfig", kvm).set_boot_device(device, once=once, uefi=uefi),
+        },
+        detail=f"boot override {device} ({'once' if once else 'persistent'})",
+        capability=Capability.BOOT_CONFIG, enforce_health=True,
+    )
 
 
 @mcp.tool(annotations=_DESTRUCTIVE)
-def amt_enable(
+async def amt_enable(
+    ctx: Context,
     feature: Literal["sol", "kvm"],
     consent_off: bool = False,
     confirm: bool = False,
@@ -1026,21 +1015,16 @@ def amt_enable(
     """Enable an Intel AMT redirection listener over WS-Man (Intel AMT/vPro only). CONFIG MUTATION.
 
     ``feature='sol'`` opens the SOL/IDE-R listener (16994); ``feature='kvm'`` opens
-    KVM redirection (5900) and sets the RFB password. Disabled unless the operator
-    enabled config mutations (``KVM_PILOT_MCP_ALLOW_CONFIG``); ``confirm=true`` is
-    required. ``consent_off=true`` (KVM only) DISABLES the on-screen user-consent
-    prompt — a surveillance escalation — and additionally requires the dedicated
-    operator gate ``KVM_PILOT_MCP_ALLOW_CONSENT_OFF`` (see README.md); leaving it
-    false keeps the prompt.
+    KVM redirection (5900) and sets the RFB password. Gated by the config effect
+    gate + per-invocation approval (typed same-path denials, #234).
+    ``consent_off=true`` (KVM only) DISABLES the on-screen user-consent prompt —
+    a surveillance escalation — and additionally requires the dedicated
+    ``KVM_PILOT_MCP_ALLOW_CONSENT_OFF`` operator gate (see README.md); leaving
+    it false keeps the prompt.
     """
-    if not _env_flag("KVM_PILOT_MCP_ALLOW_CONFIG"):
-        raise ToolError(
-            "AMT feature enablement is disabled on this server. Only the human operator can "
-            "enable it, by setting the config-mutation enable environment variable (documented "
-            "in the server's README.md) in the MCP server's own environment before starting it."
-        )
-    if not confirm:
-        raise ToolError(f"amt_enable {feature!r} was not confirmed")
+    # Usage/modifier-gate validation stays a fast ToolError — it precedes the
+    # act flow (the consent-off gate is a modifier on top of the config gate,
+    # not an effect class of its own; stay-mum per #224).
     if consent_off:
         if feature != "kvm":
             raise ToolError("consent_off applies only to feature='kvm'")
@@ -1052,24 +1036,33 @@ def amt_enable(
                 "(documented in the server's README.md). It cannot be enabled from within "
                 "an agent session."
             )
-    with _driver(profile, confirm=allow_all, enforce_health=True) as (cfg, kvm):
+
+    def _run(_cfg: HostConfig, kvm: KVMDriver) -> dict:
         fn = getattr(kvm, "enable_sol" if feature == "sol" else "enable_kvm", None)
         if fn is None:
             raise ToolError("this driver has no AMT feature enablement (use the amt driver)")
-        act.journal_event(cfg.host, "amt_enable", f"amt.enable_{feature}", dry_run=_dry_run())
         if feature == "sol":
             fn()
         else:
             fn(require_consent=not consent_off)
         return {
-            **_provenance(cfg), "feature": feature,
+            "feature": feature,
             "port": 16994 if feature == "sol" else 5900,
-            "consent": "off" if consent_off else "on", "dry_run": _dry_run(),
+            "consent": "off" if consent_off else "on",
         }
+
+    return await _act(
+        ctx, profile, tool="amt_enable", effect=EffectClass.CONFIG_MUTATION,
+        op=f"amt.enable_{feature}", transport="wsman.config",
+        args={"feature": feature, "consent_off": consent_off}, confirm=confirm,
+        run=_run, detail=f"AMT {feature} listener enabled",
+        capability=None, enforce_health=True,
+    )
 
 
 @mcp.tool(annotations=_DESTRUCTIVE)
-def wake(
+async def wake(
+    ctx: Context,
     mac: str | None = None,
     broadcast: str | None = None,
     count: int = 3,
@@ -1078,35 +1071,29 @@ def wake(
 ) -> dict:
     """Send a Wake-on-LAN magic packet to power the host on. POWER (soft).
 
-    Disabled unless the operator enabled power control (the power-enable env var,
-    see the co-located README.md) in the server's own environment. ``confirm=true``
-    is required. ``mac`` defaults to the profile's ``mac``; ``broadcast`` to its
-    ``wol_broadcast``. No KVM driver is contacted — WoL is a broadcast sent from
-    the server's own host onto the target's L2 segment.
+    Gated by the power effect gate + per-invocation approval (typed same-path
+    denials, #234). ``mac`` defaults to the profile's ``mac``; ``broadcast`` to
+    its ``wol_broadcast``. No KVM driver is contacted — WoL is a broadcast sent
+    from the server's own host onto the target's L2 segment.
     """
-    if not _env_flag("KVM_PILOT_MCP_ALLOW_POWER"):
-        raise ToolError(
-            "power control is disabled on this server. Only the human operator can "
-            "enable it, by setting the power-enable environment variable (documented "
-            "in the server's README.md) in the MCP server's own environment before "
-            "starting it. It cannot be enabled from within an agent session."
-        )
-    if not confirm:
-        raise ToolError("wake was not confirmed")
     cfg = resolve_host(profile or os.environ.get("KVM_PILOT_PROFILE"))
     target = mac or cfg.mac
     if not target:
         raise ToolError("no MAC — pass mac=, or set 'mac' in the host profile")
     bc = broadcast or cfg.wol_broadcast
-    from kvm_pilot import wol
 
-    if _dry_run():
-        return {**_provenance(cfg), "requested_mac": target, "broadcast": bc, "dry_run": True}
-    wol.send_magic_packet(target, broadcast=bc, count=count)
-    return {
-        **_provenance(cfg), "requested_mac": target, "broadcast": bc,
-        "count": count, "dry_run": False,
-    }
+    def _run() -> dict:
+        from kvm_pilot import wol
+
+        if not _dry_run():
+            wol.send_magic_packet(target, broadcast=bc, count=count)
+        return {"requested_mac": target, "broadcast": bc, "count": count}
+
+    return await _channel_act(
+        ctx, profile, cfg, tool="wake", effect=EffectClass.POWER_SOFT,
+        op="wol.wake", transport="net.wol", args={"mac": target}, confirm=confirm,
+        run=_run, detail=f"WoL magic packet x{count} to {target}",
+    )
 
 
 # -- HID act tools (issue #61): see act.py for the two-guarantee model --------
@@ -1129,6 +1116,49 @@ def _consume_receipt(
     )
 
 
+async def _channel_act(
+    ctx: Context,
+    profile: str | None,
+    cfg: HostConfig,
+    *,
+    tool: str,
+    effect: EffectClass,
+    op: str,
+    transport: str,
+    args: dict,
+    confirm: bool,
+    run: Callable[[], object],
+    detail: str,
+) -> dict:
+    """Act flow for tools that dispatch over a channel (WoL packet, SSH), not a
+    device driver (#234): same two-guarantee approval, receipt, audit terminals,
+    and same-path typed denials as ``_act``, minus the driver build. The caller
+    resolves ``cfg`` (and validates usage) first; the allowlist is enforced here.
+    """
+    act.enforce_allowlist(profile)
+    inv = act.new_invocation(
+        host=cfg.host, profile=profile, tool=tool, effect=effect, op=op,
+        transport=transport, args=args, dry_run=_dry_run(),
+    )
+    approval = await act.approve_or_deny(ctx, inv, confirm=confirm)
+    if not approval.approved:
+        return {**_provenance(cfg), **act.result(inv, approval)}
+    receipt, denied = _consume_receipt(inv, approval)
+    if denied is not None:
+        return {**_provenance(cfg), **denied}
+    try:
+        extra = run()
+    except Exception as exc:
+        act.audit_dispatch_error(inv, receipt, exc)
+        raise
+    if not inv.dry_run and act.bumps_generation(inv.effect):
+        act.bump_generation(cfg.host)
+    return {**_provenance(cfg), **act.result(
+        inv, approval, detail=detail, receipt=receipt,
+        extra=extra if isinstance(extra, dict) else None,
+    )}
+
+
 async def _act(
     ctx: Context,
     profile: str | None,
@@ -1139,17 +1169,22 @@ async def _act(
     transport: str,
     args: dict,
     confirm: bool,
-    run: Callable[[KVMDriver], object],  # return (if any) is ignored
+    run: Callable[[HostConfig, KVMDriver], object],
     detail: str,
-    capability: Capability = Capability.HID,
+    capability: Capability | None = Capability.HID,
+    enforce_health: bool = False,
 ) -> dict:
     """Shared act-tool flow (#61): resolve+gate the driver, run the two-guarantee
     approval, execute on approval, and return the receipt. Denials come back
     through the same path (a result with ``approved=False`` + a reason), never a
     raised error, so the agent can recover. Dry-run is handled by the driver's own
     SafetyPolicy, so ``run`` becomes a no-op and the receipt still records intent.
+    ``run`` may return a dict of tool-specific result fields (merged into the
+    result, #234); any other return is ignored.
     """
-    with _driver(profile, confirm=allow_all, capability=capability) as (cfg, kvm):
+    with _driver(
+        profile, confirm=allow_all, capability=capability, enforce_health=enforce_health
+    ) as (cfg, kvm):
         inv = act.new_invocation(
             host=cfg.host, profile=profile, tool=tool, effect=effect, op=op,
             transport=transport, args=args, dry_run=_dry_run(),
@@ -1161,7 +1196,7 @@ async def _act(
         if denied is not None:
             return {**_provenance(cfg), **denied}
         try:
-            run(kvm)
+            extra = run(cfg, kvm)
         except Exception as exc:
             act.audit_dispatch_error(inv, receipt, exc)
             raise
@@ -1169,7 +1204,10 @@ async def _act(
         # observations — bump the frame generation so a stale mouse ref won't match.
         if not inv.dry_run and act.bumps_generation(inv.effect):
             act.bump_generation(cfg.host)
-        return {**_provenance(cfg), **act.result(inv, approval, detail=detail, receipt=receipt)}
+        return {**_provenance(cfg), **act.result(
+            inv, approval, detail=detail, receipt=receipt,
+            extra=extra if isinstance(extra, dict) else None,
+        )}
 
 
 @mcp.tool(annotations=_DESTRUCTIVE)
@@ -1185,7 +1223,7 @@ async def type_text(
     return await _act(
         ctx, profile, tool="type_text", effect=EffectClass.HID_INPUT, op="hid.type_text",
         transport="hid.keyboard", args={"text": text}, confirm=confirm,
-        run=lambda kvm: cast("HID", kvm).type_text(text),
+        run=lambda _cfg, kvm: cast("HID", kvm).type_text(text),
         detail=f"typed {len(text)} character(s)",
     )
 
@@ -1201,7 +1239,7 @@ async def press_key(
     return await _act(
         ctx, profile, tool="press_key", effect=EffectClass.HID_INPUT, op="hid.press_key",
         transport="hid.keyboard", args={"key": key}, confirm=confirm,
-        run=lambda kvm: cast("HID", kvm).press_key(key),
+        run=lambda _cfg, kvm: cast("HID", kvm).press_key(key),
         detail=f"pressed {key!r}",
     )
 
@@ -1222,7 +1260,7 @@ async def send_shortcut(
     return await _act(
         ctx, profile, tool="send_shortcut", effect=effect, op="hid.send_shortcut",
         transport="hid.shortcut", args={"keys": keys}, confirm=confirm,
-        run=lambda kvm: cast("HID", kvm).send_shortcut(keys),
+        run=lambda _cfg, kvm: cast("HID", kvm).send_shortcut(keys),
         detail=f"sent shortcut {keys!r}",
     )
 
@@ -1240,7 +1278,7 @@ async def ctrl_alt_delete(
     return await _act(
         ctx, profile, tool="ctrl_alt_delete", effect=EffectClass.POWER_SOFT,
         op="hid.send_shortcut", transport="hid.keyboard", args={}, confirm=confirm,
-        run=lambda kvm: cast("HID", kvm).send_shortcut("ControlLeft,AltLeft,Delete"),
+        run=lambda _cfg, kvm: cast("HID", kvm).send_shortcut("ControlLeft,AltLeft,Delete"),
         detail="sent Ctrl+Alt+Del",
     )
 
@@ -1494,7 +1532,7 @@ async def mount_iso(
     return await _act(
         ctx, profile, tool="mount_iso", effect=EffectClass.MEDIA, op="msd.connect",
         transport="msd", args={"source": source, "name": name, "usb": usb}, confirm=confirm,
-        run=lambda kvm: cast("VirtualMedia", kvm).mount_iso(source, image_name=name, cdrom=not usb),
+        run=lambda _cfg, kvm: cast("VirtualMedia", kvm).mount_iso(source, image_name=name, cdrom=not usb),
         detail=f"mounted {source!r}",
         capability=Capability.VIRTUAL_MEDIA,
     )
@@ -1509,7 +1547,7 @@ async def eject(ctx: Context, confirm: bool = False, profile: str | None = None)
     return await _act(
         ctx, profile, tool="eject", effect=EffectClass.MEDIA, op="msd.disconnect",
         transport="msd", args={}, confirm=confirm,
-        run=lambda kvm: cast("VirtualMedia", kvm).msd_disconnect(),
+        run=lambda _cfg, kvm: cast("VirtualMedia", kvm).msd_disconnect(),
         detail="ejected virtual media",
         capability=Capability.VIRTUAL_MEDIA,
     )
@@ -1544,36 +1582,42 @@ def ssh_reachable(profile: str | None = None, host: str | None = None) -> dict:
 
 
 @mcp.tool(annotations=_DESTRUCTIVE)
-def ssh_exec(
-    command: str, confirm: bool = False, profile: str | None = None, host: str | None = None
+async def ssh_exec(
+    ctx: Context,
+    command: str,
+    confirm: bool = False,
+    profile: str | None = None,
+    host: str | None = None,
 ) -> dict:
     """Run a command on the managed host's OS over SSH. DESTRUCTIVE / in-band.
 
-    Disabled unless the server operator set `KVM_PILOT_MCP_ALLOW_SSH` in the
-    server's own environment. ``confirm=true`` is required as a second factor.
-    ``host`` overrides the profile/env ``ssh_host`` at runtime (e.g. a discovered
-    install-time DHCP address).
+    Gated by its own SSH effect gate (never the HID gate) + per-invocation
+    approval, with typed same-path denials (#234). ``host`` overrides the
+    profile/env ``ssh_host`` at runtime (e.g. a discovered install-time DHCP
+    address).
     """
-    if not _env_flag("KVM_PILOT_MCP_ALLOW_SSH"):
-        raise ToolError(
-            "ssh_exec is disabled on this server. Only the human operator can enable "
-            "it, by setting the SSH-enable environment variable (documented in the "
-            "server's README.md) in the MCP server's own environment before starting "
-            "it. It cannot be enabled from within an agent session."
-        )
-    if not confirm:
-        raise ToolError("ssh_exec was not confirmed")
     cfg = resolve_host(profile or os.environ.get("KVM_PILOT_PROFILE"))
     if host:
         cfg.ssh_host = host
-    from kvm_pilot.ssh import SSHChannel
 
-    try:
-        ch = SSHChannel.from_config(cfg, confirm=allow_all, dry_run=_dry_run())
-    except CapabilityError as exc:
-        raise ToolError(str(exc)) from exc
-    act.journal_event(cfg.host, "ssh_exec", "ssh.exec", dry_run=_dry_run())
-    return {**_provenance(cfg), **ch.ssh_exec(command)}
+    def _run() -> dict:
+        # Channel built post-approval so a closed gate denies before any
+        # config probing (the gate is the floor); a missing ssh_host then
+        # surfaces as a clean tool error, audited as a dispatch exception.
+        from kvm_pilot.ssh import SSHChannel
+
+        try:
+            ch = SSHChannel.from_config(cfg, confirm=allow_all, dry_run=_dry_run())
+        except CapabilityError as exc:
+            raise ToolError(str(exc)) from exc
+        return ch.ssh_exec(command)
+
+    return await _channel_act(
+        ctx, profile, cfg, tool="ssh_exec", effect=EffectClass.SSH_EXEC,
+        op="ssh.exec", transport="ssh.target",
+        args={"command": command, "host": host}, confirm=confirm,
+        run=_run, detail="ssh exec dispatched",
+    )
 
 
 @mcp.tool(annotations=_READ)
@@ -1603,34 +1647,34 @@ def appliance_status(profile: str | None = None) -> dict:
 
 
 @mcp.tool(annotations=_DESTRUCTIVE)
-def appliance_reboot(confirm: bool = False, profile: str | None = None) -> dict:
+async def appliance_reboot(
+    ctx: Context, confirm: bool = False, profile: str | None = None
+) -> dict:
     """Reboot the KVM APPLIANCE (not the target) to clear a wedged encoder. DESTRUCTIVE.
 
     Recovers the RV1126 encoder wedge (the only fix — the stuck threads are
-    unkillable kernel threads). Drops all KVM control for ~60s; the target's power
-    is untouched. Disabled unless the operator set ``KVM_PILOT_MCP_ALLOW_APPLIANCE``
-    in the server's own environment; ``confirm=true`` is required as a second factor.
-    There is no out-of-band power to the appliance, so use this deliberately, never
-    in an automated loop.
+    unkillable kernel threads). Drops all KVM control for ~60s; the target's
+    power is untouched. Gated by the appliance effect gate + per-invocation
+    approval, with typed same-path denials (#234). There is no out-of-band
+    power to the appliance, so use this deliberately, never in an automated loop.
     """
-    if not _env_flag("KVM_PILOT_MCP_ALLOW_APPLIANCE"):
-        raise ToolError(
-            "appliance reboot is disabled on this server. Only the human operator can "
-            "enable it, by setting the appliance-enable environment variable (documented "
-            "in the server's README.md) in the MCP server's own environment before "
-            "starting it. It cannot be enabled from within an agent session."
-        )
-    if not confirm:
-        raise ToolError("appliance_reboot was not confirmed")
     cfg = resolve_host(profile or os.environ.get("KVM_PILOT_PROFILE"))
-    from kvm_pilot.ssh import ApplianceChannel
 
-    try:
-        ch = ApplianceChannel.from_config(cfg, confirm=allow_all, dry_run=_dry_run())
-    except CapabilityError as exc:
-        raise ToolError(str(exc)) from exc
-    act.journal_event(cfg.host, "appliance_reboot", "appliance.reboot", dry_run=_dry_run())
-    return {**_provenance(cfg), **ch.reboot()}
+    def _run() -> dict:
+        # Post-approval for the same reason as ssh_exec: gate first, config next.
+        from kvm_pilot.ssh import ApplianceChannel
+
+        try:
+            ch = ApplianceChannel.from_config(cfg, confirm=allow_all, dry_run=_dry_run())
+        except CapabilityError as exc:
+            raise ToolError(str(exc)) from exc
+        return ch.reboot()
+
+    return await _channel_act(
+        ctx, profile, cfg, tool="appliance_reboot", effect=EffectClass.APPLIANCE_RESET,
+        op="appliance.reboot", transport="ssh.appliance", args={}, confirm=confirm,
+        run=_run, detail="appliance reboot dispatched (KVM control drops ~60s)",
+    )
 
 
 @mcp.tool(annotations=_READ)

@@ -68,6 +68,7 @@ EFFECT_ENABLE_FLAG: dict[EffectClass, str | None] = {
     EffectClass.CONFIG_MUTATION: "KVM_PILOT_MCP_ALLOW_CONFIG",
     EffectClass.APPLIANCE_RESET: "KVM_PILOT_MCP_ALLOW_APPLIANCE",
     EffectClass.EXTERNAL_WRITE: "KVM_PILOT_MCP_ALLOW_EXTERNAL_WRITE",
+    EffectClass.SSH_EXEC: "KVM_PILOT_MCP_ALLOW_SSH",
 }
 
 
@@ -134,8 +135,8 @@ def gate_summary() -> dict[str, bool]:
     fine to report — an agent learns it piecemeal from refusals anyway — but the
     enabling incantation stays out-of-band, operator-only. Soft/hard power and
     HID input/control share flags, so they collapse to one name each.
-    ``ssh`` and ``consent_off`` are direct-flag gates with no ``EffectClass``;
-    the READ_ONLY force-close (#196) is replicated for them here.
+    ``consent_off`` is a modifier gate with no ``EffectClass`` of its own; the
+    READ_ONLY force-close (#196) is replicated for it here.
     """
     read_only = env_flag("KVM_PILOT_MCP_READ_ONLY")
     return {
@@ -145,7 +146,7 @@ def gate_summary() -> dict[str, bool]:
         "config": gate_enabled(EffectClass.CONFIG_MUTATION),
         "appliance": gate_enabled(EffectClass.APPLIANCE_RESET),
         "external_write": gate_enabled(EffectClass.EXTERNAL_WRITE),
-        "ssh": not read_only and env_flag("KVM_PILOT_MCP_ALLOW_SSH"),
+        "ssh": gate_enabled(EffectClass.SSH_EXEC),
         "consent_off": not read_only and env_flag("KVM_PILOT_MCP_ALLOW_CONSENT_OFF"),
     }
 
@@ -589,23 +590,6 @@ def journal_tail(limit: int = 15) -> list[dict[str, Any]]:
         return list(_JOURNAL)[-limit:]
 
 
-def journal_event(host: str, tool: str, op: str, *, dry_run: bool) -> None:
-    """Journal a dispatch that bypasses the receipt pipeline (#223).
-
-    ``power``/``ssh_exec``/``appliance_reboot``/``set_boot_device``/``amt_enable``
-    predate the act layer (own gate + confirm, no receipts, no ``_audit_event``).
-    Until they migrate onto it, this keeps the session journal complete;
-    journal-only by design — the operator audit logger is the receipt
-    pipeline's contract.
-    """
-    entry = {
-        "ts": datetime.now(UTC).isoformat(timespec="seconds"),
-        "event": "dispatched", "host": host, "tool": tool, "op": op,
-        "effect": None, "outcome": "dispatched", "dry_run": dry_run,
-        "invocation": None,
-    }
-    with _gen_lock:
-        _JOURNAL.append(entry)
 
 
 def _audit_event(

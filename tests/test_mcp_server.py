@@ -263,9 +263,9 @@ def test_session_posture_journal_and_breadcrumb(config_file):
 
     second = result_json(resumed)
     acts = second["recent_acts"]
-    # power bypasses the receipt pipeline (pre-act-layer tool, #234), so its
-    # journal entry is a "dispatched" record rather than a consumed receipt.
-    assert [a["event"] for a in acts] == ["dispatched"]
+    # power rides the receipt pipeline since #234 — one consumed-receipt
+    # terminal per act, in both the journal and the operator audit trail.
+    assert [a["event"] for a in acts] == ["consumed"]
     assert acts[0]["tool"] == "power" and acts[0]["op"] == "power.off"
     assert acts[0]["dry_run"] is False
     # The power act bumped the frame generation; the wait left its breadcrumb.
@@ -372,28 +372,34 @@ def test_doctrine_also_served_as_resources(config_file):
 
 
 def test_power_errors_without_operator_gate(config_file):
-    """The env gate is the floor: confirm=true alone must not fire the tool."""
+    """The effect gate is the floor: confirm=true alone must not fire the tool.
+    Since #234 the denial is same-path and typed, like every act tool."""
 
     async def interact(session):
         return await session.call_tool("power", {"action": "off", "confirm": True})
 
     result = run_session(server_env(config_file), interact)
-    assert result.isError is True
-    text = result.content[0].text
-    assert "operator" in text
+    assert result.isError is False
+    payload = result_json(result)
+    assert payload["approved"] is False
+    assert payload["outcome"] == "gate_closed"
+    assert "operator" in payload["denied_reason"]
     # The refusal must not hand the agent a copy-pasteable incantation.
-    assert "KVM_PILOT_MCP_ALLOW_POWER" not in text
+    assert "KVM_PILOT" not in payload["denied_reason"]
 
 
 def test_amt_enable_requires_config_gate(config_file):
-    """amt_enable is CONFIG_MUTATION — confirm=true alone must not fire it."""
+    """amt_enable is CONFIG_MUTATION — confirm=true alone must not fire it (#234:
+    typed same-path denial)."""
 
     async def interact(session):
         return await session.call_tool("amt_enable", {"feature": "sol", "confirm": True})
 
     result = run_session(server_env(config_file), interact)  # ALLOW_CONFIG unset
-    assert result.isError is True
-    assert "disabled on this server" in result.content[0].text
+    payload = result_json(result)
+    assert payload["approved"] is False
+    assert payload["outcome"] == "gate_closed"
+    assert "disabled on this server" in payload["denied_reason"]
 
 
 def test_amt_enable_consent_off_needs_dedicated_gate(config_file):
@@ -418,9 +424,9 @@ def test_power_requires_confirm_as_second_factor(config_file):
         return await session.call_tool("power", {"action": "off"})
 
     env = server_env(config_file, KVM_PILOT_MCP_ALLOW_POWER="1")
-    result = run_session(env, interact)
-    assert result.isError is True
-    assert "not confirmed" in result.content[0].text
+    payload = result_json(run_session(env, interact))
+    assert payload["approved"] is False
+    assert payload["outcome"] == "not_confirmed"
 
 
 def test_power_executes_on_fake_driver_when_fully_gated(config_file):
@@ -768,16 +774,17 @@ def test_mount_iso_bumps_generation_invalidating_mouse_ref(config_file):
 
 
 def test_ssh_exec_errors_without_operator_gate(config_file):
-    """The env gate is the floor, checked before anything else (mirrors power)."""
+    """The SSH effect gate is the floor, checked before any channel probing
+    (#234: its own effect class — never the HID gate — and a typed denial)."""
 
     async def interact(session):
         return await session.call_tool("ssh_exec", {"command": "reboot", "confirm": True})
 
-    result = run_session(server_env(config_file), interact)
-    assert result.isError is True
-    text = result.content[0].text
-    assert "operator" in text
-    assert "KVM_PILOT_MCP_ALLOW_SSH" not in text  # no copy-pasteable incantation
+    payload = result_json(run_session(server_env(config_file), interact))
+    assert payload["approved"] is False
+    assert payload["outcome"] == "gate_closed"
+    assert payload["effect"] == "ssh_exec"
+    assert "KVM_PILOT" not in payload["denied_reason"]  # no incantation to relay
 
 
 def test_ssh_reachable_errors_when_not_configured(config_file):
@@ -792,16 +799,15 @@ def test_ssh_reachable_errors_when_not_configured(config_file):
 
 
 def test_appliance_reboot_errors_without_operator_gate(config_file):
-    """The env gate is the floor (mirrors power/ssh_exec): no copy-pasteable var."""
+    """The appliance effect gate is the floor (#234: typed same-path denial)."""
 
     async def interact(session):
         return await session.call_tool("appliance_reboot", {"confirm": True})
 
-    result = run_session(server_env(config_file), interact)
-    assert result.isError is True
-    text = result.content[0].text
-    assert "operator" in text
-    assert "KVM_PILOT_MCP_ALLOW_APPLIANCE" not in text  # no incantation to relay
+    payload = result_json(run_session(server_env(config_file), interact))
+    assert payload["approved"] is False
+    assert payload["outcome"] == "gate_closed"
+    assert "KVM_PILOT" not in payload["denied_reason"]  # no incantation to relay
 
 
 def test_appliance_status_errors_when_not_enabled(config_file):
@@ -1586,11 +1592,10 @@ def test_set_boot_device_errors_without_config_gate(config_file):
     async def interact(session):
         return await session.call_tool("set_boot_device", {"device": "pxe", "confirm": True})
 
-    result = run_session(server_env(config_file), interact)
-    assert result.isError is True
-    text = result.content[0].text
-    assert "operator" in text
-    assert "KVM_PILOT_MCP_ALLOW_CONFIG" not in text  # no copy-pasteable incantation
+    payload = result_json(run_session(server_env(config_file), interact))
+    assert payload["approved"] is False
+    assert payload["outcome"] == "gate_closed"
+    assert "KVM_PILOT" not in payload["denied_reason"]  # no copy-pasteable incantation
 
 
 def test_set_boot_device_requires_confirm(config_file):
@@ -1598,9 +1603,9 @@ def test_set_boot_device_requires_confirm(config_file):
         return await session.call_tool("set_boot_device", {"device": "pxe"})
 
     env = server_env(config_file, KVM_PILOT_MCP_ALLOW_CONFIG="1")
-    result = run_session(env, interact)
-    assert result.isError is True
-    assert "not confirmed" in result.content[0].text
+    payload = result_json(run_session(env, interact))
+    assert payload["approved"] is False
+    assert payload["outcome"] == "not_confirmed"
 
 
 def test_set_boot_device_executes_on_fake(config_file):
@@ -1629,9 +1634,10 @@ def test_wake_errors_without_power_gate(config_file):
     async def interact(session):
         return await session.call_tool("wake", {"mac": "aa:bb:cc:dd:ee:ff", "confirm": True})
 
-    result = run_session(server_env(config_file), interact)
-    assert result.isError is True
-    assert "operator" in result.content[0].text
+    payload = result_json(run_session(server_env(config_file), interact))
+    assert payload["approved"] is False
+    assert payload["outcome"] == "gate_closed"
+    assert "operator" in payload["denied_reason"]
 
 
 def test_wake_requires_confirm(config_file):
@@ -1639,8 +1645,9 @@ def test_wake_requires_confirm(config_file):
         return await session.call_tool("wake", {"mac": "aa:bb:cc:dd:ee:ff"})
 
     result = run_session(server_env(config_file, KVM_PILOT_MCP_ALLOW_POWER="1"), interact)
-    assert result.isError is True
-    assert "not confirmed" in result.content[0].text
+    payload = result_json(result)
+    assert payload["approved"] is False
+    assert payload["outcome"] == "not_confirmed"
 
 
 def test_wake_requires_mac(config_file):

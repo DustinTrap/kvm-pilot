@@ -101,8 +101,11 @@ device-side (a leaked session can lock operators out of the BMC).
 
 Every act tool — the gated state-changers, from HID (`type_text`, `press_key`,
 `send_shortcut`, `ctrl_alt_delete`, `mouse`, `calibrate_mouse`) through media
-(`mount_iso`, `eject`) to the external write (`file_firmware_report`) —
-requires **two** things, not one:
+(`mount_iso`, `eject`), power (`power`, `wake`), config (`set_boot_device`,
+`amt_enable`), in-band exec (`ssh_exec`), and the appliance
+(`appliance_reboot`) to the external write (`file_firmware_report`) —
+requires **two** things, not one (#234 unified the last five onto this
+pipeline: same receipts, same audit terminals, same typed same-path denials):
 
 1. **Allowed** — the operator opened the tool's **effect gate** in
    the server's own environment, and the target profile is on `KVM_PILOT_MCP_PROFILES`

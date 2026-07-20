@@ -135,6 +135,10 @@ class EffectClass(StrEnum):
     # #190). Not destructive to the device, but a publication/spam surface, so
     # it gets its own operator gate rather than borrowing a device gate.
     EXTERNAL_WRITE = "external_write"
+    # Arbitrary command execution on the managed host's OS over the in-band SSH
+    # channel (#234) — its own class (and gate) because it bypasses the KVM
+    # entirely and can do anything the SSH user can.
+    SSH_EXEC = "ssh_exec"
 
 
 # Effect class for each guarded op id. Every id in DESTRUCTIVE_OPS must appear
@@ -202,8 +206,9 @@ OP_EFFECT: dict[str, EffectClass] = {
     "hid.send_shortcut": EffectClass.HID_CONTROL,
     # Firmware flash reboots the device into a new image — treat as hard power.
     "firmware.flash": EffectClass.POWER_HARD,
-    # Arbitrary in-band command: can do anything, keeps its own ALLOW_SSH gate.
-    "ssh.exec": EffectClass.HID_CONTROL,
+    # Arbitrary in-band command: can do anything; its own class + ALLOW_SSH gate
+    # (#234 — was HID_CONTROL, which would have let SSH exec ride the HID gate).
+    "ssh.exec": EffectClass.SSH_EXEC,
     "appliance.reboot": EffectClass.APPLIANCE_RESET,
     # Files the firmware-registry report as a GitHub issue (#189/#190). Not in
     # DESTRUCTIVE_OPS (it never touches the device); listed for the MCP gate.
