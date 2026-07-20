@@ -352,6 +352,25 @@ def test_doctrine_serves_bundled_playbooks(config_file):
     assert "recovery" in bogus.content[0].text  # refusal names the valid topics
 
 
+def test_doctrine_also_served_as_resources(config_file):
+    """#231: the same playbooks are MCP resources — no tool round-trip for
+    resource-capable clients; byte-identical to the tool's text."""
+    from pydantic import AnyUrl
+
+    async def interact(session):
+        templates = await session.list_resource_templates()
+        res = await session.read_resource(AnyUrl("kvm-pilot://doctrine/recovery"))
+        tool = await session.call_tool("doctrine", {"topic": "recovery"})
+        return templates, res, tool
+
+    templates, res, tool = run_session(server_env(config_file), interact)
+    assert any(
+        t.uriTemplate == "kvm-pilot://doctrine/{topic}"
+        for t in templates.resourceTemplates
+    )
+    assert res.contents[0].text == result_json(tool)["text"]
+
+
 def test_power_errors_without_operator_gate(config_file):
     """The env gate is the floor: confirm=true alone must not fire the tool."""
 

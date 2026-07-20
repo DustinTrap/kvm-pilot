@@ -479,6 +479,21 @@ def doctrine(topic: str | None = None) -> dict:
     return {"topic": topic, "text": entry.read_text(encoding="utf-8")}
 
 
+@mcp.resource("kvm-pilot://doctrine/{topic}")
+def doctrine_resource(topic: str) -> str:
+    """One doctrine playbook as a readable MCP resource (#231).
+
+    Same bytes as the `doctrine` tool — the resource form lets resource-capable
+    clients list/read/@-mention the playbooks without a tool round-trip. The
+    tool stays for clients without resource support and for compacted sessions
+    that only remember tools.
+    """
+    entry = _doctrine_topics().get(topic)
+    if entry is None:
+        raise ValueError(f"unknown doctrine topic {topic!r}")
+    return entry.read_text(encoding="utf-8")
+
+
 def _cached_firmware(cfg: HostConfig) -> str | None:
     """Last-assessed firmware from the on-disk HealthCache — offline, best-effort."""
     try:
