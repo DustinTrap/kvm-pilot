@@ -619,17 +619,13 @@ def _video_unavailable_error(exc: KVMPilotError) -> ToolError:
 def classify_screen(hint: str = "", profile: str | None = None):
     """Classify the current screen's boot/run phase (read-only).
 
-    Uses the server-side vision backend when one is configured. If the server has
-    no vision credentials (no ``ANTHROPIC_API_KEY`` / ``KVM_PILOT_VISION_*``), it
-    falls back to *caller-side* classification: it returns the screenshot plus the
-    classification prompt/schema so a vision-capable agent can classify the image
-    itself. Cheap on-device gates (power-off, no-signal, boot-progress, OCR rules)
-    still resolve with no credentials at all.
-
-    Return shapes:
+    Uses the server-side vision backend when configured; cheap on-device gates
+    (power-off, no-signal, boot-progress, OCR rules) resolve with no
+    credentials at all. Return shapes:
       * server-side / cheap-gate → a dict with ``mode="server"`` + phase fields.
-      * caller-side fallback → a ``[json_text, Image]`` list; classify the image
-        yourself against the ``system_prompt`` / ``phases`` in the JSON block.
+      * no server vision → caller-side fallback, a ``[json_text, Image]`` list:
+        classify the image yourself against the ``system_prompt`` / ``phases``
+        in the JSON block.
     """
     with _driver(profile, confirm=deny_all, capability=Capability.VIDEO) as (cfg, kvm):
         try:
@@ -743,27 +739,16 @@ async def wait_for_state(
 ) -> dict:
     """Wait (bounded) until the screen reaches a boot/run phase (read-only).
 
-    The server-side twin of the CLI `watch` command: polls the sensing hierarchy
-    (cheap power/signal/boot-progress gates first, then the server-side vision
-    backend) with backoff until `phase` is observed at sufficient confidence, so
-    an agent doesn't have to hand-roll `classify_screen` polling round-trips.
-
-    `phase` must be a known phase token (see `classify_screen`); an unknown token
-    fails immediately with the valid list. `timeout` is seconds (default 60,
-    hard server-side cap 300 — for longer waits call again: the timeout result
-    reports the last observed phase, so chaining is cheap). Emits an MCP progress
-    notification per poll when the client requests progress.
-
-    Returns `reached=true` with the final phase/confidence plus a `frame_ref` for
-    the final frame — pass it to `mouse` as `observed_frame_ref` to anchor a
-    follow-up click. A timeout returns `reached=false` with the last observed
-    state through the same path (never a hang, never a raised error). If the
-    server has no vision credentials, only phases this driver's cheap gates can
-    ever emit (`power_off`, `no_signal`, and any phase on a BootProgress-capable
-    driver) are waitable — anything else fails fast, directing you to
-    `classify_screen` polling (whose caller-side fallback hands you the
-    screenshot + prompt). Holds the device driver open for up to `timeout`
-    seconds.
+    Server-side twin of CLI `watch`: polls cheap power/signal/boot-progress
+    gates, then server-side vision, until `phase` (a `classify_screen` token;
+    unknown tokens fail fast with the valid list) is observed. `timeout` is
+    seconds, capped server-side at 300 — chain calls for longer waits. Success
+    returns phase/confidence plus a `frame_ref` to pass to `mouse` as
+    `observed_frame_ref`; a timeout returns `reached=false` with the last
+    observed state (never a hang, never a raised error). With no server-side
+    vision credentials only cheap-gate phases are waitable; others fail fast
+    pointing at `classify_screen` polling. Holds the driver open up to
+    `timeout` s. Details: `doctrine` topic 'interfaces'.
     """
     if phase not in ALL_PHASES:
         raise ToolError(f"unknown phase {phase!r}. Valid phases: {', '.join(ALL_PHASES)}")
@@ -1345,18 +1330,14 @@ async def mouse(
 ) -> dict:
     """Move the mouse (and optionally click) on the host. DESTRUCTIVE (HID input).
 
-    Absolute positioning depends on current screen state, so a **click** must carry
-    the ``observed_frame_ref`` it was planned against (from a prior ``snapshot``). It
-    is refused if the host rebooted or swapped media since (frame *generation*
-    changed), if the observation is older than ``KVM_PILOT_MCP_FRAME_MAX_AGE`` (60s
-    default — the screen may have changed on its own, #141), or if the ref wasn't
-    issued by this server — so the click can't land on a stale screen. Re-``snapshot``
-    and retry. A move-only call (``button`` omitted) needs no ref.
-
-    ``coord_space``: ``percent`` (0.0-1.0, default — robust to a resolution change),
-    ``pixel`` (screen pixels; needs a driver that reports resolution), or ``raw``
-    (kvmd centered -32768..32767). ``button``: omit to move only, else move + click.
-    Gated by ``KVM_PILOT_MCP_ALLOW_HID`` + per-invocation approval.
+    A **click** must carry the ``observed_frame_ref`` it was planned against
+    (from a prior ``snapshot``); it is refused — re-``snapshot`` and retry — if
+    the host rebooted/swapped media since, the observation is older than
+    ``KVM_PILOT_MCP_FRAME_MAX_AGE`` (60s default, #141), or the ref wasn't
+    issued by this server. Move-only (``button`` omitted) needs no ref.
+    ``coord_space``: ``percent`` (0.0-1.0, default — survives resolution
+    changes), ``pixel``, or ``raw`` kvmd. Gated by ``KVM_PILOT_MCP_ALLOW_HID``
+    + per-invocation approval.
     """
     with _driver(profile, confirm=allow_all, capability=Capability.HID) as (cfg, kvm):
         inv = act.new_invocation(
@@ -1401,21 +1382,15 @@ async def calibrate_mouse(
 ) -> dict:
     """Measure and store this host's mouse commanded→observed correction (#128).
 
-    Fixes "the agent clicks where the button should be and misses": commands
-    absolute moves to known points, locates the observed cursor by frame
-    differencing, fits a per-axis scale+offset, verifies a held-out point
-    within ``tolerance`` (screen fraction), and stores the correction per
-    (host, capture resolution). Afterwards the ``mouse`` tool applies it
-    transparently to percent coordinates and reports ``calibrated: true``.
-
-    Pointer moves only — no clicks, no keystrokes — but it visibly moves the
-    live console's cursor for ~10-30s, so it is gated like HID input
-    (``KVM_PILOT_MCP_ALLOW_HID`` + approval; one approval covers the whole
-    run). Preconditions: a live video signal, a **static** screen (desktop,
-    BIOS menu, or login prompt — not video playback), and a visible cursor.
-    Needs Pillow on the *server* (``pip install 'kvm-pilot[calibrate]'``).
-    Failures are actionable errors, not partial stores; a stored calibration
-    for a different capture resolution is stale and is never applied.
+    Fixes "clicks where the button should be and misses". Pointer moves only —
+    no clicks, no keystrokes — but it visibly moves the live cursor ~10-30s,
+    so it is gated like HID input (``KVM_PILOT_MCP_ALLOW_HID``; one approval
+    covers the whole run). Preconditions: live video signal, a **static**
+    screen, a visible cursor, Pillow on the server
+    (``pip install 'kvm-pilot[calibrate]'``). Afterwards ``mouse`` percent
+    coords apply it transparently (``calibrated: true``); stored per (host,
+    capture resolution) — a resolution change makes it stale, never applied.
+    Mechanism details: the MCP server README.
     """
     with _driver(profile, confirm=allow_all, capability=Capability.HID) as (cfg, kvm):
         if not kvm.supports(Capability.VIDEO):
@@ -1469,16 +1444,11 @@ def list_virtual_media(profile: str | None = None) -> dict:
     """Inventory the KVM's virtual-media (MSD) storage (read-only).
 
     Check this BEFORE asking the operator to download or upload an ISO — the
-    image you need may already be on the device from an earlier job (#127).
-    Returns the device's MSD state: stored images (name/size/completeness),
-    the selected drive image, and whether media is attached (``online``).
-
-    ``host_visible_as`` (when the driver knows its brand's gadget name, #78)
-    is the device name the TARGET host shows once media is truly presented —
-    e.g. a boot-menu entry "UEFI: Glinet Optical Drive 1.00" on GLKVM. Use it
-    to pick the right boot entry and as a positive readiness cross-check: a
-    generic empty "CD/DVD Drive" entry without this name means the medium is
-    not actually inserted.
+    image may already be on the device (#127). Returns stored images, the
+    selected image, and attach state (``online``). ``host_visible_as`` (when
+    known, #78) is the device name the TARGET's boot menu shows for truly
+    presented media — match it to pick the right boot entry and to confirm the
+    medium is really inserted. Details: `doctrine` topic 'interfaces'.
     """
     with _driver(profile, confirm=deny_all, capability=Capability.VIRTUAL_MEDIA) as (cfg, kvm):
         if not hasattr(kvm, "get_msd_state"):
@@ -1673,19 +1643,15 @@ async def file_firmware_report(
     dry_run: bool = False,
     profile: str | None = None,
 ) -> dict:
-    """Contribute the device's firmware currency to the registry SSoT — files the
-    "Latest known release" report as a GitHub issue when the registry is behind
-    (the MCP twin of CLI ``firmware-check``, #189/#190). EXTERNAL WRITE.
+    """File the device's firmware-currency report as a GitHub issue when the
+    registry is behind (MCP twin of CLI ``firmware-check``, #189/#190).
+    EXTERNAL WRITE — writes outside the managed device.
 
-    The read/reconcile part always runs; when the registry already reflects the
-    device-reported latest there is nothing to file and the result says so. The
-    filing itself writes OUTSIDE the managed device (a public GitHub issue via
-    the ``gh`` CLI), so it is gated as its own ``external_write`` effect class:
-    **disabled unless** the operator set ``KVM_PILOT_MCP_ALLOW_EXTERNAL_WRITE``
-    in the server's own environment, plus the usual per-invocation approval
-    (elicitation, or ``confirm=true`` under standing policy). ``dry_run=true``
-    returns the exact issue title/body without sending anything. A missing or
-    unauthenticated ``gh`` comes back as a graceful ``filed=false`` reason.
+    The read/reconcile half always runs; registry current → nothing to file,
+    the result says so. Filing is gated as its own ``external_write`` effect
+    (``KVM_PILOT_MCP_ALLOW_EXTERNAL_WRITE`` + per-invocation approval);
+    ``dry_run=true`` previews the exact issue title/body; a missing or
+    unauthenticated ``gh`` is a graceful ``filed=false`` reason.
     """
     from kvm_pilot.firmware_registry import (
         UPSTREAM_REPO,

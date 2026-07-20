@@ -130,6 +130,26 @@ def test_install_command_consistent():
             )
 
 
+def test_tool_docstrings_within_budget():
+    """Tool docstrings are an unconditional per-session token tax (#230): every
+    registered tool's schema loads into every agent session. Keep the call-time
+    contract in-schema; mechanism narrative belongs in the MCP README or the
+    doctrine playbooks (both re-servable mid-session). Largest post-diet
+    docstring is ~770 chars — 900 leaves headroom without letting the
+    1,400-char monsters back in."""
+    from kvm_pilot.mcp import server
+
+    over = {
+        name: len(getattr(server, name).__doc__ or "")
+        for name in EXPECTED_TOOLS
+        if len(getattr(server, name).__doc__ or "") > 900
+    }
+    assert not over, (
+        f"tool docstring(s) over the 900-char budget: {over} — move mechanism "
+        "narrative to mcp/README.md or a doctrine playbook"
+    )
+
+
 def test_skill_description_within_budget():
     """The frontmatter description is the skill's only always-loaded part —
     trigger-matching favors <=1024 chars; doctrine belongs in the body (#227)."""
