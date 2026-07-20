@@ -7,6 +7,42 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **MCP `session` tool — the re-anchor call for long sessions** (#223). Read-only,
+  offline, never refuses: server posture (read-only/dry-run/approval posture/
+  profile allowlist), **which effect gates are open by class name** (never the
+  enabling env vars), a bounded in-memory act journal (fed from the audit
+  terminals; the five pre-act-layer tools journal their dispatches too), the
+  target's frame generation, and the last `wait_for_state` breadcrumb — so a
+  context-compacted session can ask "what have I done, what am I allowed to do,
+  what was I waiting for" instead of guessing. A restart deliberately empties
+  it, matching receipts.
+- **`kvm-pilot install-skill`** (#226) — copies the bundled Claude skill into
+  `~/.claude/skills/kvm-pilot` (idempotent, provenance-marked, `--dry-run` /
+  `--uninstall` / `--dest`): the missing bridge between `pip install` and
+  Claude Code actually discovering the skill.
+- **CLI → MCP agent-aware nudges** (#228) — commands with an MCP twin print one
+  stderr tip naming the twin when the session looks agent-driven (`CLAUDECODE`
+  set or stdout not a TTY); opt out via `--no-hints` / `KVM_PILOT_NO_HINTS=1`.
+- **Doctrine playbooks as MCP resources** (#231) — `kvm-pilot://doctrine/{topic}`,
+  same bytes as the `doctrine` tool, for resource-capable clients.
+
+### Changed
+- **MCP `healthcheck` now runs through the preflight cache** (#225): stable
+  posture served from the last assessment, firmware changes add the
+  `firmware-delta` finding, and an explicit healthcheck satisfies the
+  once-per-session preflight debounce (it previously double-audited and was
+  weaker than the implicit gate).
+- **Gate refusals stay mum** (#224): the GATE_CLOSED / consent-off /
+  external-write denials no longer hand the agent the enabling `ALLOW_*`
+  env-var incantation (one test had the leak pinned as an assertion).
+- **Terminology normalized across surfaces** (#229): effect gate / effect class /
+  act tools / destructive / playbook each mean one thing, anchored by a
+  Terminology block in the MCP README; reversible media tools no longer claim
+  DESTRUCTIVE in prose while annotated non-destructive.
+- **Skill description trimmed to the 1,024-char trigger budget** (#227) and the
+  six largest tool docstrings dieted ~45% with a 900-char budget guard (#230) —
+  mechanism narrative lives in the MCP README and doctrine playbooks, both
+  re-servable mid-session.
 - **MCP `doctrine` tool — mid-session doctrine re-anchor** (#222). A read-only,
   offline tool that re-serves the bundled skill's playbooks from the installed
   package: no `topic` lists topics, `topic="recovery"` returns that playbook's
