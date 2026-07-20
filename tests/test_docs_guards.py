@@ -130,6 +130,19 @@ def test_install_command_consistent():
             )
 
 
+def test_install_skill_command_documented():
+    """`kvm-pilot install-skill` (#226) is the one bridge between `pip install`
+    and Claude Code actually discovering the skill — every install surface must
+    name it verbatim, or the skill silently stays undiscovered package data."""
+    cmd = "kvm-pilot install-skill"
+    for doc in (_README, _GETTING_STARTED, _SKILL_SETUP):
+        assert cmd in doc.read_text(encoding="utf-8"), (
+            f"{doc.relative_to(_ROOT)}: missing the skill install command {cmd!r}"
+        )
+    # cli.md documents it as a table row (bare subcommand, house style there).
+    assert "`install-skill`" in (_ROOT / "docs" / "cli.md").read_text(encoding="utf-8")
+
+
 def _mcp_add_snippet(path: Path) -> str:
     """The `claude mcp add kvm-pilot ... kvm-pilot-mcp` command block."""
     text = path.read_text(encoding="utf-8")

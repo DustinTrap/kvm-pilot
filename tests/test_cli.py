@@ -1081,3 +1081,61 @@ def test_amt_enable_kvm_no_consent_via_cli(amt_emu, monkeypatch, capsys):
     assert amt_emu.state.kvm_5900 == "true"
     assert amt_emu.state.optin_required == "0"
     assert "CONSENT OFF" in capsys.readouterr().out
+
+
+# -- install-skill (#226) -----------------------------------------------------
+
+
+def _skill_dest_files(dest):
+    return sorted(str(p.relative_to(dest)) for p in dest.rglob("*") if p.is_file())
+
+
+def test_install_skill_fresh_copy_and_idempotent(tmp_path, capsys):
+    dest = tmp_path / "skills" / "kvm-pilot"
+    assert main(["install-skill", "--dest", str(dest)]) == 0
+    files = _skill_dest_files(dest)
+    assert "SKILL.md" in files
+    assert "references/recovery.md" in files and "references/setup.md" in files
+    assert ".installed-by-kvm-pilot.json" in files
+    out = capsys.readouterr().out
+    assert "created:" in out and "restart the Claude Code session" in out
+
+    # Second run: everything unchanged, still exit 0.
+    assert main(["install-skill", "--dest", str(dest)]) == 0
+    out = capsys.readouterr().out
+    assert "created:" not in out and "updated:" not in out
+    assert "0 file(s) changed" in out
+
+
+def test_install_skill_updates_locally_edited_file(tmp_path, capsys):
+    dest = tmp_path / "kvm-pilot"
+    assert main(["install-skill", "--dest", str(dest)]) == 0
+    (dest / "SKILL.md").write_text("locally edited\n")
+    assert main(["install-skill", "--dest", str(dest)]) == 0
+    assert "updated:" in capsys.readouterr().out
+    assert "locally edited" not in (dest / "SKILL.md").read_text()
+
+
+def test_install_skill_dry_run_writes_nothing(tmp_path, capsys):
+    dest = tmp_path / "kvm-pilot"
+    assert main(["install-skill", "--dest", str(dest), "--dry-run"]) == 0
+    assert not dest.exists()
+    assert "would create:" in capsys.readouterr().out
+
+
+def test_install_skill_uninstall_round_trip(tmp_path, capsys):
+    dest = tmp_path / "kvm-pilot"
+    assert main(["install-skill", "--dest", str(dest)]) == 0
+    assert main(["install-skill", "--dest", str(dest), "--uninstall"]) == 0
+    assert not dest.exists()  # managed files + marker + empty dirs removed
+
+
+def test_install_skill_refuses_markerless_directory(tmp_path, capsys):
+    dest = tmp_path / "kvm-pilot"
+    dest.mkdir(parents=True)
+    (dest / "SKILL.md").write_text("someone else's skill\n")
+    assert main(["install-skill", "--dest", str(dest)]) == 1
+    assert "someone else's skill" in (dest / "SKILL.md").read_text()  # untouched
+    assert "refusing" in capsys.readouterr().err
+    # Uninstall refuses the same way (nothing-to-uninstall path, exit 0, no delete).
+    assert main(["install-skill", "--dest", str(dest), "--uninstall"]) == 1

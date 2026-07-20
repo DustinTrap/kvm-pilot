@@ -14,6 +14,7 @@ support (`kvm-pilot capabilities` lists them, offline).
 |---|---|---|---|
 | `info` | | system_info | Device/system info as JSON. |
 | `capabilities` | | — (offline) | List the capabilities this driver supports; `--json` for an array. |
+| `install-skill` | `--dest`, `--dry-run`, `--uninstall` | — (offline) | Copy the bundled Claude skill into `~/.claude/skills/kvm-pilot` so Claude Code discovers it (#226). Idempotent (per-file created/updated/unchanged); a provenance marker makes uninstall safe and blocks overwriting a directory kvm-pilot didn't create. Re-run after upgrading the package; restart the Claude Code session so it loads. |
 | `benchmark` | `--samples`, `--no-hid`, `--no-os-plane`, `--select CMD`, `--save`, `--json` | — | Profile per-command latency + capability across interfaces (library/ssh/winrm) → the adaptive router scorecard (#181). |
 | `route` | `<command>`, `--fresh`, `--samples`, `--no-os-plane`, `--json` | — | Print the interface the router picks for a command (uses/refreshes the cached per-device scorecard) (#181). |
 | `host-exec` | `<cmd>`, `--powershell`, `--shell` | — | Run a command on the managed host's OS via the fastest capable **in-band** interface (ssh/winrm), auto-selected + self-tuned (#181). |

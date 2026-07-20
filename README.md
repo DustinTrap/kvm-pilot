@@ -61,6 +61,7 @@ clone. The current release line is a **pre-release**, so `--pre` is required
 ```bash
 pip install --pre kvm-pilot                    # CLI + skill + MCP server + WebSocket events
 pip install --pre "kvm-pilot[totp]"            # + 2FA / TOTP support (pyotp)
+kvm-pilot install-skill                        # optional: put the bundled skill where Claude Code loads it
 ```
 
 ### Driving a KVM from an AI agent (MCP)

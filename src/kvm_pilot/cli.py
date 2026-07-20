@@ -28,6 +28,7 @@ subcommand; ``watch`` keeps its own ``--timeout`` for the vision wait deadline.
 from __future__ import annotations
 
 import argparse
+import datetime as _dt
 import json
 import logging
 import os
@@ -1330,6 +1331,89 @@ def _add_vision(p: argparse.ArgumentParser) -> None:
     p.add_argument("--hint", help="Optional context hint for the classifier")
 
 
+# -- install-skill (#226): put the bundled skill where Claude Code loads it --
+
+_SKILL_MARKER = ".installed-by-kvm-pilot.json"
+
+
+def _skill_files():
+    """(relative name, Traversable) for SKILL.md + references/*.md — the same
+    package-data accessor the MCP doctrine tool uses."""
+    from importlib.resources import files
+
+    root = files("kvm_pilot").joinpath("skill")
+    out = [("SKILL.md", root.joinpath("SKILL.md"))]
+    for entry in sorted(root.joinpath("references").iterdir(), key=lambda e: e.name):
+        if entry.name.endswith(".md"):
+            out.append((f"references/{entry.name}", entry))
+    return out
+
+
+def cmd_install_skill(args) -> int:
+    """Copy (not symlink: survives venv recreation and wheel upgrades) the
+    bundled skill into a Claude Code skills directory. Idempotent; a marker
+    file records provenance so uninstall/overwrite never touches a directory
+    kvm-pilot didn't create."""
+    dest = Path(args.dest).expanduser() if args.dest else (
+        Path.home() / ".claude" / "skills" / "kvm-pilot"
+    )
+    marker = dest / _SKILL_MARKER
+    would = "would " if args.dry_run else ""
+
+    if dest.exists() and not marker.exists() and any(dest.iterdir()):
+        print(
+            f"refusing: {dest} exists but was not installed by kvm-pilot "
+            f"(no {_SKILL_MARKER}) — remove it yourself if you want kvm-pilot to manage it",
+            file=sys.stderr,
+        )
+        return 1
+
+    if args.uninstall:
+        if not marker.exists():
+            print(f"nothing to uninstall: no kvm-pilot-managed skill at {dest}")
+            return 0
+        for rel, _src in _skill_files():
+            target = dest / rel
+            if target.exists():
+                print(f"{would}remove {target}")
+                if not args.dry_run:
+                    target.unlink()
+        print(f"{would}remove {marker}")
+        if not args.dry_run:
+            marker.unlink()
+            refs = dest / "references"
+            for d in (refs, dest):
+                if d.exists() and not any(d.iterdir()):
+                    d.rmdir()
+        return 0
+
+    changed = 0
+    for rel, src in _skill_files():
+        target = dest / rel
+        data = src.read_bytes()
+        if target.exists() and target.read_bytes() == data:
+            print(f"unchanged: {target}")
+            continue
+        verb = "update" if target.exists() else "create"
+        print(f"would {verb}: {target}" if args.dry_run else f"{verb}d: {target}")
+        changed += 1
+        if not args.dry_run:
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_bytes(data)
+    if not args.dry_run:
+        marker.parent.mkdir(parents=True, exist_ok=True)
+        marker.write_text(json.dumps({
+            "version": __version__,
+            "installed_at": _dt.datetime.now(_dt.UTC).isoformat(timespec="seconds"),
+        }) + "\n")
+    print(
+        f"{would}install{'ed' if not args.dry_run else ''} kvm-pilot skill "
+        f"({changed} file(s) changed) at {dest}"
+        + (" — restart the Claude Code session so it loads" if changed and not args.dry_run else "")
+    )
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="kvm-pilot", description=__doc__)
     parser.add_argument("--version", action="version", version=f"kvm-pilot {__version__}")
@@ -1348,6 +1432,16 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--json", action="store_true", help="Emit a JSON array instead of a comma list")
     _add_common(p)
     p.set_defaults(func=cmd_capabilities)
+
+    p = sub.add_parser(
+        "install-skill",
+        help="Install the bundled Claude skill into ~/.claude/skills/kvm-pilot "
+        "(copies from the installed package; re-run after upgrading)",
+    )
+    p.add_argument("--dest", help="Target directory (default: ~/.claude/skills/kvm-pilot)")
+    p.add_argument("--dry-run", action="store_true", help="Print what would change; write nothing")
+    p.add_argument("--uninstall", action="store_true", help="Remove a kvm-pilot-managed install")
+    p.set_defaults(func=cmd_install_skill)
 
     p = sub.add_parser(
         "benchmark",

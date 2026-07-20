@@ -24,8 +24,10 @@ pip install --pre "kvm-pilot[totp]"       # add if the device has 2FA enabled
 
 It's a pre-release, so `--pre` (or pinning the exact current version) is required — a bare
 `pip install kvm-pilot` deliberately picks up no pre-release. A single install brings
-the `kvm-pilot` CLI, the `kvm-pilot-mcp` server, and this skill. For the
-latest unreleased tree, install from git:
+the `kvm-pilot` CLI, the `kvm-pilot-mcp` server, and this skill. To make Claude
+Code discover the skill, run `kvm-pilot install-skill` (copies it to
+`~/.claude/skills/kvm-pilot`; re-run after upgrading, then restart the session).
+For the latest unreleased tree, install from git:
 
 ```bash
 pip install "kvm-pilot[totp,ws] @ git+https://github.com/DustinTrap/kvm-pilot"

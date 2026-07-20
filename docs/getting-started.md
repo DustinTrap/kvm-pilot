@@ -21,6 +21,16 @@ pip install --pre kvm-pilot
 kvm-pilot` deliberately installs nothing. One install brings the `kvm-pilot` CLI,
 the `kvm-pilot-mcp` server, and the bundled Claude skill.
 
+The skill ships inside the package; to have **Claude Code** discover it, copy it
+into your skills directory:
+
+```bash
+kvm-pilot install-skill        # → ~/.claude/skills/kvm-pilot (re-run after upgrading)
+```
+
+then restart the Claude Code session so it loads (`--dry-run` previews,
+`--uninstall` removes it).
+
 ## 2. Enable the MCP server in your agent
 
 The `pip install` above provides the `kvm-pilot-mcp` launcher; your agent still
