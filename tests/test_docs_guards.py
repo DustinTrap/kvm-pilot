@@ -130,6 +130,54 @@ def test_install_command_consistent():
             )
 
 
+def test_mcp_readme_tool_table_matches_surface():
+    """#232: the mcp/README `## Tools` table is hand-curated prose, but its
+    row set and destructive-claims must match the live server surface —
+    a checker, deliberately not a generator (the prose is richer than the
+    docstrings and should stay that way)."""
+    from test_mcp_server import EXPECTED_ANNOTATIONS
+
+    readme = _MCP_README.read_text(encoding="utf-8")
+    tools_section = readme.split("## Tools", 1)[1].split("\n## ", 1)[0]
+    rows = dict(re.findall(r"^\| `([a-z][a-z0-9_]*)` \|([^|]*)\|", tools_section, re.M))
+
+    missing = EXPECTED_TOOLS - set(rows)
+    phantom = set(rows) - EXPECTED_TOOLS
+    assert not missing, f"mcp/README.md Tools table is missing: {sorted(missing)}"
+    assert not phantom, f"mcp/README.md Tools table has stale rows: {sorted(phantom)}"
+
+    for name, cell in rows.items():
+        claims_destructive = "destructiveHint" in cell
+        is_destructive = EXPECTED_ANNOTATIONS[name][1] is True
+        assert claims_destructive == is_destructive, (
+            f"mcp/README.md row `{name}` annotation cell says "
+            f"{'destructive' if claims_destructive else 'non-destructive'} but the "
+            f"registered annotation says the opposite — fix the doc or the tool"
+        )
+
+
+def test_cli_doc_table_matches_parser():
+    """#232: docs/cli.md's command table vs the argparse surface, both
+    directions — upgrades the checkpoint scan's advisory check into CI."""
+    import argparse
+
+    from kvm_pilot.cli import build_parser
+
+    parser = build_parser()
+    sub = next(
+        a for a in parser._actions if isinstance(a, argparse._SubParsersAction)
+    )
+    parser_cmds = set(sub.choices)
+    doc_cmds = set(
+        re.findall(r"^\| `([a-z][a-z0-9-]*)`", (_ROOT / "docs" / "cli.md").read_text(
+            encoding="utf-8"), re.M)
+    )
+    missing = parser_cmds - doc_cmds
+    phantom = doc_cmds - parser_cmds
+    assert not missing, f"docs/cli.md command table is missing: {sorted(missing)}"
+    assert not phantom, f"docs/cli.md documents commands that don't exist: {sorted(phantom)}"
+
+
 def test_tool_docstrings_within_budget():
     """Tool docstrings are an unconditional per-session token tax (#230): every
     registered tool's schema loads into every agent session. Keep the call-time
