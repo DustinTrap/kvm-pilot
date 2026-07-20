@@ -6,7 +6,25 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security / Changed
+- **Every destructive tool now rides the act layer** (#234): `power`, `wake`,
+  `ssh_exec`, `appliance_reboot`, `set_boot_device`, and `amt_enable` — which
+  predated it — get the same two-guarantee approval, single-use receipts,
+  audit terminals (they previously left NO operator audit records), elicitation
+  support, typed same-path denials, and profile-allowlist enforcement (three of
+  them silently bypassed the allowlist). New `EffectClass.SSH_EXEC`: `ssh.exec`
+  was classified `HID_CONTROL`, which under effect gating would have let
+  arbitrary in-band exec ride the weaker HID gate — it now has its own class on
+  the SSH gate.
+
 ### Added
+- **MCP `events` + `firmware_check` read tools** (#233) — the bounded MCP twins
+  that ended forced CLI shell-outs for typed events and firmware currency;
+  follow-mode streaming and `console`/SOL stay CLI by documented design (an
+  endless stream doesn't fit synchronous stdio).
+- **Doc-table drift guards** (#232) — the mcp/README tool table (row set +
+  destructive claims) and docs/cli.md's command table are now CI-checked
+  against the live surface; full doc generation deliberately rejected.
 - **MCP `session` tool — the re-anchor call for long sessions** (#223). Read-only,
   offline, never refuses: server posture (read-only/dry-run/approval posture/
   profile allowlist), **which effect gates are open by class name** (never the
