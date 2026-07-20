@@ -6,6 +6,8 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.0b11] — 2026-07-20
+
 ### Added
 - **Opt-in duration-scoped standing approvals** (#192) — `KVM_PILOT_MCP_STANDING_TTL`
   (minutes, 0/unset = off) lets a human approve a `(host, effect class)` scope
@@ -17,19 +19,6 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   instant the operator flips the effect gate or dry-run, and shown in
   `session.standing_approvals`. Every consumption still mints its own single-use
   receipt and audits with the grant id (`via: standing`).
-
-### Security / Changed
-- **Every destructive tool now rides the act layer** (#234): `power`, `wake`,
-  `ssh_exec`, `appliance_reboot`, `set_boot_device`, and `amt_enable` — which
-  predated it — get the same two-guarantee approval, single-use receipts,
-  audit terminals (they previously left NO operator audit records), elicitation
-  support, typed same-path denials, and profile-allowlist enforcement (three of
-  them silently bypassed the allowlist). New `EffectClass.SSH_EXEC`: `ssh.exec`
-  was classified `HID_CONTROL`, which under effect gating would have let
-  arbitrary in-band exec ride the weaker HID gate — it now has its own class on
-  the SSH gate.
-
-### Added
 - **MCP `events` + `firmware_check` read tools** (#233) — the bounded MCP twins
   that ended forced CLI shell-outs for typed events and firmware currency;
   follow-mode streaming and `console`/SOL stay CLI by documented design (an
@@ -56,6 +45,17 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Doctrine playbooks as MCP resources** (#231) — `kvm-pilot://doctrine/{topic}`,
   same bytes as the `doctrine` tool, for resource-capable clients.
 
+### Security / Changed
+- **Every destructive tool now rides the act layer** (#234): `power`, `wake`,
+  `ssh_exec`, `appliance_reboot`, `set_boot_device`, and `amt_enable` — which
+  predated it — get the same two-guarantee approval, single-use receipts,
+  audit terminals (they previously left NO operator audit records), elicitation
+  support, typed same-path denials, and profile-allowlist enforcement (three of
+  them silently bypassed the allowlist). New `EffectClass.SSH_EXEC`: `ssh.exec`
+  was classified `HID_CONTROL`, which under effect gating would have let
+  arbitrary in-band exec ride the weaker HID gate — it now has its own class on
+  the SSH gate.
+
 ### Changed
 - **MCP `healthcheck` now runs through the preflight cache** (#225): stable
   posture served from the last assessment, firmware changes add the
@@ -79,8 +79,6 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   full text. Exists because the skill file is read once at session start and is
   the first thing a long session compacts away — the MCP server is the one
   surface guaranteed present when the recovery ladder is needed most.
-
-### Changed
 - **Bundled skill restructured for long sessions** (#222): `SKILL.md` (457
   lines) is now a lean core — the rules that must survive a long session,
   the intake gate, the memorizable 5-rung recovery shape, interface quick
