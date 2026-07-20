@@ -138,6 +138,21 @@ replayed, dispatch-exception — emits one JSON audit record on the
 `kvm_pilot.mcp.audit` logger (capture the server's stderr/logging to retain the
 trail; receipts are per-process, a server restart voids them).
 
+**Standing approvals (#192, opt-in).** When per-invocation prompts are too
+noisy for an interactive flow (arrow-keying an installer re-prompts per
+keystroke), the operator can set `KVM_PILOT_MCP_STANDING_TTL=<minutes>` (0/unset
+= off). The elicitation form then offers `standing_minutes`: approve **once**
+for a `(host, effect class)` scope and that many minutes; invocations in scope
+consume the grant instead of re-prompting. It is **not** the `ELICIT=off`
+sledgehammer — a human still signs off, just once per window, and only if they
+choose (`standing_minutes=0` stays one-shot). A grant is **not** bound to args
+(that is the point) but is signed with the per-process key, capped at 8 h, and
+**revoked the instant** the operator flips the effect gate or dry-run — the same
+`_bound_state` re-check that guards a pending approval. Each consumption still
+mints its own single-use receipt and audits with the grant id (`via: standing`);
+opening a window emits a `standing-granted` record. Live grants show in the
+`session` tool's `standing_approvals` (scope + time left). Never spans a restart.
+
 #### Troubleshooting: act tools denied with `approval cancel` / `denied by approver` (#149)
 
 **Symptom:** act tools return `approved: false`, `approver: null`, and
@@ -150,8 +165,9 @@ killing approvals, the operator may set `KVM_PILOT_MCP_ELICIT=off` (trade-off:
 no per-call human approval — the remedy advertises this escape hatch only
 after ≥2 consecutive client-side kills). Full narrative:
 [Troubleshooting & FAQ](https://github.com/DustinTrap/kvm-pilot/blob/main/docs/troubleshooting.md#act-tools-denied-approval-cancel--denied-by-approver).
-(A duration-scoped standing approval that would remove the per-keystroke
-re-prompt without giving up human sign-off is a follow-up to #72.)
+The duration-scoped standing approval that removes the per-keystroke re-prompt
+without giving up human sign-off shipped as **`KVM_PILOT_MCP_STANDING_TTL`**
+(#192) — see *Standing approvals* above.
 
 ### Which tools work with which driver
 
@@ -277,6 +293,7 @@ kvm-pilot-mcp                    # start the stdio server (or: python -m kvm_pil
 | `KVM_PILOT_MCP_ALLOW_EXTERNAL_WRITE` | **Operator-only** opt-in enabling writes to systems *outside* the managed device — currently `file_firmware_report` (files a GitHub issue via the `gh` CLI, which must be installed + authed in the server's environment) (#190) |
 | `KVM_PILOT_MCP_PROFILES` | **Fail-closed** allowlist of profile names the server may target (comma-separated). Unset = no allowlist; set-but-empty = allow nothing; a target not on the list is refused (never a fall-back to all configured hosts) |
 | `KVM_PILOT_MCP_ELICIT` | Set to `off` to force the pre-authorized posture (the `ALLOW_*` effect gate + per-call `confirm=true` become the standing authorization) even for elicitation-capable clients; otherwise a per-invocation human approval is requested when the client supports it. The escape hatch when a chat client keeps cancelling pending approvals (`denied_reason: "approval cancel"`, see troubleshooting above) — trade-off: `off` disables per-call human approval, an operator decision |
+| `KVM_PILOT_MCP_STANDING_TTL` | Minutes ceiling for **opt-in duration-scoped standing approvals** (#192); `0`/unset disables the feature. A human approves a `(host, effect class)` scope once for up to N minutes (chosen via the form's `standing_minutes`, clamped here, 8 h hard cap); in-scope invocations then skip the prompt. Grants are per-process, not bound to args, and revoked on any effect-gate/dry-run flip. Unlike `ELICIT=off`, a human still signs off — just once per window. Live grants appear in `session.standing_approvals` |
 | `KVM_PILOT_SSH_HOST` / `KVM_PILOT_SSH_USER` / `KVM_PILOT_SSH_PORT` / `KVM_PILOT_SSH_KEY` | The **managed host's** SSH target (a different machine from the KVM) for `ssh_reachable` / `ssh_exec`; also settable per-profile as `ssh_host` etc. |
 | `KVM_PILOT_MCP_READ_ONLY` | Least-privilege launch posture (#196): only read-only tools are registered (minus `ssh_discover`), every effect gate is force-closed regardless of `ALLOW_*`, and drivers are built deny-all. Wins over `ALLOW_*` and `DRY_RUN`. The recommended first rung of the trust ladder (`READ_ONLY` → `DRY_RUN` → per-effect `ALLOW_*`) |
 | `KVM_PILOT_MCP_DRY_RUN` | Build every driver with `dry_run=True`; destructive calls are logged, never sent |

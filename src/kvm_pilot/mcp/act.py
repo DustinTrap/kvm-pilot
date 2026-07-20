@@ -242,6 +242,8 @@ class Approval:
     reason: str | None = None
     remediation: str | None = None  # operator-facing fix for a client-side denial (#149)
     outcome: Outcome | None = None  # derived from `approved` when omitted
+    grant_id: str | None = None  # set when satisfied by a standing grant (#192)
+    standing_minutes: int = 0  # window the human requested at the prompt (#192)
 
     def __post_init__(self) -> None:
         # approved and outcome are two views of one fact: derive the generic
@@ -262,6 +264,10 @@ class _ApprovalForm(BaseModel):
 
     approve: bool = False
     approver: str = "operator"
+    # Opt-in standing window (#192): minutes to approve this (host, effect) for,
+    # without re-prompting. Honored only when the operator enabled the feature
+    # (KVM_PILOT_MCP_STANDING_TTL); clamped to that ceiling. 0 = one-shot.
+    standing_minutes: int = 0
 
 
 def _elicit_posture_on() -> bool:
@@ -298,7 +304,8 @@ async def approve_or_deny(ctx: Context | None, inv: InvocationContext, *, confir
     """
     approval = await _decide(ctx, inv, confirm=confirm)
     _audit_event(
-        "approved" if approval.approved else "denied", inv, outcome=str(approval.outcome)
+        "approved" if approval.approved else "denied", inv,
+        outcome=str(approval.outcome), grant_id=approval.grant_id,
     )
     return approval
 
@@ -320,13 +327,25 @@ async def _decide(ctx: Context | None, inv: InvocationContext, *, confirm: bool)
         )
 
     before = _bound_state(inv.effect)
+    standing_minutes = 0
 
     # Guarantee (b): approved at run time — interactive elicitation or policy+confirm.
     if _elicit_posture_on() and _client_supports_elicitation(ctx):
+        # A live standing grant (#192) satisfies guarantee (b) without a prompt —
+        # the human already approved this (host, effect) window. Dispatch still
+        # mints a single-use receipt and audits per invocation.
+        grant = _match_standing_grant(inv)
+        if grant is not None:
+            _clear_client_kills(inv.host)
+            return Approval(
+                True, approver=grant.approver, outcome=Outcome.APPROVED,
+                grant_id=grant.grant_id,
+            )
         decision = await _elicit(ctx, inv)  # type: ignore[arg-type]
         if not decision.approved:
             return decision
         approver = decision.approver or "operator"
+        standing_minutes = decision.standing_minutes
     else:
         # Pre-authorized / policy posture (unattended): standing enable-flag + confirm.
         if not confirm:
@@ -349,6 +368,10 @@ async def _decide(ctx: Context | None, inv: InvocationContext, *, confirm: bool)
             outcome=Outcome.INVALIDATED,
         )
     _clear_client_kills(inv.host)
+    # The human opted into a standing window on THIS approval — open it now that
+    # the bound state re-check has passed (never for an invalidated approval).
+    if standing_minutes > 0 and standing_enabled():
+        _create_standing_grant(inv, approver, standing_minutes, before)
     return Approval(True, approver=approver, outcome=Outcome.APPROVED)
 
 
@@ -416,6 +439,12 @@ async def _elicit(ctx: Context, inv: InvocationContext) -> Approval:
         f"  args_hash={inv.args_hash[:12]}  dry_run={inv.dry_run}  "
         f"invocation={inv.invocation_id[:8]}"
     )
+    if standing_enabled():
+        message += (
+            f"\n  standing_minutes>0 approves all '{inv.effect}' on this host for "
+            f"that long (max {_standing_ceiling_min():.0f}m) without re-prompting; "
+            "0 = just this call."
+        )
     try:
         result = await ctx.elicit(message=message, schema=_ApprovalForm)
     except Exception as exc:  # noqa: BLE001 - a failed prompt is a recoverable denial
@@ -425,8 +454,10 @@ async def _elicit(ctx: Context, inv: InvocationContext) -> Approval:
     if result.action == "accept":
         data = result.data
         if data is not None and data.approve:
-            return Approval(True, approver=data.approver or "operator",
-                            outcome=Outcome.APPROVED)
+            return Approval(
+                True, approver=data.approver or "operator", outcome=Outcome.APPROVED,
+                standing_minutes=max(0, data.standing_minutes),
+            )
         return Approval(False, reason="denied by approver",
                         remediation=_with_kill_hint(_REMEDY_DENIED, inv),
                         outcome=Outcome.DENIED)
@@ -580,7 +611,8 @@ _JOURNAL: deque[dict[str, Any]] = deque(maxlen=50)
 # "issued"/"approved" are interim states of the same invocation — journaling
 # terminals only keeps it at one line per act.
 _JOURNAL_EVENTS = frozenset(
-    {"denied", "consumed", "expired", "mismatched", "replayed", "dispatch-exception"}
+    {"denied", "consumed", "expired", "mismatched", "replayed", "dispatch-exception",
+     "standing-granted"}  # #192: opening a standing window is a security event
 )
 
 
@@ -599,9 +631,10 @@ def _audit_event(
     receipt: Receipt | None = None,
     outcome: str | None = None,
     error: str | None = None,
+    grant_id: str | None = None,
 ) -> None:
     if event in _JOURNAL_EVENTS:
-        entry = {
+        entry: dict[str, Any] = {
             "ts": datetime.now(UTC).isoformat(timespec="seconds"),
             "event": event,
             "host": inv.host,
@@ -613,6 +646,8 @@ def _audit_event(
             # Prefix only — enough to cross-reference the operator audit trail.
             "invocation": inv.invocation_id[:8],
         }
+        if grant_id is not None:
+            entry["grant"] = grant_id[:8]
         with _gen_lock:
             _JOURNAL.append(entry)
     record: dict[str, Any] = {
@@ -633,6 +668,11 @@ def _audit_event(
         record["outcome"] = outcome
     if error is not None:
         record["error"] = error
+    if grant_id is not None:
+        # Audit continuity (#192): every standing-consumed approval names the
+        # grant it drew on, and the grant-creation event names the new grant.
+        record["grant_id"] = grant_id
+        record["via"] = "standing"
     _audit_log.info(json.dumps(record, sort_keys=True))
 
 
@@ -640,6 +680,160 @@ def audit_dispatch_error(inv: InvocationContext, receipt: Receipt, exc: Exceptio
     """A dispatch that raised AFTER the receipt was consumed: the external
     effect is unknown — the audit trail must say so rather than staying silent."""
     _audit_event("dispatch-exception", inv, receipt=receipt, error=str(exc))
+
+
+# --------------------------------------------------------------------------- #
+# Standing approvals (#192): opt-in, duration-scoped                          #
+# --------------------------------------------------------------------------- #
+#
+# A human approves ONCE (via elicitation) for a *scope* — (host, profile,
+# effect class) — and a TTL; invocations inside the scope then consume against
+# the grant instead of re-prompting (the per-keystroke cancel-storm cure).
+# Unlike a #72 receipt this is NOT bound to args — that is the point. It is
+# still signed with the per-process key (so it can't outlive a restart and is
+# tamper-evident) and bound to the mutable env state (dry-run + effect gate),
+# so an operator flipping either revokes every live grant on next use. Every
+# consumption still mints its own single-use receipt and emits a per-invocation
+# audit record referencing the grant id — the standing grant replaces the human
+# PROMPT, never the dispatch-time receipt or the audit trail.
+#
+# Operator-gated and off by default: ``KVM_PILOT_MCP_STANDING_TTL`` is the
+# ceiling in minutes a grant may last (0/unset = the whole feature is disabled;
+# the elicitation form's opt-in is ignored). READ_ONLY disables it too.
+
+_STANDING_CEILING_MAX_MIN = 480.0  # 8h hard cap regardless of the operator knob
+
+
+def _standing_ceiling_min() -> float:
+    """Operator's max standing-grant lifetime in minutes (0/unset = disabled)."""
+    raw = os.environ.get("KVM_PILOT_MCP_STANDING_TTL", "").strip()
+    if not raw:
+        return 0.0
+    try:
+        return min(max(float(raw), 0.0), _STANDING_CEILING_MAX_MIN)
+    except ValueError:
+        return 0.0
+
+
+def standing_enabled() -> bool:
+    """True when the operator has opted this server into standing approvals."""
+    return _standing_ceiling_min() > 0 and not env_flag("KVM_PILOT_MCP_READ_ONLY")
+
+
+@dataclass(frozen=True)
+class StandingGrant:
+    grant_id: str
+    host: str
+    profile: str | None
+    effect: EffectClass
+    approver: str
+    issued_at: float
+    expires_at: float
+    bound_state: tuple[bool, bool]  # (dry_run, gate_open) at issue — flip revokes
+    mac: str
+
+
+_ScopeKey = tuple[str, str | None, EffectClass]
+_STANDING_GRANTS: dict[_ScopeKey, StandingGrant] = {}
+
+
+def _grant_scope(inv: InvocationContext) -> _ScopeKey:
+    # Args are deliberately NOT in the scope; effect class is exact, so a
+    # soft-power grant never covers a hard-power (off-hard/reset) invocation.
+    return (inv.host, inv.profile, inv.effect)
+
+
+def _grant_mac(
+    grant_id: str, host: str, profile: str | None, effect: EffectClass,
+    approver: str, issued_at: float, expires_at: float,
+) -> str:
+    payload = json.dumps(
+        {
+            "grant_id": grant_id, "host": host, "profile": profile,
+            "effect": str(effect), "approver": approver,
+            "issued_at": issued_at, "expires_at": expires_at,
+        },
+        sort_keys=True, separators=(",", ":"),
+    ).encode()
+    return hmac.new(_RECEIPT_KEY, payload, hashlib.sha256).hexdigest()
+
+
+def _create_standing_grant(
+    inv: InvocationContext, approver: str, minutes: float, bound: tuple[bool, bool]
+) -> StandingGrant | None:
+    """Open a standing window for ``inv``'s scope, clamped to the operator ceiling."""
+    ceiling = _standing_ceiling_min()
+    if ceiling <= 0 or minutes <= 0:
+        return None
+    ttl_min = min(float(minutes), ceiling)
+    issued = time.time()
+    expires = issued + ttl_min * 60.0
+    grant_id = uuid.uuid4().hex
+    grant = StandingGrant(
+        grant_id=grant_id, host=inv.host, profile=inv.profile, effect=inv.effect,
+        approver=approver, issued_at=issued, expires_at=expires, bound_state=bound,
+        mac=_grant_mac(grant_id, inv.host, inv.profile, inv.effect, approver, issued, expires),
+    )
+    with _gen_lock:
+        _STANDING_GRANTS[_grant_scope(inv)] = grant
+    _audit_event(
+        "standing-granted", inv, outcome=f"standing {ttl_min:.0f}m", grant_id=grant_id
+    )
+    return grant
+
+
+def _match_standing_grant(
+    inv: InvocationContext, *, now: float | None = None
+) -> StandingGrant | None:
+    """A live, valid grant for ``inv``'s scope, else None (purging a dead one).
+
+    Fail-closed: a bad MAC, an expiry, or a changed bound state (the operator
+    flipped dry-run or the effect gate) purges the grant and returns None so
+    the caller falls back to a fresh human prompt.
+    """
+    clock = time.time() if now is None else now
+    scope = _grant_scope(inv)
+    with _gen_lock:
+        grant = _STANDING_GRANTS.get(scope)
+        if grant is None:
+            return None
+        good_mac = hmac.compare_digest(
+            grant.mac,
+            _grant_mac(grant.grant_id, grant.host, grant.profile, grant.effect,
+                       grant.approver, grant.issued_at, grant.expires_at),
+        )
+        if not good_mac or clock >= grant.expires_at:
+            del _STANDING_GRANTS[scope]
+            return None
+    # Bound-state re-check reads env — do it outside the lock, then re-lock to purge.
+    if _bound_state(inv.effect) != grant.bound_state:
+        with _gen_lock:
+            _STANDING_GRANTS.pop(scope, None)
+        return None
+    return grant
+
+
+def revoke_standing_grants() -> None:
+    """Drop every live standing grant (tests / a forced posture reset)."""
+    with _gen_lock:
+        _STANDING_GRANTS.clear()
+
+
+def standing_grants_summary(now: float | None = None) -> list[dict[str, Any]]:
+    """Live standing grants for the ``session`` tool (purges expired lazily)."""
+    clock = time.time() if now is None else now
+    out: list[dict[str, Any]] = []
+    with _gen_lock:
+        for scope, grant in list(_STANDING_GRANTS.items()):
+            if clock >= grant.expires_at:
+                del _STANDING_GRANTS[scope]
+                continue
+            out.append({
+                "host": grant.host, "effect": str(grant.effect),
+                "approver": grant.approver, "grant": grant.grant_id[:8],
+                "expires_in_s": round(grant.expires_at - clock),
+            })
+    return out
 
 
 # --------------------------------------------------------------------------- #
@@ -683,6 +877,9 @@ def result(
                 datetime.fromtimestamp(receipt.expires_at, UTC).isoformat()
                 if receipt is not None else None
             ),
+            # #192: the standing grant that authorized this (None = a fresh
+            # human approval or the pre-authorized posture).
+            "via_standing_grant": approval.grant_id[:8] if approval.grant_id else None,
         },
         "detail": detail,
         "denied_reason": approval.reason,
@@ -842,6 +1039,9 @@ __all__ = [
     "verify_and_consume",
     "receipt_state",
     "audit_dispatch_error",
+    "standing_enabled",
+    "standing_grants_summary",
+    "revoke_standing_grants",
     "result",
     "generation",
     "bump_generation",

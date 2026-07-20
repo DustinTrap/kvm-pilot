@@ -61,9 +61,9 @@ every call returns 404. A firmware upgrade can revert it.
   doctrine — recovery, interfaces, setup, linux-install, target-context,
   library, or core — for mid-session re-anchoring; offline, no device I/O),
   `session` (this server's current posture: dry-run/read-only state, which
-  effect gates are open by class name, the recent act journal, and the last
-  `wait_for_state` breadcrumb — call it first when resuming after a context
-  compaction), `events` (bounded collect of typed device events — the text
+  effect gates are open by class name, any live standing approvals, the recent
+  act journal, and the last `wait_for_state` breadcrumb — call it first when
+  resuming after a context compaction), `events` (bounded collect of typed device events — the text
   cross-check for a vision wait), `firmware_check` (read-only firmware
   currency vs the registry), and `ssh_discover` (CIDR scan — RISKY/opt-in,
   needs `confirm=true`, user-owned networks only)

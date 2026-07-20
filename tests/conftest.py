@@ -46,6 +46,11 @@ def _isolated_health_cache(tmp_path, monkeypatch):
     from kvm_pilot.health import reset_session_audit
 
     reset_session_audit()
+    # Standing approvals (#192) are module-level, per-process — drop any a test
+    # left behind so grants never leak across tests.
+    from kvm_pilot.mcp.act import revoke_standing_grants
+
+    revoke_standing_grants()
 
 
 class FakeHTTP:

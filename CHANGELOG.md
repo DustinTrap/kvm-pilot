@@ -6,6 +6,18 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Opt-in duration-scoped standing approvals** (#192) — `KVM_PILOT_MCP_STANDING_TTL`
+  (minutes, 0/unset = off) lets a human approve a `(host, effect class)` scope
+  ONCE for a bounded window; in-scope act invocations then consume the grant
+  instead of re-prompting (the cure for the per-keystroke cancel-storm). Unlike
+  `ELICIT=off` a human still signs off, just once per window, and only if they
+  set `standing_minutes` on the prompt. Grants are signed with the per-process
+  key (never span a restart), NOT bound to args, capped at 8 h, revoked the
+  instant the operator flips the effect gate or dry-run, and shown in
+  `session.standing_approvals`. Every consumption still mints its own single-use
+  receipt and audits with the grant id (`via: standing`).
+
 ### Security / Changed
 - **Every destructive tool now rides the act layer** (#234): `power`, `wake`,
   `ssh_exec`, `appliance_reboot`, `set_boot_device`, and `amt_enable` — which

@@ -26,6 +26,7 @@ _ENV = (
     "KVM_PILOT_MCP_ALLOW_SSH",
     "KVM_PILOT_MCP_ALLOW_CONSENT_OFF",
     "KVM_PILOT_MCP_READ_ONLY",
+    "KVM_PILOT_MCP_STANDING_TTL",
     "KVM_PILOT_MCP_PROFILES",
     "KVM_PILOT_PROFILE",
     "KVM_PILOT_HOST",
@@ -426,3 +427,115 @@ def test_wait_breadcrumb_round_trip():
     act.note_wait("h", record)
     assert act.last_wait("h") == record
     assert act.last_wait("other") is None
+
+
+# -- standing approvals (#192): negative-first ---------------------------------
+
+from kvm_pilot.mcp.act import EffectClass as _EC  # noqa: E402
+
+
+def _standing_setup(monkeypatch, *, ceiling="10"):
+    _clear(monkeypatch)
+    act.revoke_standing_grants()
+    if ceiling is not None:
+        monkeypatch.setenv("KVM_PILOT_MCP_STANDING_TTL", ceiling)
+    monkeypatch.setenv("KVM_PILOT_MCP_ALLOW_POWER", "1")  # gate open -> bound (False, True)
+
+
+def _open_grant(monkeypatch, *, minutes=5, host="h", profile="p", effect=_EC.POWER_SOFT):
+    inv = _inv(host=host, profile=profile, effect=effect, op="power.off")
+    return inv, act._create_standing_grant(inv, "alice", minutes, act._bound_state(effect))
+
+
+def test_standing_disabled_by_default(monkeypatch):
+    _clear(monkeypatch)  # no KVM_PILOT_MCP_STANDING_TTL
+    monkeypatch.setenv("KVM_PILOT_MCP_ALLOW_POWER", "1")
+    assert act.standing_enabled() is False
+    inv, grant = _open_grant(monkeypatch)          # honors the disabled ceiling
+    assert grant is None
+    assert act._match_standing_grant(inv) is None
+
+
+def test_standing_read_only_disables_feature(monkeypatch):
+    _standing_setup(monkeypatch)
+    monkeypatch.setenv("KVM_PILOT_MCP_READ_ONLY", "1")
+    assert act.standing_enabled() is False
+
+
+def test_standing_scope_escape_host_and_effect(monkeypatch):
+    _standing_setup(monkeypatch)
+    monkeypatch.setenv("KVM_PILOT_MCP_ALLOW_HID", "1")
+    inv, grant = _open_grant(monkeypatch, host="h", effect=_EC.POWER_SOFT)
+    assert grant is not None
+    # same scope matches...
+    assert act._match_standing_grant(inv) is not None
+    # ...a different host does NOT
+    assert act._match_standing_grant(_inv(host="other", profile="p", effect=_EC.POWER_SOFT)) is None
+    # ...and a different effect class does NOT (a soft-power grant is not hard-power)
+    assert act._match_standing_grant(
+        _inv(host="h", profile="p", effect=_EC.POWER_HARD, op="power.off-hard")
+    ) is None
+
+
+def test_standing_expiry_mid_loop_purges(monkeypatch):
+    _standing_setup(monkeypatch)
+    inv, grant = _open_grant(monkeypatch, minutes=5)
+    assert act._match_standing_grant(inv, now=grant.issued_at + 60) is not None   # inside window
+    assert act._match_standing_grant(inv, now=grant.expires_at + 1) is None       # expired
+    assert act._match_standing_grant(inv) is None  # and it was purged from the store
+
+
+def test_standing_gate_or_dry_run_flip_revokes(monkeypatch):
+    _standing_setup(monkeypatch)
+    inv, grant = _open_grant(monkeypatch)
+    assert act._match_standing_grant(inv) is not None
+    # Operator flips the effect gate off mid-loop -> bound state changes -> revoked.
+    monkeypatch.delenv("KVM_PILOT_MCP_ALLOW_POWER", raising=False)
+    assert act._match_standing_grant(inv) is None
+    assert act._match_standing_grant(inv) is None  # purged, not just skipped
+
+
+def test_standing_dry_run_flip_revokes(monkeypatch):
+    _standing_setup(monkeypatch)
+    inv, grant = _open_grant(monkeypatch)
+    assert act._match_standing_grant(inv) is not None
+    monkeypatch.setenv("KVM_PILOT_MCP_DRY_RUN", "1")  # the human approved a LIVE window
+    assert act._match_standing_grant(inv) is None
+
+
+def test_standing_tampered_mac_is_refused(monkeypatch):
+    _standing_setup(monkeypatch)
+    inv, grant = _open_grant(monkeypatch)
+    scope = act._grant_scope(inv)
+    # Extend the expiry in-place WITHOUT re-signing — the MAC no longer covers it.
+    act._STANDING_GRANTS[scope] = type(grant)(
+        **{**grant.__dict__, "expires_at": grant.expires_at + 999999}
+    )
+    assert act._match_standing_grant(inv) is None  # MAC mismatch -> purged
+
+
+def test_standing_ttl_clamped_to_ceiling(monkeypatch):
+    _standing_setup(monkeypatch, ceiling="10")
+    inv, grant = _open_grant(monkeypatch, minutes=999)  # asks for way more than allowed
+    window_min = (grant.expires_at - grant.issued_at) / 60
+    assert 9.9 <= window_min <= 10.1  # clamped to the 10-minute operator ceiling
+
+
+def test_standing_summary_lists_live_and_purges_expired(monkeypatch):
+    _standing_setup(monkeypatch)
+    _, grant = _open_grant(monkeypatch, minutes=5)
+    live = act.standing_grants_summary()
+    assert len(live) == 1
+    assert live[0]["effect"] == "power_soft" and live[0]["approver"] == "alice"
+    assert live[0]["expires_in_s"] > 0
+    assert act.standing_grants_summary(now=grant.expires_at + 1) == []  # expired -> purged
+
+
+def test_standing_granted_shows_in_journal(monkeypatch):
+    _standing_setup(monkeypatch)
+    act._JOURNAL.clear()
+    _open_grant(monkeypatch, minutes=5)
+    events = [e["event"] for e in act.journal_tail()]
+    assert "standing-granted" in events
+    entry = next(e for e in act.journal_tail() if e["event"] == "standing-granted")
+    assert entry["effect"] == "power_soft" and "grant" in entry

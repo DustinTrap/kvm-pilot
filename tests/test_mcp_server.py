@@ -554,6 +554,76 @@ def test_send_shortcut_vt_switch_uses_hid_gate(config_file):
     assert parsed["effect"] == "hid_control"
 
 
+def _run_counting_elicit(env, interact, *, content):
+    """Like run_session_elicit but counts how many human prompts the server
+    raised — the way to prove a standing grant SKIPPED a re-prompt (#192)."""
+    from mcp.types import ElicitResult
+
+    prompts: list = []
+
+    async def elicitation_callback(context, params):
+        prompts.append(params)
+        return ElicitResult(action="accept", content=content)
+
+    async def runner():
+        params = StdioServerParameters(
+            command=sys.executable, args=["-m", "kvm_pilot.mcp.server"], env=env
+        )
+        async with stdio_client(params) as (read, write):
+            async with ClientSession(
+                read, write, elicitation_callback=elicitation_callback
+            ) as session:
+                await session.initialize()
+                return await interact(session), prompts
+
+    return asyncio.run(asyncio.wait_for(runner(), timeout=60))
+
+
+def test_standing_approval_skips_reprompt_and_shows_in_session(config_file):
+    """#192 full loop: one human approval with standing_minutes>0 opens a window;
+    the next in-scope call (different args!) consumes it with NO second prompt,
+    and the live grant shows in `session`."""
+
+    async def interact(session):
+        a = await session.call_tool("type_text", {"text": "first"})
+        b = await session.call_tool("type_text", {"text": "second-different-args"})
+        s = await session.call_tool("session", {})
+        return a, b, s
+
+    env = server_env(
+        config_file, KVM_PILOT_MCP_ALLOW_HID="1", KVM_PILOT_MCP_STANDING_TTL="10"
+    )
+    (results, prompts) = _run_counting_elicit(
+        env, interact, content={"approve": True, "standing_minutes": 5}
+    )
+    a, b, s = results
+    pa, pb = result_json(a), result_json(b)
+    assert pa["approved"] is True and pb["approved"] is True
+    assert len(prompts) == 1  # ONLY the first call prompted a human
+    assert pa["approval"]["via_standing_grant"] is None      # fresh approval opened it
+    assert pb["approval"]["via_standing_grant"] is not None  # second consumed the grant
+    grants = result_json(s)["standing_approvals"]
+    assert len(grants) == 1
+    assert grants[0]["effect"] == "hid_input" and grants[0]["expires_in_s"] > 0
+
+
+def test_standing_approval_disabled_reprompts_every_call(config_file):
+    """Without KVM_PILOT_MCP_STANDING_TTL the form's standing_minutes is ignored:
+    the posture change is the operator's, never the client's."""
+
+    async def interact(session):
+        await session.call_tool("type_text", {"text": "one"})
+        await session.call_tool("type_text", {"text": "two"})
+        return await session.call_tool("session", {})
+
+    env = server_env(config_file, KVM_PILOT_MCP_ALLOW_HID="1")  # no STANDING_TTL
+    (s, prompts) = _run_counting_elicit(
+        env, interact, content={"approve": True, "standing_minutes": 5}
+    )
+    assert len(prompts) == 2  # every call still prompts a human
+    assert result_json(s)["standing_approvals"] == []
+
+
 def test_act_interactive_elicit_accept(config_file):
     # An elicitation-capable client uses the interactive posture (no confirm needed).
     async def interact(session):

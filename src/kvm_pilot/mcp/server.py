@@ -513,7 +513,8 @@ def session(profile: str | None = None) -> dict:
     Call this after a context compaction, when resuming a long flow, or before
     planning act calls: it names the target, dry-run/read-only state, which
     effect gates are open (by class name only — opening one is operator-only,
-    out of band), the approval posture, the recent act journal, and the last
+    out of band), the approval posture, any live standing approvals (#192) with
+    their scope and time left, the recent act journal, and the last
     ``wait_for_state`` result for the target. All journal/wait state is
     in-memory: a server restart empties it (and voids receipts and frame refs),
     so an empty journal after a restart is expected, not evidence nothing
@@ -528,6 +529,7 @@ def session(profile: str | None = None) -> dict:
             "profile_allowlist": act.allowlist_names(),
         },
         "gates": act.gate_summary(),
+        "standing_approvals": act.standing_grants_summary(),
         "recent_acts": act.journal_tail(),
     }
     try:
