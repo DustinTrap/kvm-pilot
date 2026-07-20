@@ -1331,6 +1331,59 @@ def _add_vision(p: argparse.ArgumentParser) -> None:
     p.add_argument("--hint", help="Optional context hint for the classifier")
 
 
+# -- agent-aware MCP nudges (#228): close the CLI/MCP usage asymmetry --------
+#
+# Agents in a terminal take the zero-setup path (this CLI) and stay there, even
+# for actions the MCP server does better (measured: MCP reads ~0.18s vs ~1.28s
+# CLI cold start; in-band images with frame_ref for safe clicks). One line on
+# stderr at the moment the slower path is used — never stdout, never twice.
+
+# CLI subcommand -> (MCP tool, what the twin adds over this command).
+_MCP_TWINS: dict[str, tuple[str, str]] = {
+    "snapshot": ("snapshot", "returns a model-visible image + a frame_ref for safe clicks"),
+    "classify": ("classify_screen", "classifies in-session, no screenshot file round-trip"),
+    "watch": ("wait_for_state", "bounded server-side wait with a typed timeout result"),
+    "healthcheck": ("healthcheck", "same audit, served through the preflight cache"),
+    "logs": ("logs", "same log as structured output"),
+    "capabilities": ("capabilities", "same structural answer, no process start"),
+    "media-list": ("list_virtual_media", "same MSD inventory as structured output"),
+    "mount": ("mount_iso", "gated + per-call approved, with a typed outcome"),
+    "eject": ("eject", "gated + per-call approved, with a typed outcome"),
+    "power": ("power", "gated + per-call approved, with honest effect verification"),
+    "power-cycle": ("power", "gated + per-call approved, with honest effect verification"),
+    "boot-device": ("set_boot_device", "gated + per-call approved, with a typed outcome"),
+    "wake": ("wake", "gated + per-call approved Wake-on-LAN"),
+    "type": ("type_text", "gated HID with receipts and a typed outcome"),
+    "key": ("press_key", "gated HID with receipts and a typed outcome"),
+    "mouse-move": ("mouse", "frame_ref-anchored moves/clicks that refuse stale screens"),
+    "click": ("mouse", "frame_ref-anchored clicks that refuse stale screens"),
+    "ssh-exec": ("ssh_exec", "gated in-band exec with a typed outcome"),
+}
+
+
+def _maybe_mcp_hint(command: str | None, *, no_hints: bool = False) -> None:
+    """One stderr line pointing an agent at the faster MCP twin (#228).
+
+    Fires only in an agent-looking context (CLAUDECODE set, or stdout not a
+    TTY), at most once per invocation, and never on stdout — parsing and
+    scripts are unaffected. Silence with --no-hints or KVM_PILOT_NO_HINTS=1.
+    """
+    if no_hints or os.environ.get("KVM_PILOT_NO_HINTS", "").strip() == "1":
+        return
+    if command not in _MCP_TWINS:
+        return
+    if not (os.environ.get("CLAUDECODE") or not sys.stdout.isatty()):
+        return
+    tool, why = _MCP_TWINS[command]
+    print(
+        f"tip: the kvm-pilot MCP server's `mcp__kvm-pilot__{tool}` does this "
+        f"in-session ({why}; ~0.2s vs CLI cold start). Not loaded? See "
+        "docs/getting-started.md §2 and `kvm-pilot install-skill`. "
+        "(silence: KVM_PILOT_NO_HINTS=1)",
+        file=sys.stderr,
+    )
+
+
 # -- install-skill (#226): put the bundled skill where Claude Code loads it --
 
 _SKILL_MARKER = ".installed-by-kvm-pilot.json"
@@ -1418,6 +1471,11 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="kvm-pilot", description=__doc__)
     parser.add_argument("--version", action="version", version=f"kvm-pilot {__version__}")
     parser.add_argument("-v", "--verbose", action="store_true", help="Debug logging")
+    parser.add_argument(
+        "--no-hints", action="store_true",
+        help="Suppress the agent-context MCP-twin tips (also: KVM_PILOT_NO_HINTS=1; "
+        "global; must precede the subcommand)",
+    )
     parser.add_argument(
         "--timeout", dest="http_timeout", type=float, metavar="SECONDS",
         help="HTTP per-request timeout in seconds (global; must precede the subcommand)",
@@ -1786,7 +1844,10 @@ def main(argv: list | None = None) -> int:
         format="%(levelname)s %(name)s: %(message)s",
     )
     try:
-        return args.func(args)
+        ret = args.func(args)
+        if ret == 0:
+            _maybe_mcp_hint(getattr(args, "command", None), no_hints=args.no_hints)
+        return ret
     except SafetyError as exc:
         print(f"blocked: {exc}", file=sys.stderr)
         return 3

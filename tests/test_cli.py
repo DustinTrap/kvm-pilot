@@ -1139,3 +1139,51 @@ def test_install_skill_refuses_markerless_directory(tmp_path, capsys):
     assert "refusing" in capsys.readouterr().err
     # Uninstall refuses the same way (nothing-to-uninstall path, exit 0, no delete).
     assert main(["install-skill", "--dest", str(dest), "--uninstall"]) == 1
+
+
+# -- agent-aware MCP nudges (#228) --------------------------------------------
+
+
+def test_mcp_hint_fires_in_agent_context(monkeypatch, capsys):
+    from kvm_pilot.cli import _maybe_mcp_hint
+
+    monkeypatch.setenv("CLAUDECODE", "1")
+    monkeypatch.delenv("KVM_PILOT_NO_HINTS", raising=False)
+    _maybe_mcp_hint("snapshot")
+    err = capsys.readouterr().err
+    assert "mcp__kvm-pilot__snapshot" in err and "frame_ref" in err
+    assert capsys.readouterr().out == ""  # never on stdout
+
+
+def test_mcp_hint_respects_opt_outs_and_unknown_commands(monkeypatch, capsys):
+    from kvm_pilot.cli import _maybe_mcp_hint
+
+    monkeypatch.setenv("CLAUDECODE", "1")
+    monkeypatch.setenv("KVM_PILOT_NO_HINTS", "1")
+    _maybe_mcp_hint("snapshot")            # env opt-out
+    monkeypatch.delenv("KVM_PILOT_NO_HINTS")
+    _maybe_mcp_hint("snapshot", no_hints=True)  # flag opt-out
+    _maybe_mcp_hint("install-skill")       # no MCP twin
+    assert capsys.readouterr().err == ""
+
+
+def test_mcp_hint_absent_for_interactive_tty(monkeypatch, capsys):
+    import sys as _sys
+
+    from kvm_pilot.cli import _maybe_mcp_hint
+
+    monkeypatch.delenv("CLAUDECODE", raising=False)
+    monkeypatch.setattr(_sys.stdout, "isatty", lambda: True)
+    _maybe_mcp_hint("snapshot")
+    assert capsys.readouterr().err == ""
+
+
+def test_mcp_hint_end_to_end_on_capabilities(monkeypatch, capsys):
+    monkeypatch.setenv("CLAUDECODE", "1")
+    monkeypatch.setenv("KVM_PILOT_HOST", "h")
+    monkeypatch.setenv("KVM_PILOT_DRIVER", "fake")
+    assert main(["capabilities"]) == 0
+    assert "mcp__kvm-pilot__capabilities" in capsys.readouterr().err
+    monkeypatch.setenv("KVM_PILOT_NO_HINTS", "1")
+    assert main(["capabilities"]) == 0
+    assert "mcp__kvm-pilot__" not in capsys.readouterr().err
