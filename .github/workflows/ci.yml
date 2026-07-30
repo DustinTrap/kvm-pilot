@@ -97,18 +97,20 @@ jobs:
           /tmp/smoke/bin/kvm-pilot --version
 
   mcp-majors:
-    # `mcp>=1.10,<3` spans two SDK majors that are NOT source-compatible: 2.x moved
+    # `mcp>=1.17,<3` spans two SDK majors that are NOT source-compatible: 2.x moved
     # `mcp.server.fastmcp` -> `mcp.server.mcpserver` and renamed the model fields to
     # snake_case (#241). The `test` job only ever resolves the newest allowed mcp, so
     # it cannot catch a change that breaks the *older* major — and the shim exists
-    # precisely to keep both working. Pin each end of the range and run the MCP suite
-    # against it. If supporting 1.x stops being worth this job, raise the floor in
-    # pyproject and delete the leg — don't let it silently rot.
+    # precisely to keep both working. Run the MCP suite against three points:
+    # the exact declared floor (a range would resolve the newest 1.x and never
+    # exercise the bound we publish — the old `>=1.10` claim was false for months),
+    # newest 1.x, and 2.x. If supporting 1.x stops being worth this job, raise the
+    # floor in pyproject and drop the legs — don't let it silently rot.
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
-        mcp-version: ["mcp>=1.10,<2", "mcp>=2,<3"]
+        mcp-version: ["mcp==1.17.0", "mcp>=1.17,<2", "mcp>=2,<3"]
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:

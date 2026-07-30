@@ -43,7 +43,11 @@ classifiers = [
 # to `mcp.server.mcpserver` (MCPServer/Image) — the breakage behind the old `<2` cap
 # (#110) — so the server imports the SDK through `kvm_pilot.mcp._sdk`, which resolves
 # either major. Keep the `<3` cap: a future major may move things again.
-dependencies = ["mcp>=1.10,<3", "websocket-client>=1.9.0"]
+# The floor is 1.17, measured, not guessed: below 1.14 the server does not import at
+# all (FastMCP couldn't resolve our `Context` annotations), and 1.14-1.16 lack
+# `FastMCP.remove_tool`, which read-only mode needs (#196). The old `>=1.10` claim was
+# never true. The mcp-majors CI leg pins this exact floor so it can't silently rot.
+dependencies = ["mcp>=1.17,<3", "websocket-client>=1.9.0"]
 
 [project.optional-dependencies]
 totp = ["pyotp>=2.10.0"]

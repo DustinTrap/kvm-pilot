@@ -8,7 +8,7 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 - **Support for both MCP SDK majors** (#241) — the dependency widens from
-  `mcp>=1.10,<2` to `mcp>=1.10,<3`, so `pip install kvm-pilot` works whether the
+  `mcp>=1.10,<2` to `mcp>=1.17,<3`, so `pip install kvm-pilot` works whether the
   resolver picks mcp 1.x or the now-stable 2.x. The two majors are **not**
   source-compatible (2.x moved `mcp.server.fastmcp` → `mcp.server.mcpserver`,
   `FastMCP` → `MCPServer`, and renamed the SDK's model fields to snake_case —
@@ -24,6 +24,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `KVM_PILOT_MCP_READ_ONLY=1` aborted the server at startup with an
   `AttributeError` instead of serving the least-privilege tool set (#196). The
   hint is now read major-agnostically. No effect on mcp 1.x installs.
+- **The published mcp lower bound was never true** (#241) — `>=1.10` was declared
+  but unexercised: below 1.14 the bundled server does not import at all (FastMCP
+  could not resolve its `Context` annotations), and 1.14–1.16 lack
+  `FastMCP.remove_tool`, which read-only mode (#196) calls. The floor is now the
+  measured one, `>=1.17`, and the `mcp-majors` CI leg pins that exact version so
+  the bound is tested rather than asserted.
 
 ## [0.1.0b11] — 2026-07-20
 

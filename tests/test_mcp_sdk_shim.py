@@ -14,7 +14,7 @@ the equivalent 2.x-only import breaks on mcp 1.x.
 
 from __future__ import annotations
 
-import re
+import ast
 from pathlib import Path
 
 from kvm_pilot.mcp import _sdk
@@ -22,10 +22,31 @@ from kvm_pilot.mcp import _sdk
 _SRC = Path(__file__).resolve().parents[1] / "src" / "kvm_pilot"
 _SHIM = _SRC / "mcp" / "_sdk.py"
 
-# Either major's server package, imported anywhere but the shim, pins us to that
-# major. `mcp.types` is deliberately absent: those models kept their path across
-# the move, so importing them directly is fine.
-_DIRECT_SDK_IMPORT = re.compile(r"^\s*(?:from|import)\s+mcp\.server\.(fastmcp|mcpserver)\b", re.M)
+
+def _imports_mcp_server(source: str) -> bool:
+    """Does this module import anything out of mcp's server package?
+
+    Parsed rather than pattern-matched: the package is reachable as
+    `import mcp.server.fastmcp`, `from mcp.server.mcpserver import X` *and*
+    `from mcp.server import fastmcp`, and a regex that misses the last form
+    would let exactly the #110 breakage back in. `mcp.types` is deliberately not
+    covered — those models kept their path across the move, so importing them
+    directly is fine.
+    """
+    for node in ast.walk(ast.parse(source)):
+        if isinstance(node, ast.Import):
+            names = [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            # A relative import (level > 0) can't reach the mcp package.
+            if node.level:
+                continue
+            module = node.module or ""
+            names = [module] + [f"{module}.{alias.name}" for alias in node.names]
+        else:
+            continue
+        if any(n == "mcp.server" or n.startswith("mcp.server.") for n in names):
+            return True
+    return False
 
 
 def test_shipped_package_imports_the_sdk_only_through_the_shim():
@@ -33,12 +54,39 @@ def test_shipped_package_imports_the_sdk_only_through_the_shim():
     offenders = {
         path.relative_to(_SRC).as_posix()
         for path in _SRC.rglob("*.py")
-        if path != _SHIM and _DIRECT_SDK_IMPORT.search(path.read_text())
+        if path != _SHIM and _imports_mcp_server(path.read_text())
     }
     assert not offenders, (
         f"{sorted(offenders)} import mcp's server package directly; import from "
         "kvm_pilot.mcp._sdk instead so both mcp 1.x and 2.x keep working (#241)."
     )
+
+
+def test_the_guard_catches_every_way_of_reaching_mcp_server():
+    """The guard above is only worth having if it sees all the import spellings.
+
+    `from mcp.server import fastmcp` is the one a line-based check misses, and it
+    breaks on mcp 2.x exactly like the others."""
+    caught = [
+        "import mcp.server.fastmcp",
+        "import mcp.server.mcpserver as sdk",
+        "from mcp.server.fastmcp import FastMCP",
+        "from mcp.server.mcpserver.exceptions import ToolError",
+        "from mcp.server import fastmcp",
+        "from mcp.server import mcpserver",
+        "def f():\n    from mcp.server.fastmcp import Context",  # function-local too
+    ]
+    for source in caught:
+        assert _imports_mcp_server(source), f"guard missed: {source!r}"
+
+    allowed = [
+        "from mcp.types import ToolAnnotations",  # unmoved across majors
+        "import mcp",
+        "from kvm_pilot.mcp._sdk import MCPServer",
+        "from . import server",  # relative: can't reach the mcp package
+    ]
+    for source in allowed:
+        assert not _imports_mcp_server(source), f"guard over-reached: {source!r}"
 
 
 def test_shim_exports_every_symbol_the_server_uses():
