@@ -14,6 +14,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
+import re
 import sys
 from pathlib import Path
 
@@ -114,7 +115,10 @@ def run_session(env: dict[str, str], interact):
         async with stdio_client(params) as (read, write):
             async with ClientSession(read, write) as session:
                 init = await session.initialize()
-                assert init.serverInfo.name == "kvm-pilot"
+                # by_alias: mcp 2.x renamed these model fields to snake_case, but
+                # the wire keys stayed camelCase — assert the wire, not the field
+                # name, so one assertion holds on both SDK majors (#241).
+                assert init.model_dump(by_alias=True)["serverInfo"]["name"] == "kvm-pilot"
                 return await interact(session)
 
     return asyncio.run(asyncio.wait_for(runner(), timeout=60))
@@ -124,6 +128,25 @@ def result_json(result) -> dict:
     """Parse a dict-returning tool's JSON text content."""
     assert result.content[0].type == "text"
     return json.loads(result.content[0].text)
+
+
+def wire(model, key: str):
+    """Read a wire field off an SDK model, on either mcp major (#241).
+
+    mcp 2.x renamed the model fields to snake_case (``isError`` -> ``is_error``,
+    ``mimeType`` -> ``mime_type``) but kept the camelCase keys on the wire. Pass
+    the wire key: it is what the protocol — and therefore the assertion — is
+    actually about, and it reads the same on both majors."""
+    snake = re.sub(r"(?<!^)(?=[A-Z])", "_", key).lower()
+    for field in (key, snake):
+        if field in type(model).model_fields:
+            return getattr(model, field)
+    raise AssertionError(f"{type(model).__name__} has no {key!r}/{snake!r} field")
+
+
+def is_error(result) -> bool:
+    """The ``isError`` flag off a ``CallToolResult``, on either mcp major (#241)."""
+    return wire(result, "isError")
 
 
 def run_session_elicit(env, interact, *, action, content=None):
@@ -158,7 +181,12 @@ def test_handshake_lists_annotated_tools(config_file):
     for name, expected in EXPECTED_ANNOTATIONS.items():
         ann = by_name[name].annotations
         assert ann is not None, name
-        got = (ann.readOnlyHint, ann.destructiveHint, ann.idempotentHint, ann.openWorldHint)
+        # by_alias keeps the camelCase wire keys across both mcp majors (#241).
+        hints = ann.model_dump(by_alias=True)
+        got = tuple(
+            hints[k]
+            for k in ("readOnlyHint", "destructiveHint", "idempotentHint", "openWorldHint")
+        )
         assert got == expected, f"{name}: annotations {got} != expected {expected}"
 
 
@@ -189,7 +217,7 @@ def test_read_only_mode_registers_only_read_tools(config_file):
     tools, health, power = run_session(env, interact)
     assert {t.name for t in tools} == READ_ONLY_MODE_TOOLS
     assert result_json(health)["read_only"] is True
-    assert power.isError  # never registered, so the call can only error
+    assert is_error(power)  # never registered, so the call can only error
 
 
 def test_read_only_mode_forces_gates_closed(monkeypatch):
@@ -286,7 +314,7 @@ def test_session_never_refuses(config_file):
         return await session.call_tool("session", {})
 
     result = run_session(server_env(config_file, KVM_PILOT_MCP_PROFILES=""), interact)
-    assert result.isError is False
+    assert is_error(result) is False
     payload = result_json(result)
     assert payload["gates"]  # posture still served
     assert payload["server"]["profile_allowlist"] == []
@@ -380,25 +408,24 @@ def test_doctrine_serves_bundled_playbooks(config_file):
     assert {"core", "recovery", "interfaces", "setup"} <= set(topics)
     text = result_json(recovery)["text"]
     assert "Wake-on-LAN" in text  # the ladder's first rung is the payload
-    assert bogus.isError
+    assert is_error(bogus)
     assert "recovery" in bogus.content[0].text  # refusal names the valid topics
 
 
 def test_doctrine_also_served_as_resources(config_file):
     """#231: the same playbooks are MCP resources — no tool round-trip for
     resource-capable clients; byte-identical to the tool's text."""
-    from pydantic import AnyUrl
-
     async def interact(session):
         templates = await session.list_resource_templates()
-        res = await session.read_resource(AnyUrl("kvm-pilot://doctrine/recovery"))
+        # A plain str URI: mcp 1.x coerces it to AnyUrl, 2.x requires the str (#241).
+        res = await session.read_resource("kvm-pilot://doctrine/recovery")
         tool = await session.call_tool("doctrine", {"topic": "recovery"})
         return templates, res, tool
 
     templates, res, tool = run_session(server_env(config_file), interact)
     assert any(
-        t.uriTemplate == "kvm-pilot://doctrine/{topic}"
-        for t in templates.resourceTemplates
+        wire(t, "uriTemplate") == "kvm-pilot://doctrine/{topic}"
+        for t in wire(templates, "resourceTemplates")
     )
     assert res.contents[0].text == result_json(tool)["text"]
 
@@ -411,7 +438,7 @@ def test_power_errors_without_operator_gate(config_file):
         return await session.call_tool("power", {"action": "off", "confirm": True})
 
     result = run_session(server_env(config_file), interact)
-    assert result.isError is False
+    assert is_error(result) is False
     payload = result_json(result)
     assert payload["approved"] is False
     assert payload["outcome"] == "gate_closed"
@@ -446,7 +473,7 @@ def test_amt_enable_consent_off_needs_dedicated_gate(config_file):
     # ALLOW_CONFIG on, but the dedicated consent-off gate is NOT — must still refuse.
     env = server_env(config_file, KVM_PILOT_MCP_ALLOW_CONFIG="1")
     result = run_session(env, interact)
-    assert result.isError is True
+    assert is_error(result) is True
     text = result.content[0].text.lower()
     assert "consent" in text and "gate" in text
 
@@ -467,7 +494,7 @@ def test_power_executes_on_fake_driver_when_fully_gated(config_file):
 
     env = server_env(config_file, KVM_PILOT_MCP_ALLOW_POWER="1")
     result = run_session(env, interact)
-    assert result.isError is False
+    assert is_error(result) is False
     text = result.content[0].text
     assert "requested on host 'fakebox.local' (fake)" in text
     assert "DRY-RUN" not in text
@@ -693,7 +720,7 @@ def test_allowlist_refuses_profile_not_listed(config_file):
 
     env = server_env(config_file, KVM_PILOT_MCP_PROFILES="fakebox")
     result = run_session(env, interact)
-    assert result.isError is True
+    assert is_error(result) is True
     assert "allowlist" in result.content[0].text
 
 
@@ -702,7 +729,7 @@ def test_allowlist_allows_listed_profile(config_file):
         return await session.call_tool("info", {})  # default profile 'fakebox' is listed
 
     env = server_env(config_file, KVM_PILOT_MCP_PROFILES="fakebox")
-    assert run_session(env, interact).isError is False
+    assert is_error(run_session(env, interact)) is False
 
 
 # -- mouse + generation-keyed staleness (#124) -------------------------------
@@ -713,7 +740,7 @@ def test_snapshot_returns_frame_ref(config_file):
         return await session.call_tool("snapshot", {})
 
     result = run_session(server_env(config_file), interact)
-    assert result.isError is False
+    assert is_error(result) is False
     payload = json.loads(result.content[0].text)
     assert payload["host"] == "fakebox.local"
     assert payload["frame_ref"].startswith("fakebox.local:0:")
@@ -896,7 +923,7 @@ def test_ssh_reachable_errors_when_not_configured(config_file):
         return await session.call_tool("ssh_reachable", {})
 
     result = run_session(server_env(config_file), interact)
-    assert result.isError is True
+    assert is_error(result) is True
     assert "not configured" in result.content[0].text
 
 
@@ -919,7 +946,7 @@ def test_appliance_status_errors_when_not_enabled(config_file):
         return await session.call_tool("appliance_status", {})
 
     result = run_session(server_env(config_file), interact)
-    assert result.isError is True
+    assert is_error(result) is True
     assert "not enabled" in result.content[0].text
 
 
@@ -930,7 +957,7 @@ def test_access_paths_reports_the_lockout_view(config_file):
         return await session.call_tool("access_paths", {})
 
     result = run_session(server_env(config_file), interact)
-    assert result.isError is False
+    assert is_error(result) is False
     parsed = result_json(result)
     assert "paths" in parsed and "summary" in parsed
     assert any(p["path"] == "kvmd-rest" for p in parsed["paths"])
@@ -945,7 +972,7 @@ def test_ssh_reachable_host_override_unblocks_unconfigured_profile(config_file):
         return await session.call_tool("ssh_reachable", {"host": "127.0.0.1"})
 
     result = run_session(server_env(config_file), interact)
-    assert result.isError is False  # no longer "not configured"
+    assert is_error(result) is False  # no longer "not configured"
     parsed = result_json(result)
     assert parsed["target"] == "127.0.0.1"
     assert "reachable" in parsed
@@ -959,7 +986,7 @@ def test_ssh_reachable_rejects_hyphen_host(config_file):
         return await session.call_tool("ssh_reachable", {"host": "-oProxyCommand=touch /tmp/x"})
 
     result = run_session(server_env(config_file), interact)
-    assert result.isError is True
+    assert is_error(result) is True
     assert "misparsed" in result.content[0].text
 
 
@@ -970,7 +997,7 @@ def test_ssh_discover_requires_confirm(config_file):
         return await session.call_tool("ssh_discover", {"cidr": "10.0.0.0/30"})
 
     result = run_session(server_env(config_file), interact)
-    assert result.isError is True
+    assert is_error(result) is True
     assert "not confirmed" in result.content[0].text
 
 
@@ -982,7 +1009,7 @@ def test_dry_run_marks_results_and_skips_the_command(config_file):
 
     env = server_env(config_file, KVM_PILOT_MCP_ALLOW_POWER="1", KVM_PILOT_MCP_DRY_RUN="1")
     power, info = run_session(env, interact)
-    assert power.isError is False
+    assert is_error(power) is False
     assert "DRY-RUN" in power.content[0].text
     assert "fakebox.local" in power.content[0].text
     # Read-only results carry the dry-run flag too.
@@ -1001,7 +1028,7 @@ def test_read_only_tools_report_provenance(config_file):
     assert parsed["driver"] == "fake"
     # Regression for the get_atx_state AttributeError: power_state must work on
     # a driver without PiKVM's ATX detail endpoint.
-    assert state.isError is False
+    assert is_error(state) is False
     assert result_json(state)["powered_on"] is False
 
 
@@ -1036,7 +1063,7 @@ def test_logs_tool_returns_text_with_provenance(config_file):
         return await session.call_tool("logs", {"seek": 60})
 
     result = run_session(server_env(config_file), interact)
-    assert result.isError is False
+    assert is_error(result) is False
     parsed = result_json(result)
     assert parsed["host"] == "fakebox.local"
     assert parsed["driver"] == "fake"
@@ -1053,7 +1080,7 @@ def test_list_virtual_media_inventories_msd_storage(config_file):
         return await session.call_tool("list_virtual_media", {})
 
     result = run_session(server_env(config_file), interact)
-    assert result.isError is False
+    assert is_error(result) is False
     parsed = result_json(result)
     assert parsed["host"] == "fakebox.local"
     assert "online" in parsed["msd"] and "storage" in parsed["msd"]
@@ -1065,11 +1092,11 @@ def test_snapshot_returns_a_real_image(config_file):
         return await session.call_tool("snapshot", {})
 
     result = run_session(server_env(config_file), interact)
-    assert result.isError is False
+    assert is_error(result) is False
     types = [c.type for c in result.content]
     assert "image" in types
     image = result.content[types.index("image")]
-    assert image.mimeType == "image/jpeg"
+    assert wire(image, "mimeType") == "image/jpeg"
     assert "fakebox.local" in result.content[0].text  # provenance note
 
 
@@ -1108,7 +1135,7 @@ def test_classify_screen_supports_local_backend(config_file):
         KVM_PILOT_VISION_MODEL="test-vlm",
     )
     result = run_session(env, interact)
-    assert result.isError is False
+    assert is_error(result) is False
     parsed = result_json(result)
     assert parsed["phase"] == "power_off"
     assert parsed["host"] == "fakebox.local"
@@ -1125,7 +1152,7 @@ def test_classify_screen_cheap_gate_works_without_any_key(config_file):
 
     # server_env strips ANTHROPIC_API_KEY; the default backend is anthropic.
     result = run_session(server_env(config_file), interact)
-    assert result.isError is False
+    assert is_error(result) is False
     parsed = result_json(result)
     assert parsed["mode"] == "server"
     assert parsed["phase"] == "power_off"
@@ -1138,11 +1165,10 @@ def test_classify_fallback_returns_image_and_prompt():
     before the backend), so the fallback can't be reached end-to-end there."""
     from types import SimpleNamespace
 
-    from mcp.server.fastmcp import Image
-
     from kvm_pilot.drivers import FakeDriver
     from kvm_pilot.errors import VisionError
     from kvm_pilot.mcp import server
+    from kvm_pilot.mcp._sdk import Image
 
     cfg = SimpleNamespace(host="fakebox.local", driver="fake")
     out = server._classify_fallback(
@@ -1165,10 +1191,9 @@ def test_classify_fallback_raises_when_snapshot_also_fails():
     """No image means nothing to delegate -> a clean tool error, not a fallback."""
     from types import SimpleNamespace
 
-    from mcp.server.fastmcp.exceptions import ToolError
-
     from kvm_pilot.errors import VisionError
     from kvm_pilot.mcp import server
+    from kvm_pilot.mcp._sdk import ToolError
 
     class NoSnapshot:
         def snapshot(self):
@@ -1194,7 +1219,7 @@ def test_wait_for_state_reaches_cheap_phase_without_vision_key(config_file):
 
     # server_env strips ANTHROPIC_API_KEY; the default backend is anthropic.
     result = run_session(server_env(config_file), interact)
-    assert result.isError is False
+    assert is_error(result) is False
     parsed = result_json(result)
     assert parsed["reached"] is True
     assert parsed["phase"] == "power_off"
@@ -1212,7 +1237,7 @@ def test_wait_for_state_timeout_returns_same_path_result(config_file):
         return await session.call_tool("wait_for_state", {"phase": "desktop", "timeout": 1})
 
     result = run_session(server_env(config_file), interact)
-    assert result.isError is False
+    assert is_error(result) is False
     parsed = result_json(result)
     assert parsed["reached"] is False
     assert parsed["waited_for"] == "desktop"
@@ -1229,7 +1254,7 @@ def test_wait_for_state_rejects_unknown_phase_fast(config_file):
         return await session.call_tool("wait_for_state", {"phase": "dekstop", "timeout": 300})
 
     result = run_session(server_env(config_file), interact)
-    assert result.isError is True
+    assert is_error(result) is True
     text = result.content[0].text
     assert "Valid phases" in text
     assert "desktop" in text
@@ -1249,7 +1274,7 @@ def test_wait_for_state_emits_progress(config_file):
         )
 
     result = run_session(server_env(config_file), interact)
-    assert result.isError is False
+    assert is_error(result) is False
     assert updates
     progress, total, message = updates[0]
     assert total == 1.0
@@ -1306,10 +1331,9 @@ def test_wait_for_state_keyless_refuses_vlm_phase_end_to_end(config_file, monkey
     phase must raise the typed refusal — NOT fall through and burn the timeout.
     Kills the 'delete the gate block' mutation the subprocess fake can't (it is
     BootProgress-capable, so end-to-end it can wait for any phase keylessly)."""
-    from mcp.server.fastmcp.exceptions import ToolError
-
     import kvm_pilot.config as _cfg
     from kvm_pilot.mcp import server
+    from kvm_pilot.mcp._sdk import ToolError
     from kvm_pilot.vision.anthropic import AnthropicBackend
     monkeypatch.setattr(_cfg, "DEFAULT_CONFIG_PATH", config_file)
     monkeypatch.setenv("KVM_PILOT_PROFILE", "fakebox")
@@ -1348,9 +1372,8 @@ def test_wait_timeout_clamped_to_cap_and_rejects_nonpositive():
     """The server-side ceiling without a 300 s test run: in-range values pass
     through, anything above is clamped to the cap; non-positive and non-finite
     (NaN compares False against <= 0) are refused."""
-    from mcp.server.fastmcp.exceptions import ToolError
-
     from kvm_pilot.mcp import server
+    from kvm_pilot.mcp._sdk import ToolError
 
     assert server._clamp_timeout(10) == 10
     assert server._clamp_timeout(1e6) == 300.0
@@ -1369,7 +1392,7 @@ def test_video_tools_error_cleanly_on_capability_less_driver(config_file):
         return await session.call_tool("snapshot", {"profile": "bmc"})
 
     result = run_session(server_env(config_file), interact)
-    assert result.isError is True
+    assert is_error(result) is True
     text = result.content[0].text
     assert "redfish" in text
     assert "video" in text
@@ -1406,7 +1429,7 @@ def test_support_matrix_unknown_combo_returns_empty_cleanly(config_file):
         return await session.call_tool("support_matrix", {"vendor": "nonexistent"})
 
     result = run_session(server_env(config_file), interact)
-    assert result.isError is False
+    assert is_error(result) is False
     assert result_json(result)["combos"] == []
 
 
@@ -1716,7 +1739,7 @@ def test_set_boot_device_executes_on_fake(config_file):
 
     env = server_env(config_file, KVM_PILOT_MCP_ALLOW_CONFIG="1")
     result = run_session(env, interact)
-    assert result.isError is False
+    assert is_error(result) is False
     text = result.content[0].text
     assert '"target": "pxe"' in text and '"enabled": "Once"' in text
 
@@ -1726,7 +1749,7 @@ def test_boot_options_is_read_only(config_file):
         return await session.call_tool("boot_options", {})
 
     result = run_session(server_env(config_file), interact)
-    assert result.isError is False
+    assert is_error(result) is False
     assert '"enabled": "Disabled"' in result.content[0].text
 
 
@@ -1757,7 +1780,7 @@ def test_wake_requires_mac(config_file):
         return await session.call_tool("wake", {"confirm": True})
 
     result = run_session(server_env(config_file, KVM_PILOT_MCP_ALLOW_POWER="1"), interact)
-    assert result.isError is True
+    assert is_error(result) is True
     assert "no MAC" in result.content[0].text
 
 
@@ -1767,6 +1790,6 @@ def test_wake_dry_run_reports_without_sending(config_file):
 
     env = server_env(config_file, KVM_PILOT_MCP_ALLOW_POWER="1", KVM_PILOT_MCP_DRY_RUN="1")
     result = run_session(env, interact)
-    assert result.isError is False
+    assert is_error(result) is False
     text = result.content[0].text
     assert '"dry_run": true' in text and "aa:bb:cc:dd:ee:ff" in text

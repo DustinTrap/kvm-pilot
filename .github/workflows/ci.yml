@@ -66,7 +66,9 @@ jobs:
     # leaks pre-releases into the transitive dep resolution). The `test`/`security`
     # jobs use editable installs *without* `--pre`, so they can't catch a dependency
     # that only breaks under a real `--pre` resolve — e.g. #110, where `--pre` pulled
-    # the mcp 2.x beta and the bundled server failed to import out of the box.
+    # the (then unsupported) mcp 2.x beta and the bundled server failed to import out
+    # of the box. Both mcp majors are supported now (#241) — see the mcp-majors job,
+    # which pins each one explicitly; this job keeps covering whatever `--pre` picks.
     # Asserts the shipped MCP server + skill + console scripts actually work.
     runs-on: ubuntu-latest
     steps:
@@ -93,6 +95,36 @@ jobs:
           test -x /tmp/smoke/bin/kvm-pilot        # CLI console script
           test -x /tmp/smoke/bin/kvm-pilot-mcp    # MCP server console script
           /tmp/smoke/bin/kvm-pilot --version
+
+  mcp-majors:
+    # `mcp>=1.10,<3` spans two SDK majors that are NOT source-compatible: 2.x moved
+    # `mcp.server.fastmcp` -> `mcp.server.mcpserver` and renamed the model fields to
+    # snake_case (#241). The `test` job only ever resolves the newest allowed mcp, so
+    # it cannot catch a change that breaks the *older* major — and the shim exists
+    # precisely to keep both working. Pin each end of the range and run the MCP suite
+    # against it. If supporting 1.x stops being worth this job, raise the floor in
+    # pyproject and delete the leg — don't let it silently rot.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        mcp-version: ["mcp>=1.10,<2", "mcp>=2,<3"]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install with ${{ matrix.mcp-version }}
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e ".[dev,totp,ws]"
+          pip install "${{ matrix.mcp-version }}"   # pin the major under test
+          python -c "import importlib.metadata as m; print('mcp', m.version('mcp'))"
+      - name: Pytest (MCP surfaces)
+        run: pytest tests/test_mcp_server.py tests/test_mcp_sdk_shim.py tests/test_act.py
 
   redfish-integration:
     # Validates `--driver redfish` end-to-end against an external, DMTF-conformant

@@ -43,11 +43,10 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
-from mcp.server.fastmcp import Context
-from mcp.server.fastmcp.exceptions import ToolError
 from mcp.types import ClientCapabilities, ElicitationCapability
 from pydantic import BaseModel
 
+from kvm_pilot.mcp._sdk import Context, ToolError
 from kvm_pilot.safety import EffectClass
 
 # --------------------------------------------------------------------------- #

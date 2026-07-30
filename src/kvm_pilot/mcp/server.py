@@ -58,9 +58,6 @@ from importlib.resources import files
 from typing import TYPE_CHECKING, Literal, cast
 
 import anyio
-from mcp.server.fastmcp import Context, FastMCP, Image
-from mcp.server.fastmcp.exceptions import ToolError
-from mcp.types import ToolAnnotations
 
 from kvm_pilot import resolve_host
 from kvm_pilot.calibrate import (
@@ -80,6 +77,14 @@ from kvm_pilot.errors import (
 from kvm_pilot.errors import TimeoutError as KVMTimeoutError
 from kvm_pilot.health import RECOVERY_ORDER
 from kvm_pilot.mcp import act
+from kvm_pilot.mcp._sdk import (
+    Context,
+    Image,
+    MCPServer,
+    ToolError,
+    read_only_hint,
+    tool_annotations,
+)
 from kvm_pilot.safety import EffectClass, allow_all, deny_all, shortcut_effect
 from kvm_pilot.vision import (
     ALL_PHASES,
@@ -105,7 +110,7 @@ if TYPE_CHECKING:
         VirtualMedia,
     )
 
-mcp = FastMCP("kvm-pilot")
+mcp = MCPServer("kvm-pilot")
 _log = logging.getLogger("kvm_pilot.mcp")
 
 # Tool annotations (#195): every tool declares all four hints explicitly,
@@ -132,23 +137,23 @@ _log = logging.getLogger("kvm_pilot.mcp")
 #                    The _REMOTE variant may leave the operator's network
 #                    (mount by URL; filing a GitHub issue — which dedupes
 #                    against existing issues, hence idempotent).
-_READ = ToolAnnotations(
-    readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False
+_READ = tool_annotations(
+    read_only=True, destructive=False, idempotent=True, open_world=False
 )
-_READ_VISION = ToolAnnotations(
-    readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=True
+_READ_VISION = tool_annotations(
+    read_only=True, destructive=False, idempotent=True, open_world=True
 )
-_READ_VISION_WAIT = ToolAnnotations(
-    readOnlyHint=True, destructiveHint=False, idempotentHint=False, openWorldHint=True
+_READ_VISION_WAIT = tool_annotations(
+    read_only=True, destructive=False, idempotent=False, open_world=True
 )
-_DESTRUCTIVE = ToolAnnotations(
-    readOnlyHint=False, destructiveHint=True, idempotentHint=False, openWorldHint=False
+_DESTRUCTIVE = tool_annotations(
+    read_only=False, destructive=True, idempotent=False, open_world=False
 )
-_REVERSIBLE_WRITE = ToolAnnotations(
-    readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=False
+_REVERSIBLE_WRITE = tool_annotations(
+    read_only=False, destructive=False, idempotent=True, open_world=False
 )
-_REVERSIBLE_WRITE_REMOTE = ToolAnnotations(
-    readOnlyHint=False, destructiveHint=False, idempotentHint=True, openWorldHint=True
+_REVERSIBLE_WRITE_REMOTE = tool_annotations(
+    read_only=False, destructive=False, idempotent=True, open_world=True
 )
 
 _POWER_ACTIONS = {
@@ -197,8 +202,8 @@ def _apply_read_only_mode() -> None:
     if not _read_only_mode():
         return
     for tool in list(mcp._tool_manager.list_tools()):
-        ann = tool.annotations
-        if ann is None or ann.readOnlyHint is not True or tool.name in _READ_ONLY_MODE_EXCLUDED:
+        hint = read_only_hint(tool.annotations)
+        if hint is not True or tool.name in _READ_ONLY_MODE_EXCLUDED:
             mcp.remove_tool(tool.name)
 
 

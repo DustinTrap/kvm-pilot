@@ -14,9 +14,8 @@ import pytest
 
 pytest.importorskip("mcp")
 
-from mcp.server.fastmcp.exceptions import ToolError  # noqa: E402
-
 from kvm_pilot.mcp import act  # noqa: E402
+from kvm_pilot.mcp._sdk import ToolError  # noqa: E402
 from kvm_pilot.safety import EffectClass  # noqa: E402
 
 _ENV = (
