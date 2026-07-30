@@ -97,10 +97,14 @@ def test_shim_exports_every_symbol_the_server_uses():
 
 
 def test_shim_resolves_the_major_actually_installed():
-    """SDK_MAJOR must describe the installed mcp, not the branch that imported."""
-    import mcp.server
+    """SDK_MAJOR must describe the installed mcp, not the branch that imported.
 
-    has_v2 = hasattr(mcp.server, "mcpserver")
+    `find_spec` rather than `hasattr(mcp.server, "mcpserver")`: importing a
+    submodule binds it on its parent package, so the attribute check would be
+    reading the shim's own side effect back to itself."""
+    from importlib.util import find_spec
+
+    has_v2 = find_spec("mcp.server.mcpserver") is not None
     assert _sdk.SDK_MAJOR == (2 if has_v2 else 1)
 
 

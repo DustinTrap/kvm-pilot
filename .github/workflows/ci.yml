@@ -125,6 +125,11 @@ jobs:
           pip install -e ".[dev,totp,ws]"
           pip install "${{ matrix.mcp-version }}"   # pin the major under test
           python -c "import importlib.metadata as m; print('mcp', m.version('mcp'))"
+      - name: Mypy (types against this major)
+        # The `test` job type-checks against the newest allowed mcp only. The SDK
+        # renames are visible to mypy (annotation kwargs resolve to one major's
+        # field names), so an untyped-checked major is where that drift lands.
+        run: mypy src/kvm_pilot
       - name: Pytest (MCP surfaces)
         run: pytest tests/test_mcp_server.py tests/test_mcp_sdk_shim.py tests/test_act.py
 
