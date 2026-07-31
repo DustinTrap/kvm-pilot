@@ -6,6 +6,8 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.0b12] — 2026-07-31
+
 ### Added
 - **Support for both MCP SDK majors** (#241) — the dependency widens from
   `mcp>=1.10,<2` to `mcp>=1.17,<3`, so `pip install kvm-pilot` works whether the
