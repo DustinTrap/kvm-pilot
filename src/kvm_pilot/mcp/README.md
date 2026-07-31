@@ -3,8 +3,10 @@
 A local **stdio MCP server** that exposes a KVM device to MCP-capable agents
 (Claude Desktop, Claude Code, other agent hosts). It **ships in the wheel** —
 `pip install --pre kvm-pilot` installs it and the `kvm-pilot-mcp` launcher, pulling the
-[`mcp`](https://pypi.org/project/mcp/) SDK (`mcp>=1.10`) as a base dependency. The
-client/driver code stays stdlib-only; `mcp` is imported only in this subpackage.
+[`mcp`](https://pypi.org/project/mcp/) SDK (`mcp>=1.17,<3`) as a base dependency —
+**either SDK major works**, 1.x or 2.x (#241). The client/driver code stays
+stdlib-only; `mcp` is imported only in this subpackage, through one shim
+(`_sdk.py`) that resolves whichever major is installed.
 
 > ⚠️ **Beta.** The core read paths are live-verified on real hardware
 > (GL-RM1PE, beta maturity in the support matrix), but many device+capability

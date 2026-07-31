@@ -38,12 +38,20 @@ echo "UNTRACKED_NOT_IGNORED: $( [ -n "$UNTRACKED" ] && echo "$UNTRACKED" | wc -l
 [ -n "$UNTRACKED" ] && echo "$UNTRACKED" | sed 's/^/  /'
 
 UP="$(git rev-parse --abbrev-ref --symbolic-full-name '@{upstream}' 2>/dev/null || true)"
-if [ -n "$UP" ]; then
+# No configured upstream does NOT mean unpushed: `git push origin main` publishes
+# the branch without setting a tracking ref. Fall back to the matching remote
+# branch so the ahead/behind counts — the actual work-at-risk signal — still run.
+if [ -z "$UP" ] && git rev-parse --verify --quiet "origin/$BRANCH" >/dev/null 2>&1; then
+  UP="origin/$BRANCH"
+  echo "UPSTREAM: $UP (no tracking ref configured — compared against the remote branch)"
+elif [ -n "$UP" ]; then
   echo "UPSTREAM: $UP"
-  echo "UNPUSHED (ahead): $(git rev-list --count '@{upstream}..HEAD' 2>/dev/null || echo '?') commit(s)"
-  echo "BEHIND: $(git rev-list --count 'HEAD..@{upstream}' 2>/dev/null || echo '?') commit(s)"
+fi
+if [ -n "$UP" ]; then
+  echo "UNPUSHED (ahead): $(git rev-list --count "$UP..HEAD" 2>/dev/null || echo '?') commit(s)"
+  echo "BEHIND: $(git rev-list --count "HEAD..$UP" 2>/dev/null || echo '?') commit(s)"
 else
-  echo "UPSTREAM: (none — branch not pushed)"
+  echo "UPSTREAM: (none, and no origin/$BRANCH — this branch has never been pushed)"
 fi
 
 # Stray debug in the working diff (added lines only). Bare print( is legit in this

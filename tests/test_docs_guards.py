@@ -130,6 +130,28 @@ def test_install_command_consistent():
             )
 
 
+def test_mcp_readme_declares_the_real_mcp_dependency():
+    """The mcp/README states the SDK range it pulls — it must be pyproject's.
+
+    This one drifts silently: the README file itself need never change for the
+    claim to go false, because the fact it states lives in pyproject. It went
+    stale exactly that way when the floor moved off `mcp>=1.10` (#241), and the
+    README both ships in the wheel and mirrors to the wiki.
+    """
+    declared = re.search(
+        r'"(mcp(?:[><=!,.\d\s]+))"', (_ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    )
+    assert declared, "no mcp requirement found in pyproject [project].dependencies"
+    spec = declared.group(1).replace(" ", "")
+    text = _MCP_README.read_text(encoding="utf-8")
+    quoted = {m.replace(" ", "") for m in re.findall(r"`(mcp[><=!,.\d]+)`", text)}
+    assert quoted, "src/kvm_pilot/mcp/README.md no longer states the mcp SDK range"
+    assert spec in quoted, (
+        f"src/kvm_pilot/mcp/README.md says {sorted(quoted)} but pyproject "
+        f"declares `{spec}` — update the README to the shipped range"
+    )
+
+
 def test_mcp_readme_tool_table_matches_surface():
     """#232: the mcp/README `## Tools` table is hand-curated prose, but its
     row set and destructive-claims must match the live server surface —
