@@ -90,17 +90,18 @@ badly-covered area inside a large well-covered one.** At introduction:
 | Category | Coverage | Lines | Uncovered | Target |
 |---|---:|---:|---:|---:|
 | CLI | 86.89% | 1053 | 138 | 85% ✅ |
-| Vision | 87.87% | 371 | 45 | 90% |
-| Health & evidence | 89.76% | 1562 | 160 | 90% |
+| Health & evidence | 90.14% | 1562 | 154 | 90% ✅ |
 | Drivers | 90.58% | 3322 | 313 | 90% ✅ |
 | MCP server | 91.15% | 644 | 57 | 90% ✅ |
+| Vision | 91.91% | 371 | 30 | 90% ✅ |
 | In-band channels | 92.40% | 263 | 20 | 90% ✅ |
 | Core plumbing | 92.62% | 1003 | 74 | 90% ✅ |
 | **Safety & approval** | **98.21%** | 447 | 8 | **95%** ✅ |
-| **Blended (the gate)** | **90.61%** | **8675** | **815** | — |
+| **Blended (the gate)** | **90.85%** | **8675** | **794** | — |
 
-Six of eight categories are at or above target. The two that are not — Vision
-and Health & evidence — sit within ~2 points and are not currently a priority.
+**All eight categories are at or above target.** That is the state to hold, not
+a reason to raise every target — the next move is keeping it true through
+ordinary change, which is exactly what the ratchet is for.
 
 The targets are deliberately **not uniform** — see below.
 
@@ -189,8 +190,8 @@ The blended floor buys most of the value for a fraction of the machinery.
 |---|---|
 | Measured at introduction | 85.66% line coverage (7427 / 8670 lines, post-exclusion) |
 | Initial floor | 85.0 |
-| **Current** | **90.61%** (7860 / 8675) — subprocess measurement + approval-path, CLI and MCP-tool tests |
-| **Current floor** | **90.11** |
+| **Current** | **90.85%** (7881 / 8675) — subprocess measurement + approval-path, CLI, MCP-tool, vision and evidence tests |
+| **Current floor** | **90.35** |
 
 Measuring the subprocess costs about **8% wall clock** on the suite (236s vs
 218s locally) — worth it to stop 82 end-to-end tests reporting as nothing.
