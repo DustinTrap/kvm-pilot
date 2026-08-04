@@ -65,9 +65,14 @@ def test_cli_info_talks_to_external_reference(redfish_emulator_url, capsys):
 def test_cli_capabilities_match_the_bmc_set(redfish_emulator_url, capsys):
     rc = main(_cli(redfish_emulator_url, "capabilities"))
     assert rc == 0
-    out = capsys.readouterr().out
-    assert "power" in out and "system_info" in out
-    assert "hid" not in out and "video" not in out  # a BMC has neither
+    # Line 1 is the capability list; line 2 is the video-scope verdict (#210).
+    # Assert against the list alone — the scope line legitimately contains the
+    # word "video" ("video scope: none"), which a whole-output substring check
+    # reads as the capability being present.
+    caps, scope = capsys.readouterr().out.splitlines()
+    assert "power" in caps and "system_info" in caps
+    assert "hid" not in caps and "video" not in caps  # a BMC has neither
+    assert scope.startswith("video scope: none")
 
 
 def test_cli_capability_gate_fires_against_external_reference(redfish_emulator_url, capsys):
