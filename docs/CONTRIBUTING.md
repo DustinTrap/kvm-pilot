@@ -150,6 +150,11 @@ kvm-pilot --driver pikvm --host 127.0.0.1 --port 8080 --scheme http \
 > argv is visible to any local user via `ps` — use `--ask-passwd`,
 > `--passwd-file`, or a config profile (see [SECURITY.md](SECURITY.md)).
 
+It clones upstream's **`master`** by default and hands it to upstream's own
+`make run`, which starts a **privileged** container — pin it with
+`make kvmd-testenv KVMD_REF=<reviewed-sha>` if you want a reviewed tree
+rather than whatever master is today.
+
 Prerequisites are hard: upstream's recipe runs a privileged container,
 `sudo modprobe`s the `gpio_mockup` kernel module, and passes through a V4L2
 `/dev/video0` (a webcam, or `v4l2loopback-dkms`) — it exits early without

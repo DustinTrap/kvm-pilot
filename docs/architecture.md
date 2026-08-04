@@ -145,7 +145,8 @@ e.g. `power.off_hard`.)
       `KVMClient`/`PiKVMClient` stay as aliases. `GLKVMDriver` detects the GL
       "API disabled" 404 (→ `ApiDisabledError`), tracks per-firmware quirks, and
       carries GL's proprietary `/api/upgrade/*` flash layer.
-      (Moving `PiKVMDriver` out of `client.py` into `drivers/pikvm/` is deferred.)
+      (Moving `PiKVMDriver` itself out of `client.py` and into the existing
+      [`drivers/pikvm.py`](../src/kvm_pilot/drivers/pikvm.py) is deferred.)
 - [x] **Step 4 — drivers.** Four concrete non-PiKVM drivers have landed:
       `FakeDriver` ([`drivers/fake.py`](../src/kvm_pilot/drivers/fake.py)) — in-process,
       no hardware (#2) — `IpmiDriver` ([`drivers/ipmi.py`](../src/kvm_pilot/drivers/ipmi.py),
@@ -167,7 +168,10 @@ e.g. `power.off_hard`.)
       a subcommand needing a capability the device lacks fails cleanly (exit 1)
       instead of `AttributeError`, and the `redfish` path is validated end-to-end
       against an external DMTF-conformant emulator (sushy-tools) in CI.
-- [ ] **Step 5** — entry-point plugins + a "writing a driver" guide; per-driver deps as extras.
+- [ ] **Step 5** — entry-point plugins; per-driver deps as extras. (The
+      "writing a driver" half of this step **shipped**:
+      [plugin-development.md](plugin-development.md), enforced by
+      `tests/test_driver_contract.py`.)
 
 The zero-dependency stdlib core is preserved: the HTTP transport stays on
 urllib, and a heavier per-driver dependency would ship as an optional extra —

@@ -58,7 +58,11 @@ jobs:
             --batch "$RUNNER_TEMP/items.json" \
             --registry src/kvm_pilot/data/firmware_registry.json \
             --today "$(date +%F)" \
-            --results results.json || true
+            --results results.json || echo "ingest_failed=1" >> "$GITHUB_ENV"
+          # `|| ...` (not a bare failure) so the commenting step below still runs
+          # and tells each reporter what happened. The status is remembered and
+          # re-raised at the end of the job, instead of the old `|| true` which
+          # reported success for a run that ingested nothing (#243).
 
       - name: Comment each issue, label the ingested ones
         if: steps.collect.outputs.count != '0'
@@ -83,7 +87,10 @@ jobs:
           if git diff --quiet src/kvm_pilot/data/firmware_registry.json; then
             echo "no registry change this run"; exit 0
           fi
-          branch="firmware-ingest/$(date +%Y%m%d-%H)"
+          # Unique per run: the branch is force-pushed, and an hour-granular name
+          # meant a second run in the same hour (cron + a manual dispatch) silently
+          # discarded the first batch's un-merged PR content (#243).
+          branch="firmware-ingest/$(date +%Y%m%d-%H)-${GITHUB_RUN_ID}"
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -B "$branch"
@@ -101,3 +108,13 @@ jobs:
           else
             echo "::warning::Could not open PR automatically ($(cat pr_err.txt)). Branch '$branch' is pushed — open the PR by hand, or enable 'Allow GitHub Actions to create and approve pull requests' in Settings > Actions > General."
           fi
+
+      - name: Fail the run if the ingest itself failed
+        # Last, deliberately: a partial ingest may still have changed the registry,
+        # and that change must reach its PR before the job reports the failure.
+        if: always() && steps.collect.outputs.count != '0' && env.ingest_failed == '1'
+        run: |
+          echo "::error::the registry ingest exited non-zero — reporters were" \
+               "notified and any registry change was still PR'd, but this run" \
+               "did not complete cleanly"
+          exit 1

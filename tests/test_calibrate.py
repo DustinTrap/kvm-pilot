@@ -250,3 +250,53 @@ def test_static_screen_costs_a_bounded_number_of_frames():
     calibrate(kvm)
     # baseline + (STATIC_SAMPLES-1) gate frames + one per grid point + verify
     assert shots["n"] == STATIC_SAMPLES + len(GRID) + 1
+
+
+# -- store keying: a dual-resolution host keeps BOTH calibrations (#243) ----
+
+
+def _cal(host, resolution, scale=0.9):
+    return MouseCalibration(
+        host=host, resolution=resolution, scale_x=scale, offset_x=0.03,
+        scale_y=scale, offset_y=0.03, residual=0.005, verified_at=1.0,
+    )
+
+
+def test_two_resolutions_on_one_host_both_survive(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    save_calibration(_cal("box", "1920x1080", scale=0.9))
+    save_calibration(_cal("box", "1024x768", scale=0.8))
+    # Keying by host alone made the second overwrite the first, so switching the
+    # capture mode back forced a re-measure of a calibration already taken.
+    hd = load_calibration("box", "1920x1080")
+    vga = load_calibration("box", "1024x768")
+    assert hd is not None and hd.scale_x == pytest.approx(0.9)
+    assert vga is not None and vga.scale_x == pytest.approx(0.8)
+
+
+def test_mismatched_resolution_is_still_never_applied(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    save_calibration(_cal("box", "1920x1080"))
+    assert load_calibration("box", "800x600") is None  # stale, not silently reused
+
+
+def test_legacy_host_keyed_row_is_still_read(tmp_path, monkeypatch):
+    # Stores written before the per-resolution key must keep working.
+    import json
+
+    from kvm_pilot.calibrate import _store_path
+
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    path = _store_path()
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"box": _cal("box", "1920x1080").to_dict()}))
+    assert load_calibration("box", "1920x1080") is not None
+    assert load_calibration("box", "640x480") is None  # same staleness rule
+
+
+def test_bare_probe_finds_any_stored_resolution(tmp_path, monkeypatch):
+    # maybe_apply() probes "is this host calibrated at all?" before it knows the
+    # current resolution; that probe must not miss a per-resolution row.
+    monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
+    save_calibration(_cal("box", "1920x1080"))
+    assert load_calibration("box") is not None

@@ -388,7 +388,10 @@ def unregistered_docs() -> list[str]:
     registered = {p[0] for p in PAGES}
     candidates = sorted(
         p.relative_to(ROOT).as_posix()
-        for pattern in ("docs/*.md", "docs/analysis/*.md")
+        # The skill's reference pages are published docs too — they were outside
+        # the guard's globs, so a new one could silently never sync (#243).
+        for pattern in ("docs/*.md", "docs/analysis/*.md",
+                        "src/kvm_pilot/skill/references/*.md")
         for p in ROOT.glob(pattern)
     )
     return [p for p in candidates if p not in registered and p not in OPT_OUT]

@@ -238,22 +238,50 @@ def _load_store() -> dict:
         return {}
 
 
+def _store_key(host: str, resolution: str) -> str:
+    """Store key. The correction is a function of the negotiated video mode, so a
+    host that switches resolution has TWO valid calibrations, not one — keying by
+    host alone made the second overwrite the first and forced a re-measure on
+    every switch back (#243; the docstring and docs always promised
+    per-(host, resolution))."""
+    return f"{host}@{resolution}"
+
+
 def save_calibration(cal: MouseCalibration) -> Path:
     path = _store_path()
     path.parent.mkdir(parents=True, exist_ok=True)
     store = _load_store()
-    store[cal.host] = cal.to_dict()
+    store[_store_key(cal.host, cal.resolution)] = cal.to_dict()
+    # Drop any pre-#243 host-keyed row for this host: it is superseded, and
+    # leaving it behind would shadow nothing but would linger forever.
+    store.pop(cal.host, None)
     path.write_text(json.dumps(store, indent=2, sort_keys=True))
     return path
 
 
 def load_calibration(host: str, resolution: str | None = None) -> MouseCalibration | None:
-    """Stored correction for ``host``, or None.
+    """Stored correction for ``host`` at ``resolution``, or None.
 
     A stored row for a *different* resolution is stale (the skew is a function
-    of the negotiated mode) and is treated as absent, never applied.
+    of the negotiated mode) and is treated as absent, never applied. Rows written
+    before the store was keyed per-resolution are still read (host key), and are
+    subject to the same staleness check.
     """
-    row = _load_store().get(host)
+    store = _load_store()
+    row = None
+    if resolution is not None:
+        row = store.get(_store_key(host, resolution))
+    if not isinstance(row, dict):
+        # No resolution given (a bare "is this host calibrated at all?" probe),
+        # or only a legacy host-keyed row exists.
+        row = store.get(host)
+    if not isinstance(row, dict) and resolution is None:
+        # Any resolution's row answers the bare probe.
+        row = next(
+            (v for k, v in sorted(store.items())
+             if isinstance(v, dict) and k.startswith(f"{host}@")),
+            None,
+        )
     if not isinstance(row, dict):
         return None
     try:

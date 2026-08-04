@@ -3,6 +3,12 @@ COMPOSE ?= docker compose -f compose.yaml
 PYTEST ?= .venv/bin/pytest
 REDFISH_URL ?= http://127.0.0.1:8000
 KVMD_DIR ?= .kvmd-testenv
+# Upstream branch for `make kvmd-testenv`. Deliberately a moving ref, not a
+# pinned SHA: the point of the testenv is driving the CURRENT kvmd API, and a
+# frozen ref quietly stops testing what users run. The tradeoff is real —
+# upstream's own `make run` starts a PRIVILEGED container from whatever this
+# names — so it is opt-in, Linux-only, and overridable: `make kvmd-testenv
+# KVMD_REF=<reviewed-sha>` pins it when you want reproducibility (#243).
 KVMD_REF ?= master
 
 .PHONY: help emulators emulators-down emulators-logs integration kvmd-testenv

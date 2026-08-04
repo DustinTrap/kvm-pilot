@@ -259,10 +259,6 @@ implement `video` + `hid`**, closing the seam Redfish leaves open.
 
 **Live-validated on a Dell Latitude 5411 (AMT 14.1.67)** — WS-Man power / info /
 single-use boot, remote SOL + KVM enablement, and a **1920×1080 BIOS/POST
-screenshot over KVM redirection** all exercised on real hardware — plus 56 unit
-tests over pure-stdlib WS-Man and RFB emulators (DES FIPS-46-3 vector; ZRLE
-**Live-validated on a Dell Latitude 5411 (AMT 14.1.67)** — WS-Man power / info /
-single-use boot, remote SOL + KVM enablement, and a **1920×1080 BIOS/POST
 screenshot over KVM redirection** all exercised on real hardware (in the run
 ledger, derived maturity **beta**) — plus 56 unit tests over pure-stdlib WS-Man
 and RFB emulators (DES FIPS-46-3 vector; ZRLE tile-decode vectors). One run on

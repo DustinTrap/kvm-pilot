@@ -130,15 +130,33 @@ jobs:
           jq --arg v "$V" '.version = $v | .packages[].version = $v' server.json > server.json.tmp
           mv server.json.tmp server.json
           jq -r '"Publishing \(.name) \(.version)"' server.json
-      - name: Install mcp-publisher
+      - name: Install cosign (to verify the mcp-publisher release)
+        uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
+      - name: Install mcp-publisher (signature-verified)
+        env:
+          MCP_PUBLISHER_VERSION: v1.8.0
         run: |
           set -euo pipefail
+          # This job holds `id-token: write` — an unverified binary here could mint
+          # an OIDC token and publish a malicious registry entry under our name.
+          # So: download the release asset AND its sigstore bundle, and verify the
+          # signature against the upstream release workflow's identity before the
+          # binary is ever executed (#243).
+          #
           # Release assets use Go arch names (amd64/arm64), not uname's
           # x86_64/aarch64 — map them or the download 404s (b3 post-mortem).
           ARCH="$(uname -m)"
           case "$ARCH" in x86_64) ARCH=amd64 ;; aarch64) ARCH=arm64 ;; esac
-          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/download/v1.8.0/mcp-publisher_$(uname -s | tr '[:upper:]' '[:lower:]')_${ARCH}.tar.gz" \
-            | tar xz mcp-publisher
+          OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+          BASE="https://github.com/modelcontextprotocol/registry/releases/download/${MCP_PUBLISHER_VERSION}"
+          ASSET="mcp-publisher_${OS}_${ARCH}.tar.gz"
+          curl -fsSL -o "$ASSET" "${BASE}/${ASSET}"
+          curl -fsSL -o "${ASSET}.sigstore.json" "${BASE}/${ASSET}.sigstore.json"
+          cosign verify-blob "$ASSET" \
+            --bundle "${ASSET}.sigstore.json" \
+            --certificate-identity "https://github.com/modelcontextprotocol/registry/.github/workflows/release.yml@refs/tags/${MCP_PUBLISHER_VERSION}" \
+            --certificate-oidc-issuer "https://token.actions.githubusercontent.com"
+          tar xz mcp-publisher < "$ASSET"
           ./mcp-publisher --version
       - name: Publish to the MCP registry
         run: |
