@@ -97,7 +97,12 @@ badly-covered area inside a large well-covered one.** At introduction:
 | In-band channels | 92.40% | 263 | 20 | 90% ✅ |
 | Core plumbing | 92.62% | 1003 | 74 | 90% ✅ |
 | **Safety & approval** | **98.21%** | 447 | 8 | **95%** ✅ |
+| _Uncategorized_ | 100.00% | 10 | 0 | — |
 | **Blended (the gate)** | **90.85%** | **8675** | **794** | — |
+
+The rows sum to the blended total — *Uncategorized* is package `__init__`
+re-export wiring that matches no category pattern, and the gate reports it as
+`Other`. If that row ever grows, a category pattern is missing.
 
 **All eight categories are at or above target.** That is the state to hold, not
 a reason to raise every target — the next move is keeping it true through

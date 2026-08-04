@@ -170,3 +170,41 @@ def test_bundle_carries_no_vendored_wheels(tmp_path):
     with zipfile.ZipFile(out) as zf:
         assert not [n for n in zf.namelist() if n.endswith((".whl", ".so", ".pyd", ".dylib"))]
         assert out.stat().st_size < 100_000  # a manifest and a shim, nothing more
+
+
+def test_the_build_is_reproducible(tmp_path):
+    """Two builds of one commit must be byte-identical, or the artifact cannot be
+    compared across machines or re-verified after the fact. `writestr` stamps
+    "now" and `write` copies source mtime, so both need a fixed ZipInfo."""
+    import hashlib
+
+    mod = _build_script()
+    a = mod.build(tmp_path / "a.mcpb")
+    b = mod.build(tmp_path / "b.mcpb")
+    digest = lambda p: hashlib.sha256(p.read_bytes()).hexdigest()  # noqa: E731
+    assert digest(a) == digest(b)
+
+
+def test_the_bundle_is_attached_only_after_the_release_gate_passes():
+    """A bundle on the Release must have cleared the same checks as the wheel.
+    Attaching it from the build job would publish it before test/smoke-install
+    had spoken."""
+    import yaml
+
+    wf = yaml.safe_load(
+        (_ROOT / ".github" / "workflows" / "release.yml").read_text(encoding="utf-8")
+    )
+    jobs = wf["jobs"]
+    attach = [
+        name for name, job in jobs.items()
+        if any("gh release upload" in str(step.get("run", "")) for step in job.get("steps", []))
+    ]
+    assert attach, "no job attaches the bundle to the Release"
+    for name in attach:
+        needs = set(jobs[name].get("needs") or [])
+        assert {"build", "test", "smoke-install"} <= needs, (
+            f"{name} attaches the bundle without gating on build+test+smoke-install"
+        )
+    # And write access stays scoped to the attaching job.
+    assert "contents" not in (jobs["build"].get("permissions") or {}), \
+        "the build job must not hold contents:write"

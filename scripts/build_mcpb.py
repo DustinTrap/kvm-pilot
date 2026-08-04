@@ -32,6 +32,9 @@ ABOUT = ROOT / "src" / "kvm_pilot" / "__about__.py"
 # Everything in mcpb/ ships except editor/OS noise.
 EXCLUDE_NAMES = {"__pycache__", ".DS_Store"}
 
+# Fixed member timestamp (the zip epoch) so a build is reproducible.
+ZIP_EPOCH = (1980, 1, 1, 0, 0, 0)
+
 
 def package_version() -> str:
     m = re.search(r'__version__\s*=\s*"([^"]+)"', ABOUT.read_text(encoding="utf-8"))
@@ -57,20 +60,24 @@ def build(out: Path) -> Path:
     manifest_text, pyproject_text = stamp(version)
     out.parent.mkdir(parents=True, exist_ok=True)
 
-    # Deterministic member order so two builds of one commit are byte-comparable.
+    # Byte-identical for a given commit: sorted members, and a FIXED timestamp and
+    # mode on every entry. `writestr` would otherwise stamp "now" while `write`
+    # copies the source file's mtime, so two builds of one commit differed and the
+    # artifact could not be compared across machines or re-verified later.
     files = sorted(
         p for p in BUNDLE_DIR.rglob("*")
         if p.is_file() and not any(part in EXCLUDE_NAMES for part in p.parts)
     )
+    generated = {"manifest.json": manifest_text, "pyproject.toml": pyproject_text}
     with zipfile.ZipFile(out, "w", zipfile.ZIP_DEFLATED) as zf:
         for path in files:
             rel = path.relative_to(BUNDLE_DIR).as_posix()
-            if rel == "manifest.json":
-                zf.writestr(rel, manifest_text)
-            elif rel == "pyproject.toml":
-                zf.writestr(rel, pyproject_text)
-            else:
-                zf.write(path, rel)
+            info = zipfile.ZipInfo(rel, date_time=ZIP_EPOCH)
+            info.compress_type = zipfile.ZIP_DEFLATED
+            info.external_attr = 0o644 << 16
+            body = generated.get(rel)
+            data = body.encode("utf-8") if body is not None else path.read_bytes()
+            zf.writestr(info, data)
 
     names = zipfile.ZipFile(out).namelist()
     for required in ("manifest.json", "pyproject.toml", "server/main.py"):

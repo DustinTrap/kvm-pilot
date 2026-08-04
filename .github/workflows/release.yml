@@ -34,8 +34,6 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write   # attach the .mcpb bundle to the Release (#148); nothing else
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -87,13 +85,6 @@ jobs:
         with:
           name: mcpb
           path: bundle/
-      - name: Attach the bundle to the GitHub Release
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          TAG="${GITHUB_REF_NAME:-${{ github.event.release.tag_name }}}"
-          gh release upload "$TAG" bundle/*.mcpb --clobber --repo "$GITHUB_REPOSITORY"
 
   smoke-install:
     # Pre-publish gate: clean-room `pip install --pre` of the *exact* wheel we are
@@ -123,6 +114,30 @@ jobs:
           test -x /tmp/smoke/bin/kvm-pilot        # CLI console script
           test -x /tmp/smoke/bin/kvm-pilot-mcp    # MCP server console script
           /tmp/smoke/bin/kvm-pilot --version
+
+  # The bundle is a RELEASE ARTIFACT, so it must clear the same gate the wheel
+  # does. Building it in `build` and attaching there would put it on the Release
+  # before test/smoke-install had spoken — a user could download a bundle from a
+  # release whose validation failed. Own job, same `needs`, and `contents: write`
+  # scoped to it alone (the build job stays read-only).
+  publish-bundle:
+    needs: [build, test, smoke-install]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # attach the .mcpb to the Release; nothing else
+    steps:
+      - uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: mcpb
+          path: bundle/
+      - name: Attach the bundle to the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME:-${{ github.event.release.tag_name }}}"
+          ls -l bundle/
+          gh release upload "$TAG" bundle/*.mcpb --clobber --repo "$GITHUB_REPOSITORY"
 
   publish:
     needs: [build, test, smoke-install]
