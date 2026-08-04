@@ -281,6 +281,44 @@ both live-validated).
 | `virtual_media` | — | n/a | n/a | AMT IDE-R exists but is not implemented in this version. |
 | `sensors` / `logs` / `events` / `watchdog` / `firmware_update` | — | n/a | n/a | Not implemented for AMT. |
 
+## `ipmi` — IPMI 2.0 BMCs (pre-Redfish iDRAC / iLO / Supermicro)
+
+[`IpmiDriver`](../src/kvm_pilot/drivers/ipmi.py) (#62) — the driver for BMCs
+that predate Redfish, or whose Redfish service is disabled. It shells out to the
+system **`ipmitool -I lanplus`** rather than implementing RMCP+/RAKP from
+scratch: the same choice the SOL console and the SSH channel make, and the
+reason a heavyweight Python IPMI stack is not a dependency.
+
+**No video, ever.** IPMI has no framebuffer — `video_scope` is `none`. Firmware
+screens are reachable only as *text* over SOL, and only when the platform
+redirects its console to serial (server BIOSes usually do; laptops usually do
+not). For pixels on a BMC you need that vendor's own KVM, which is outside IPMI.
+
+**Live-validated end-to-end on a Dell PowerEdge R710 / iDRAC6 1.95**
+(2026-07-14) — every capability below was exercised on real hardware and is in
+the [run ledger](firmware-registry.md#maturity-derived-from-the-run-ledger-98),
+which derives **beta** maturity for that combo. Independently cross-checked
+against OpenIPMI **`ipmi_sim`** (#207), the same way Redfish is cross-checked
+against sushy-tools — an independent implementation catches spec assumptions
+that a driver and its own mocks can share.
+
+Structural set: `power, system_info, boot_config, sensors, logs, serial_console`.
+
+| Capability | CLI / MCP surface | Reliability | Testing level | Notes |
+|---|---|---|---|---|
+| `power` | `power`, `power-cycle` · MCP `power`, `power_state` | reliable | live:dell PowerEdge R710@iDRAC6 1.95 (beta) + ipmi_sim + mock | `chassis power on/off/cycle/reset`. Verified live: `power_off_hard`→OFF, `power_on`→ON, each confirmed by read-back. Unlike the GL ATX path, the power *state* here is trustworthy. |
+| `system_info` | `info` · MCP `info` | reliable | live (as above) | `mc info` + FRU. **Model comes from FRU Board Product, not `localhost`** — a real-hardware fix (#62); the naive field made ledger rows read `fake/fake`. |
+| `boot_config` | `boot-device` · MCP `boot_options`, `set_boot_device` | reliable | live (as above) | `chassis bootdev`. Verified live: pxe-once, hdd-persistent, and clear-to-none all round-trip. IPMI has **no `usb` selector** — `floppy` is its removable-media target and is what a read reports (#243). |
+| `sensors` | `sensors` · MCP — | reliable | live (as above) | `sdr elist` — 105 rows on the R710 (e.g. Ambient Temp 24 °C). Empty on a stock `ipmi_sim`, which models no device SDRs. |
+| `logs` | `logs` · MCP `logs` | reliable | live (as above) | `sel list` — ~150 entries / 13 KB on the R710. The BMC event log, not an OS log. |
+| `serial_console` | `console` (CLI only) | conditional | live (as above) | `ipmitool sol activate` over a PTY. Captured a **full BIOS boot and the F11 boot menu** on the R710 — the pre-boot text path that replaces video on a BMC. **iDRAC6 SOL is COM2 (`ttyS1`)**; text-only, so a graphical installer is not drivable this way. |
+| `video` / `hid` / `virtual_media` | — | n/a | n/a | Not in IPMI. Use the vendor's own KVM, or an `amt`/`redfish` path where available. |
+| `firmware_update` / `events` / `watchdog` | — | n/a | n/a | Not implemented for IPMI. `watchdog` is specified by IPMI and is the natural next capability (#28). |
+
+> **Prerequisite:** `ipmitool` must be on `PATH` — the driver reports a clear
+> `CapabilityError` naming the package if it is missing, rather than failing
+> obscurely at the first command.
+
 ## `fake` — in-process test double (no hardware)
 
 [`FakeDriver`](../src/kvm_pilot/drivers/fake.py) implements the capability
