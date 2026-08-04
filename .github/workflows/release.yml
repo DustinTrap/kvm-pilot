@@ -34,6 +34,8 @@ jobs:
 
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write   # attach the .mcpb bundle to the Release (#148); nothing else
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -56,10 +58,42 @@ jobs:
             || { echo "::error::No wheel for version ${V} — release tag disagrees with src/kvm_pilot/__about__.py"; exit 1; }
           ls dist/ | grep -qF "kvm_pilot-${V}.tar.gz" \
             || { echo "::error::No sdist for version ${V} — release tag disagrees with src/kvm_pilot/__about__.py"; exit 1; }
+      # The one-click Claude Desktop bundle (#148). Built into bundle/, NOT
+      # dist/: the publish job uploads everything in dist/ to PyPI, and a .mcpb
+      # sitting there would break that upload. Built after the version check so
+      # a tag/version disagreement fails before we produce a bundle claiming to
+      # install something that was never published.
+      - name: Build the MCP Bundle (.mcpb)
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME:-${{ github.event.release.tag_name }}}"
+          V="${TAG#v}"
+          python scripts/build_mcpb.py --out "bundle/kvm-pilot-${V}.mcpb"
+          python - "bundle/kvm-pilot-${V}.mcpb" "$V" <<'PYEOF'
+          import json, sys, tomllib, zipfile
+          bundle, want = sys.argv[1], sys.argv[2]
+          with zipfile.ZipFile(bundle) as zf:
+              manifest = json.loads(zf.read("manifest.json"))
+              deps = tomllib.loads(zf.read("pyproject.toml").decode())["project"]["dependencies"]
+          assert manifest["version"] == want, f"manifest {manifest['version']} != tag {want}"
+          assert deps == [f"kvm-pilot=={want}"], f"bundle pins {deps}, tag says {want}"
+          print(f"bundle OK: v{want}, pins {deps[0]}")
+          PYEOF
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: dist
           path: dist/
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: mcpb
+          path: bundle/
+      - name: Attach the bundle to the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME:-${{ github.event.release.tag_name }}}"
+          gh release upload "$TAG" bundle/*.mcpb --clobber --repo "$GITHUB_REPOSITORY"
 
   smoke-install:
     # Pre-publish gate: clean-room `pip install --pre` of the *exact* wheel we are

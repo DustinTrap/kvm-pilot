@@ -35,6 +35,31 @@ then restart the Claude Code session so it loads (`--dry-run` previews,
 
 ## 2. Enable the MCP server in your agent
 
+### Claude Desktop: install the bundle (no terminal needed)
+
+Download **`kvm-pilot-<version>.mcpb`** from the
+[latest release](https://github.com/DustinTrap/kvm-pilot/releases/latest) and
+open it — Claude Desktop installs it and shows a settings panel. You do not need
+`pip` for this path; the bundle declares its own dependencies and Desktop
+resolves them.
+
+**Everything that can change a machine ships OFF.** Reading the screen, health
+checks and inventory work immediately. Power, keyboard/mouse, virtual media, SSH
+and configuration changes each have their own switch, all off, and every such
+call still asks for your approval at the moment it happens. **Dry run is on by
+default**, so even a capability you enable will rehearse rather than act until
+you turn that off — two deliberate steps between a fresh install and something
+that moves.
+
+Fill in either a **config profile** (if you already have
+`~/.config/kvm-pilot/config.toml`) *or* the device address, username and
+password. The password is stored in your OS keychain.
+
+> The bundle pins one exact kvm-pilot version, so it is a reproducible artifact
+> rather than "whatever PyPI had that day". Upgrade by installing a newer bundle.
+
+### Everything else: register the launcher
+
 The `pip install` above provides the `kvm-pilot-mcp` launcher; your agent still
 has to be told to load it. You can just ask your agent — e.g. *"load the kvm-pilot
 MCP server that pip installed and walk me through enabling it"* — or register it

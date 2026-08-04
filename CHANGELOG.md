@@ -7,6 +7,19 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **One-click install for Claude Desktop** (#148) — releases now attach a
+  `kvm-pilot-<version>.mcpb` bundle. Open it and Desktop installs the MCP server
+  with no `pip`, no JSON editing. **Every destructive capability ships off**, and
+  dry-run ships **on**, so a fresh install rehearses rather than acts until two
+  deliberate switches are flipped; each destructive call still asks for approval
+  at the moment it happens. The bundle uses the MCPB `uv` server type and pins one
+  exact kvm-pilot version, so it carries no vendored wheels (kvm-pilot's compiled
+  dependencies are per-platform) and installs a reproducible version rather than
+  whatever PyPI had that day. Guard tests fail the build if any effect gate
+  appears without defaulting off, if a gate is declared but not wired into the
+  server environment, or if the pin drifts from `__about__.py`.
+
+### Added
 - **Pre-boot video is now a first-class dimension** (#210). `video` says an
   interface can produce a screenshot; it never said whether BIOS/POST/GRUB would
   be *in* it — and an HDMI-capture KVM is **blind below the OS on a laptop**,

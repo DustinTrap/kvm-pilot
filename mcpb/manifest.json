@@ -1,0 +1,161 @@
+{
+  "manifest_version": "0.3",
+  "name": "kvm-pilot",
+  "display_name": "kvm-pilot",
+  "version": "0.1.0b12",
+  "description": "Smart hands for your AI agents: gated, verified, audited control of IP-KVMs and BMCs.",
+  "long_description": "Drive bare-metal machines from Claude Desktop — read the screen, press keys, mount install media, and control power across IP-KVMs (PiKVM, GL.iNet Comet, BliKVM) and BMCs (Redfish, IPMI, Intel AMT).\n\n**Every destructive capability ships OFF.** Reading the screen, health checks and inventory work immediately; anything that can change a machine's state stays disabled until you deliberately enable it below, and each such call still asks for your approval at the moment it happens. Dry-run is on by default, so even an enabled capability rehearses rather than acts until you turn it off.",
+  "author": {
+    "name": "DustinTrap",
+    "url": "https://github.com/DustinTrap"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/DustinTrap/kvm-pilot"
+  },
+  "homepage": "https://github.com/DustinTrap/kvm-pilot",
+  "documentation": "https://github.com/DustinTrap/kvm-pilot/wiki",
+  "support": "https://github.com/DustinTrap/kvm-pilot/issues",
+  "license": "MIT",
+  "keywords": ["kvm", "bmc", "ipmi", "redfish", "amt", "pikvm", "bare-metal", "infrastructure"],
+  "server": {
+    "type": "uv",
+    "entry_point": "server/main.py",
+    "mcp_config": {
+      "command": "uv",
+      "args": ["run", "--directory", "${__dirname}", "server/main.py"],
+      "env": {
+        "KVM_PILOT_PROFILE": "${user_config.profile}",
+        "KVM_PILOT_HOST": "${user_config.host}",
+        "KVM_PILOT_USER": "${user_config.username}",
+        "KVM_PILOT_PASSWD": "${user_config.password}",
+        "KVM_PILOT_MCP_READ_ONLY": "${user_config.read_only}",
+        "KVM_PILOT_MCP_DRY_RUN": "${user_config.dry_run}",
+        "KVM_PILOT_MCP_ALLOW_POWER": "${user_config.allow_power}",
+        "KVM_PILOT_MCP_ALLOW_HID": "${user_config.allow_hid}",
+        "KVM_PILOT_MCP_ALLOW_MEDIA": "${user_config.allow_media}",
+        "KVM_PILOT_MCP_ALLOW_SSH": "${user_config.allow_ssh}",
+        "KVM_PILOT_MCP_ALLOW_APPLIANCE": "${user_config.allow_appliance}",
+        "KVM_PILOT_MCP_ALLOW_CONFIG": "${user_config.allow_config}",
+        "KVM_PILOT_MCP_ALLOW_EXTERNAL_WRITE": "${user_config.allow_external_write}",
+        "KVM_PILOT_MCP_ALLOW_CONSENT_OFF": "${user_config.allow_consent_off}",
+        "ANTHROPIC_API_KEY": "${user_config.anthropic_api_key}"
+      }
+    }
+  },
+  "user_config": {
+    "profile": {
+      "type": "string",
+      "title": "Config profile",
+      "description": "Name of a [hosts.NAME] profile in ~/.config/kvm-pilot/config.toml. Use this instead of the address/username/password fields below if you already have a config file.",
+      "required": false,
+      "default": ""
+    },
+    "host": {
+      "type": "string",
+      "title": "Device address",
+      "description": "The KVM appliance or BMC address — NOT the managed server behind it. Leave blank if you set a profile above.",
+      "required": false,
+      "default": ""
+    },
+    "username": {
+      "type": "string",
+      "title": "Device username",
+      "description": "Username for the KVM/BMC itself.",
+      "required": false,
+      "default": ""
+    },
+    "password": {
+      "type": "string",
+      "title": "Device password",
+      "description": "Password for the KVM/BMC. Stored in your OS keychain, never written to a config file by this bundle.",
+      "sensitive": true,
+      "required": false,
+      "default": ""
+    },
+    "read_only": {
+      "type": "boolean",
+      "title": "Read-only mode (safest)",
+      "description": "Register ONLY read-only tools. Nothing that can change a machine is even present. Recommended for first contact; turn it off when you are ready to act.",
+      "required": false,
+      "default": false
+    },
+    "dry_run": {
+      "type": "boolean",
+      "title": "Dry run (rehearse, do not act)",
+      "description": "Destructive calls are logged and answered as if they ran, but nothing is sent to the device. Leave this ON until you have watched it do the right thing.",
+      "required": false,
+      "default": true
+    },
+    "allow_power": {
+      "type": "boolean",
+      "title": "Allow power control",
+      "description": "DESTRUCTIVE: power on/off/cycle/reset the managed machine, and reboot chords like Ctrl+Alt+Del. An unsaved-work loss risk.",
+      "required": false,
+      "default": false
+    },
+    "allow_hid": {
+      "type": "boolean",
+      "title": "Allow keyboard & mouse",
+      "description": "Typing and clicking on the managed machine's console.",
+      "required": false,
+      "default": false
+    },
+    "allow_media": {
+      "type": "boolean",
+      "title": "Allow virtual media",
+      "description": "Mount and eject ISO/USB images the machine can boot from.",
+      "required": false,
+      "default": false
+    },
+    "allow_ssh": {
+      "type": "boolean",
+      "title": "Allow in-band SSH commands",
+      "description": "Run commands on the managed machine's operating system over SSH.",
+      "required": false,
+      "default": false
+    },
+    "allow_appliance": {
+      "type": "boolean",
+      "title": "Allow rebooting the KVM appliance",
+      "description": "Reboots the KVM device ITSELF (not the managed machine) to clear a wedged video encoder. There is no out-of-band power to the appliance, so a failed reboot means physical access.",
+      "required": false,
+      "default": false
+    },
+    "allow_config": {
+      "type": "boolean",
+      "title": "Allow device configuration changes",
+      "description": "Set the next boot device, enable AMT SOL/KVM redirection, calibrate the mouse.",
+      "required": false,
+      "default": false
+    },
+    "allow_external_write": {
+      "type": "boolean",
+      "title": "Allow writes outside the device",
+      "description": "Lets kvm-pilot file a GitHub issue reporting your device's firmware version to the community compatibility registry. Off by default because an external side effect is not implied by device access.",
+      "required": false,
+      "default": false
+    },
+    "allow_consent_off": {
+      "type": "boolean",
+      "title": "Allow disabling AMT on-screen consent",
+      "description": "SECURITY POSTURE CHANGE: lets a session start on an Intel AMT machine with no on-screen prompt, so anyone holding the credentials can watch and drive the console silently. Leave off unless that is deliberate.",
+      "required": false,
+      "default": false
+    },
+    "anthropic_api_key": {
+      "type": "string",
+      "title": "Anthropic API key (optional)",
+      "description": "Enables server-side screen classification. Without it, classification falls back to Claude itself — which is usually what you want in Claude Desktop, so most people can leave this blank.",
+      "sensitive": true,
+      "required": false,
+      "default": ""
+    }
+  },
+  "compatibility": {
+    "platforms": ["darwin", "win32", "linux"],
+    "runtimes": {
+      "python": ">=3.11"
+    }
+  }
+}

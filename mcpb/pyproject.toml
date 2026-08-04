@@ -1,0 +1,16 @@
+# Dependency manifest for the kvm-pilot MCP Bundle (#148).
+#
+# The host installs this with uv when the bundle is added, so the bundle carries
+# no vendored wheels: kvm-pilot depends on compiled packages (cryptography,
+# pydantic-core, Pillow) whose wheels are per-platform and per-Python, and
+# vendoring them would make the bundle both huge and wrong on some machines.
+#
+# The version is PINNED exactly, so a bundle is a reproducible artifact rather
+# than "whatever PyPI had that day". tests/test_mcpb_bundle.py fails the build if
+# it drifts from src/kvm_pilot/__about__.py.
+[project]
+name = "kvm-pilot-mcpb"
+version = "0.1.0b12"
+description = "Runtime dependencies for the kvm-pilot MCP Bundle"
+requires-python = ">=3.11"
+dependencies = ["kvm-pilot==0.1.0b12"]
