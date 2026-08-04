@@ -97,6 +97,7 @@ PAGES: list[tuple[str, str, str | None, str | None]] = [
     ("docs/reflexes.md", "reflexes.md", "Reflexes (RFC)", "Design records"),
     # Project — contributing, extending, security
     ("docs/CONTRIBUTING.md", "CONTRIBUTING.md", "Contributing", "Project"),
+    ("docs/coverage-policy.md", "coverage-policy.md", "Coverage policy", "Project"),
     ("docs/plugin-development.md", "plugin-development.md",
      "Writing a first-class driver", "Project"),
     ("docs/SECURITY.md", "SECURITY.md", "Security policy", "Project"),

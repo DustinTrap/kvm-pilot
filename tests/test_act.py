@@ -538,3 +538,226 @@ def test_standing_granted_shows_in_journal(monkeypatch):
     assert "standing-granted" in events
     entry = next(e for e in act.journal_tail() if e["event"] == "standing-granted")
     assert entry["effect"] == "power_soft" and "grant" in entry
+
+
+# ===========================================================================
+# Interactive posture: the elicitation path (#246 — this is the approval gate,
+# so its branches deserve tests, not just line execution).
+# ===========================================================================
+
+
+class _Result:
+    """What ctx.elicit() returns: an action plus (on accept) the filled form."""
+
+    def __init__(self, action: str, data=None):
+        self.action, self.data = action, data
+
+
+class _Form:
+    def __init__(self, approve=True, approver="operator", standing_minutes=0):
+        self.approve, self.approver = approve, approver
+        self.standing_minutes = standing_minutes
+
+
+class _Ctx:
+    """A client that supports elicitation and answers with a scripted result."""
+
+    def __init__(self, result=None, *, supports=True, raises=None):
+        self._result, self._supports, self._raises = result, supports, raises
+        self.prompts: list[str] = []
+
+        outer = self
+
+        class _Session:
+            def check_client_capability(self, _caps):
+                return outer._supports
+
+        self.session = _Session()
+
+    async def elicit(self, message: str, schema):  # noqa: ARG002 - schema unused in the fake
+        self.prompts.append(message)
+        if self._raises is not None:
+            raise self._raises
+        return self._result
+
+
+def _approve(ctx, inv, confirm=False):
+    return asyncio.run(act.approve_or_deny(ctx, inv, confirm=confirm))
+
+
+@pytest.fixture(autouse=True)
+def _interactive(monkeypatch):
+    """Default these tests to the interactive posture with HID enabled."""
+    monkeypatch.delenv("KVM_PILOT_MCP_ELICIT", raising=False)
+    monkeypatch.setenv("KVM_PILOT_MCP_ALLOW_HID", "1")
+
+
+def test_elicit_accepted_approves_and_names_the_approver():
+    ctx = _Ctx(_Result("accept", _Form(approve=True, approver="dustin")))
+    got = _approve(ctx, _inv())
+    assert got.approved is True
+    assert got.approver == "dustin"
+    assert got.outcome is act.Outcome.APPROVED
+
+
+def test_elicit_prompt_states_what_is_being_approved():
+    """The human is the guarantee — the prompt must carry enough to decide on."""
+    ctx = _Ctx(_Result("accept", _Form()))
+    inv = _inv(host="10.0.0.9", tool="power", op="atx.power_off")
+    _approve(ctx, inv)
+    prompt = ctx.prompts[0]
+    for expected in ("power", "10.0.0.9", inv.args_hash[:12], inv.invocation_id[:8]):
+        assert expected in prompt
+
+
+def test_elicit_declined_form_is_DENIED_not_cancelled():
+    ctx = _Ctx(_Result("accept", _Form(approve=False)))
+    got = _approve(ctx, _inv())
+    assert got.approved is False
+    assert got.outcome is act.Outcome.DENIED
+    assert "denied by approver" in got.reason
+
+
+def test_client_cancel_is_CANCELLED_and_distinct_from_denial():
+    """A chat client killing the prompt is benign and retryable; a human saying
+    no is not. Agents branch on this (#149)."""
+    got = _approve(_Ctx(_Result("cancel")), _inv())
+    assert got.approved is False
+    assert got.outcome is act.Outcome.CANCELLED
+    assert got.remediation
+
+
+def test_client_decline_is_DENIED():
+    got = _approve(_Ctx(_Result("decline")), _inv())
+    assert got.approved is False
+    assert got.outcome is act.Outcome.DENIED
+
+
+def test_a_failed_prompt_denies_rather_than_raising():
+    """A broken elicitation must degrade to a recoverable denial — an exception
+    escaping here would surface as a tool crash instead of 'not approved'."""
+    got = _approve(_Ctx(None, raises=RuntimeError("transport gone")), _inv())
+    assert got.approved is False
+    assert got.outcome is act.Outcome.CANCELLED
+    assert "transport gone" in got.reason
+
+
+def test_accept_with_no_form_data_is_not_an_approval():
+    got = _approve(_Ctx(_Result("accept", None)), _inv())
+    assert got.approved is False
+    assert got.outcome is act.Outcome.DENIED
+
+
+def test_a_client_without_elicitation_falls_back_to_confirm(monkeypatch):
+    """No elicitation capability => the pre-authorized path, which requires an
+    explicit confirm=true rather than silently approving."""
+    ctx = _Ctx(_Result("accept", _Form()), supports=False)
+    assert _approve(ctx, _inv(), confirm=False).approved is False
+    assert _approve(ctx, _inv(), confirm=True).approved is True
+    assert ctx.prompts == []  # never prompted
+
+
+def test_a_capability_probe_that_raises_is_treated_as_no_elicitation():
+    ctx = _Ctx(_Result("accept", _Form()))
+
+    class _Boom:
+        def check_client_capability(self, _caps):
+            raise RuntimeError("probe exploded")
+
+    ctx.session = _Boom()
+    # Falls back to confirm-required rather than crashing the tool.
+    assert _approve(ctx, _inv(), confirm=False).approved is False
+    assert _approve(ctx, _inv(), confirm=True).approved is True
+
+
+def test_gate_closed_denies_before_any_prompt():
+    """Guarantee (a) precedes guarantee (b): a disabled effect never reaches a
+    human, so nobody can approve something the operator switched off."""
+    ctx = _Ctx(_Result("accept", _Form()))
+    got = _approve(ctx, _inv(effect=EffectClass.POWER_HARD))
+    assert got.approved is False
+    assert got.outcome is act.Outcome.GATE_CLOSED
+    assert ctx.prompts == []
+
+
+def test_posture_reports_which_regime_is_active(monkeypatch):
+    monkeypatch.delenv("KVM_PILOT_MCP_ELICIT", raising=False)
+    assert act.approval_posture() == "interactive"
+    monkeypatch.setenv("KVM_PILOT_MCP_ELICIT", "off")
+    assert act.approval_posture() == "pre-authorized"
+
+
+# -- standing grants short-circuit the prompt (#192) ------------------------
+
+
+def test_a_live_standing_grant_approves_without_prompting(monkeypatch):
+    monkeypatch.setenv("KVM_PILOT_MCP_STANDING_TTL", "30")
+    act.revoke_standing_grants()
+    ctx = _Ctx(_Result("accept", _Form(approve=True, approver="dustin",
+                                       standing_minutes=10)))
+    first = _approve(ctx, _inv())
+    assert first.approved and len(ctx.prompts) == 1
+
+    # Same (host, effect) again: satisfied by the grant, no second prompt.
+    second = _approve(ctx, _inv(args={"text": "different"}))
+    assert second.approved is True
+    assert second.grant_id is not None
+    assert len(ctx.prompts) == 1, "an in-scope call must not re-prompt"
+
+
+def test_a_standing_grant_does_not_cover_another_host(monkeypatch):
+    monkeypatch.setenv("KVM_PILOT_MCP_STANDING_TTL", "30")
+    act.revoke_standing_grants()
+    ctx = _Ctx(_Result("accept", _Form(approve=True, standing_minutes=10)))
+    _approve(ctx, _inv(host="host-a"))
+    _approve(ctx, _inv(host="host-b"))
+    assert len(ctx.prompts) == 2, "a grant is scoped to one host"
+
+
+def test_standing_minutes_are_ignored_when_the_operator_did_not_opt_in(monkeypatch):
+    monkeypatch.delenv("KVM_PILOT_MCP_STANDING_TTL", raising=False)
+    act.revoke_standing_grants()
+    ctx = _Ctx(_Result("accept", _Form(approve=True, standing_minutes=60)))
+    _approve(ctx, _inv())
+    _approve(ctx, _inv())
+    assert len(ctx.prompts) == 2, "standing grants must stay off unless enabled"
+
+
+# -- frame observation bookkeeping (#141) ----------------------------------
+
+
+def test_note_frame_flags_a_byte_identical_repeat():
+    """The staleness tell: an identical frame across a change the generation
+    mechanism cannot see (it only tracks media/power effects) means the pixels
+    are stale or cached, and an agent must not click on them."""
+    ref_a = act.frame_ref("hostx", b"screen-one")
+    assert act.note_frame("hostx", ref_a) is False       # first sighting
+    assert act.note_frame("hostx", ref_a) is True        # unchanged
+    ref_b = act.frame_ref("hostx", b"screen-two")
+    assert act.note_frame("hostx", ref_b) is False       # moved on
+
+
+def test_note_frame_tracks_hosts_independently():
+    a = act.frame_ref("host-a", b"same-pixels")
+    b = act.frame_ref("host-b", b"same-pixels")
+    act.note_frame("host-a", a)
+    # Identical content on a DIFFERENT host is not a repeat for that host.
+    assert act.note_frame("host-b", b) is False
+
+
+def test_frame_ref_is_content_addressed_and_host_scoped():
+    assert act.frame_ref("h", b"x") == act.frame_ref("h", b"x")
+    assert act.frame_ref("h", b"x") != act.frame_ref("h", b"y")
+    assert act.frame_ref("h1", b"x") != act.frame_ref("h2", b"x")
+
+
+def test_minted_frame_tracking_is_bounded(monkeypatch):
+    """Unbounded growth in a long-lived server is a leak; the cap drops the
+    oldest half rather than clearing everything, so recent refs stay valid."""
+    monkeypatch.setattr(act, "_FRAME_MAX_TRACKED", 8)
+    act._FRAME_MINTED.clear()
+    refs = [act.frame_ref("hostcap", f"frame-{i}".encode()) for i in range(20)]
+    assert len(act._FRAME_MINTED) <= 8, "the mint cache must stay bounded"
+    # The most recent ref survived the pruning and is still age-checkable.
+    assert act.frame_age(refs[-1]) is not None
+    assert act.frame_age("never:minted:deadbeef") is None

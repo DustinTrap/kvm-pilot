@@ -94,11 +94,20 @@ markers = [
 [tool.coverage.run]
 source = ["kvm_pilot"]
 branch = true
+# The MCP suite drives the server as a real subprocess over stdio (82 tests).
+# Without parallel + the COVERAGE_PROCESS_START hook that tests/test_mcp_server.py
+# sets, none of that execution is recorded and mcp/server.py reads ~49% while
+# actually being exercised end-to-end (#246). parallel lets each process write
+# its own data file; pytest-cov combines them.
+parallel = true
+sigterm = true
 
 [tool.coverage.report]
-# CI gate (#56): the suite sits at ~81% (branch); 75 catches a real coverage
-# collapse without being brittle about single-file refactors.
-fail_under = 75
+# No fail_under here on purpose (#246). The coverage gate is the ratchet in
+# `scripts/coverage_gate.py`, checked against the committed `.coverage-floor`.
+# Two floors would be two different numbers — this one measured BRANCH coverage
+# while the ratchet measures LINE coverage — and a second, weaker gate that
+# fires first only obscures which control actually spoke.
 
 [tool.ruff]
 line-length = 100

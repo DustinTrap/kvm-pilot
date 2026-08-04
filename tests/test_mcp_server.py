@@ -89,6 +89,19 @@ def config_file(tmp_path: Path) -> Path:
     return path
 
 
+_PYPROJECT = Path(__file__).resolve().parents[1] / "pyproject.toml"
+
+
+def _coverage_active() -> bool:
+    """True when this pytest run is collecting coverage."""
+    try:
+        import coverage
+
+        return coverage.Coverage.current() is not None
+    except Exception:  # noqa: BLE001 - absence of coverage is not an error
+        return False
+
+
 def server_env(config_file: Path, **extra: str) -> dict[str, str]:
     """Subprocess env: ambient KVM_PILOT_*/API keys stripped, ours layered on."""
     env = {
@@ -101,6 +114,15 @@ def server_env(config_file: Path, **extra: str) -> dict[str, str]:
     # The conftest cache isolation is monkeypatched env — stripped above, so the
     # spawned server would write the developer's real ~/.cache without this.
     env["KVM_PILOT_HEALTH_CACHE"] = str(config_file.parent / "health-cache.json")
+    # Measure the SERVER, not just the client half. These tests spawn a real
+    # subprocess, whose execution is invisible to the parent's coverage unless
+    # coverage restarts itself inside the child — which coverage's sitecustomize
+    # hook does when COVERAGE_PROCESS_START names a config (#246). Without this,
+    # 82 end-to-end tests contributed nothing and mcp/server.py measured ~49%
+    # while being thoroughly exercised. The quirk lives here, in the suite; the
+    # coverage gate stays a dumb, honest calculator.
+    if "COVERAGE_RUN" in os.environ or _coverage_active():
+        env["COVERAGE_PROCESS_START"] = str(_PYPROJECT)
     env.update(extra)
     return env
 

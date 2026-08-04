@@ -1208,3 +1208,274 @@ def test_mcp_hint_end_to_end_on_capabilities(monkeypatch, capsys):
     monkeypatch.setenv("KVM_PILOT_NO_HINTS", "1")
     assert main(["capabilities"]) == 0
     assert "mcp__kvm-pilot__" not in capsys.readouterr().err
+
+
+# ===========================================================================
+# Router / benchmark surfaces (#181) — the CLI's largest uncovered region.
+# All run offline against the fake driver; the scorecard cache is redirected by
+# conftest's XDG_CACHE_HOME isolation (which only works since #246 moved the
+# scorecard out of the config dir and off an import-time constant).
+# ===========================================================================
+
+
+import json as _json  # noqa: E402
+from pathlib import Path  # noqa: E402
+
+
+def _scorecards_dir():
+    from kvm_pilot.router import _scorecard_dir
+
+    return Path(_scorecard_dir())
+
+
+def test_route_picks_an_interface_and_says_which(capsys):
+    rc = main(["route", "snapshot", "--driver", "fake", "--samples", "1"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "route 'snapshot'" in out
+    assert "library" in out          # names the chosen interface
+    assert "benchmarked" in out      # ... and why it believes that
+
+
+def test_route_writes_a_scorecard_keyed_by_host(capsys):
+    """The cache is per device — the router's whole premise is that one host's
+    measurements do not describe another's."""
+    assert main(["route", "snapshot", "--driver", "fake", "--samples", "1"]) == 0
+    capsys.readouterr()
+    from kvm_pilot.router import load_for
+
+    card = load_for("fake")
+    assert card is not None and card.results
+    assert card.host == "fake"
+    assert (_scorecards_dir() / "fake.json").exists()
+    assert load_for("some-other-host") is None
+
+
+def test_route_fresh_rebenchmarks_even_with_a_cache(capsys, monkeypatch):
+    assert main(["route", "snapshot", "--driver", "fake", "--samples", "1"]) == 0
+    capsys.readouterr()
+
+    calls = {"n": 0}
+    from kvm_pilot import benchmark as bench
+
+    real = bench.benchmark_all
+
+    def counting(*a, **kw):
+        calls["n"] += 1
+        return real(*a, **kw)
+
+    monkeypatch.setattr(bench, "benchmark_all", counting)
+    assert main(["route", "snapshot", "--driver", "fake", "--samples", "1"]) == 0
+    assert calls["n"] == 0, "a cached command must not re-benchmark"
+
+    assert main(["route", "snapshot", "--driver", "fake", "--samples", "1", "--fresh"]) == 0
+    assert calls["n"] == 1, "--fresh must force a re-benchmark"
+
+
+def test_route_reuses_the_cache_for_any_command_it_measured(capsys, monkeypatch):
+    """One benchmark run covers every command, so a second route for a DIFFERENT
+    command still answers from cache — that is what makes the cache worth having.
+    """
+    assert main(["route", "snapshot", "--driver", "fake", "--samples", "1"]) == 0
+    capsys.readouterr()
+    from kvm_pilot import benchmark as bench
+
+    def refuse(*_a, **_kw):
+        raise AssertionError("re-benchmarked a command the cached card already covers")
+
+    monkeypatch.setattr(bench, "benchmark_all", refuse)
+    assert main(["route", "get_info", "--driver", "fake", "--samples", "1"]) == 0
+    assert "get_info" in capsys.readouterr().out
+
+
+def test_route_json_is_machine_readable(capsys):
+    rc = main(["route", "snapshot", "--driver", "fake", "--samples", "1", "--json"])
+    assert rc == 0
+    payload = _json.loads(capsys.readouterr().out)
+    assert payload["command"] == "snapshot"
+    assert payload["interface"]
+
+
+def test_benchmark_reports_every_probed_command(capsys):
+    rc = main(["benchmark", "--driver", "fake", "--samples", "1"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "command" in out and "interface" in out and "p50_ms" in out
+    for cmd in ("get_info", "capabilities"):
+        assert cmd in out
+
+
+def test_benchmark_only_persists_when_asked(capsys):
+    """`benchmark` reports; it does not silently rewrite the router's cache.
+    `--save` is the opt-in, and the docstring promises exactly that."""
+    from kvm_pilot.router import load_for
+
+    assert main(["benchmark", "--driver", "fake", "--samples", "1"]) == 0
+    capsys.readouterr()
+    assert load_for("fake") is None, "benchmark must not persist without --save"
+
+    assert main(["benchmark", "--driver", "fake", "--samples", "1", "--save"]) == 0
+    capsys.readouterr()
+    card = load_for("fake")
+    assert card is not None and card.results
+
+
+def test_benchmark_json_shape(capsys):
+    rc = main(["benchmark", "--driver", "fake", "--samples", "1", "--json"])
+    assert rc == 0
+    payload = _json.loads(capsys.readouterr().out)
+    assert payload["host"] == "fake"
+    assert isinstance(payload["results"], list) and payload["results"]
+
+
+def test_host_exec_refuses_when_no_in_band_interface_is_capable(capsys):
+    """The honest-failure path: the fake driver has no ssh_host, so nothing on
+    the OS plane is capable and the command must say so instead of hanging."""
+    rc = main(["host-exec", "uptime", "--driver", "fake", "--samples", "1"])
+    assert rc == 1
+    err = capsys.readouterr().err
+    assert "no capable in-band interface" in err
+    assert "ssh_host" in err  # names the fix
+
+
+# -- appliance-SSH surface (#162) ------------------------------------------
+
+
+def test_appliance_without_configuration_explains_how_to_enable(capsys):
+    rc = main(["appliance", "loadavg", "--driver", "fake", "--host", "h"])
+    assert rc == 2
+    err = capsys.readouterr().err
+    assert "appliance-SSH is not configured" in err
+    assert "appliance_ssh" in err
+
+
+class _FakeApplianceChannel:
+    host = "10.0.0.9"
+
+    def __init__(self, *, la=0.4, threads=(), reboot=None):
+        self._la, self._threads = la, list(threads)
+        self._reboot = reboot if reboot is not None else {"ok": True, "dry_run": False}
+
+    def loadavg(self):
+        return self._la
+
+    def d_state_video_threads(self):
+        return self._threads
+
+    def reboot(self):
+        return self._reboot
+
+
+def _with_appliance(monkeypatch, chan):
+    import kvm_pilot.cli as cli_mod
+
+    real = cli_mod._build_client
+
+    def build(args):
+        kvm = real(args)
+        kvm.appliance_channel = chan
+        return kvm
+
+    monkeypatch.setattr(cli_mod, "_build_client", build)
+
+
+def test_appliance_loadavg_reports_and_refuses_to_call_it_health(monkeypatch, capsys):
+    """These threads park in D-state even when healthy — the output must say so,
+    because reading loadavg as a health signal is the documented trap (#162)."""
+    _with_appliance(monkeypatch, _FakeApplianceChannel(la=9.9, threads=["rkvenc", "rkispp"]))
+    rc = main(["appliance", "loadavg", "--driver", "fake", "--host", "h"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "9.9" in out and "rkvenc" in out
+    assert "NOT a health signal" in out
+
+
+def test_appliance_loadavg_handles_an_unreadable_value(monkeypatch, capsys):
+    _with_appliance(monkeypatch, _FakeApplianceChannel(la=None))
+    assert main(["appliance", "loadavg", "--driver", "fake", "--host", "h"]) == 0
+    assert "unreadable" in capsys.readouterr().out
+
+
+def test_appliance_reboot_reports_the_control_gap_it_causes(monkeypatch, capsys):
+    _with_appliance(monkeypatch, _FakeApplianceChannel(reboot={"ok": True, "dry_run": False}))
+    rc = main(["appliance", "reboot", "--driver", "fake", "--host", "h", "--yes"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "issued" in out
+    assert "target power is untouched" in out  # the reassurance that matters
+
+
+def test_appliance_reboot_dry_run_says_nothing_was_sent(monkeypatch, capsys):
+    _with_appliance(monkeypatch, _FakeApplianceChannel(reboot={"dry_run": True}))
+    assert main(["appliance", "reboot", "--driver", "fake", "--host", "h", "--dry-run"]) == 0
+    assert "not sent" in capsys.readouterr().out
+
+
+def test_appliance_reboot_failure_is_a_nonzero_exit(monkeypatch, capsys):
+    _with_appliance(monkeypatch, _FakeApplianceChannel(reboot={"ok": False, "dry_run": False}))
+    rc = main(["appliance", "reboot", "--driver", "fake", "--host", "h", "--yes"])
+    assert rc == 1
+    assert "failed" in capsys.readouterr().err
+
+
+# -- access paths: the lockout-exposure view (#162) ------------------------
+
+
+def test_paths_names_each_recovery_path_and_its_state(capsys):
+    rc = main(["paths", "--driver", "fake", "--host", "h"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "Access paths for" in out
+    assert "kvmd-rest" in out
+    # Each row carries a state and a failure-domain kind, not just a name.
+    assert "(primary)" in out
+    assert "not configured" in out  # appliance-ssh is off on the fake driver
+
+
+def test_paths_warns_when_no_out_of_band_power_exists(capsys):
+    """The finding that matters: every live path sharing the appliance's fate
+    means a hung target cannot be recovered remotely (#162)."""
+    rc = main(["paths", "--driver", "fake", "--host", "h"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "independent" in out
+    assert "out-of-band power" in out
+
+
+def test_paths_json_is_machine_readable(capsys):
+    rc = main(["paths", "--driver", "fake", "--host", "h", "--json"])
+    assert rc == 0
+    payload = _json.loads(capsys.readouterr().out)
+    assert payload["paths"] and "summary" in payload
+    assert {"path", "kind", "live", "configured"} <= set(payload["paths"][0])
+
+
+def test_media_list_prints_the_msd_inventory(capsys):
+    """Check what is already on the device before asking anyone to upload
+    gigabytes again (#127)."""
+    rc = main(["media-list", "--driver", "fake", "--host", "h"])
+    assert rc == 0
+    payload = _json.loads(capsys.readouterr().out)
+    assert "storage" in payload or "drive" in payload
+
+
+def test_recover_hid_reports_success_and_failure_distinctly(monkeypatch, capsys):
+    import kvm_pilot.cli as cli_mod
+
+    real = cli_mod._rich_client
+
+    def with_result(ok):
+        def build(args, cap=None):
+            kvm = real(args, cap) if cap is not None else real(args)
+            kvm.recover_hid = lambda: ok
+            return kvm
+        return build
+
+    monkeypatch.setattr(cli_mod, "_rich_client", with_result(True))
+    assert main(["recover-hid", "--driver", "fake", "--host", "h", "--yes"]) == 0
+    assert "reattached" in capsys.readouterr().out
+
+    monkeypatch.setattr(cli_mod, "_rich_client", with_result(False))
+    assert main(["recover-hid", "--driver", "fake", "--host", "h", "--yes"]) == 1
+    # The failure names the physical cause this cannot fix.
+    assert "data-capable" in capsys.readouterr().out

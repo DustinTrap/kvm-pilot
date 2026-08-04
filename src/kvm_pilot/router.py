@@ -149,15 +149,26 @@ def stale_rows(scorecard: Scorecard, trigger: Trigger) -> list[CommandResult]:
 # disk per host and reloaded — with a firmware check that drops the KVM-plane
 # rows if the device was reflashed (they're the ones a flash can change; #180).
 
-_SCORECARD_DIR = os.path.join(
-    os.environ.get("XDG_CONFIG_HOME", os.path.join(os.path.expanduser("~"), ".config")),
-    "kvm-pilot", "scorecards",
-)
+def _scorecard_dir() -> str:
+    """Where scorecards live: the CACHE dir, resolved per call.
+
+    Two bugs fixed here (#246). It was the *config* dir — but a scorecard is
+    regenerable measurement, not user-authored settings, and it belongs beside
+    the health cache and the mouse calibration, which both use
+    ``health._cache_base_dir``. And it was a module-level constant evaluated at
+    import, so redirecting the env afterwards did nothing: a test that ran
+    ``benchmark`` or ``route`` wrote to (and read from) the developer's real
+    home directory, which is both a stray write and a way for a test to pass for
+    the wrong reason.
+    """
+    from .health import _cache_base_dir
+
+    return os.path.join(_cache_base_dir(), "kvm-pilot", "scorecards")
 
 
 def scorecard_path(host: str, *, base: str | None = None) -> str:
     safe = host.replace("/", "_").replace(":", "_")
-    return os.path.join(base or _SCORECARD_DIR, f"{safe}.json")
+    return os.path.join(base or _scorecard_dir(), f"{safe}.json")
 
 
 def save_scorecard(card: Scorecard, path: str | None = None) -> str:
