@@ -79,7 +79,19 @@ def default_decoder(data: bytes) -> list[list[int]]:
         ) from exc
     import io  # noqa: PLC0415
 
-    img = Image.open(io.BytesIO(data)).convert("L")
+    try:
+        img = Image.open(io.BytesIO(data)).convert("L")
+    except Exception as exc:  # noqa: BLE001 - Pillow raises several types here
+        # A snapshot that will not decode is a precondition failure, not a crash:
+        # a device can hand back an HTML error body, a truncated frame, or (on
+        # GL at native resolution) a lone H.264 NAL mislabeled image/jpeg. Say
+        # which of those it looks like instead of surfacing a raw Pillow error.
+        raise CalibrationError(
+            f"the snapshot could not be decoded as an image ({exc}). Calibration "
+            "needs a real JPEG/PNG frame — check `snapshot` works first; on GL at "
+            "native resolution the streamer can return an undecodable H.264 frame "
+            "(#107/#151), in which case lower the capture resolution."
+        ) from exc
     if img.width > DECODE_WIDTH:
         img = img.resize((DECODE_WIDTH, max(1, round(img.height * DECODE_WIDTH / img.width))))
     px = list(img.getdata())

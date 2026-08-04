@@ -89,15 +89,18 @@ badly-covered area inside a large well-covered one.** At introduction:
 
 | Category | Coverage | Lines | Uncovered | Target |
 |---|---:|---:|---:|---:|
-| MCP server | 82.76% | 644 | 111 | 90% |
 | CLI | 86.89% | 1053 | 138 | 85% ✅ |
 | Vision | 87.87% | 371 | 45 | 90% |
 | Health & evidence | 89.76% | 1562 | 160 | 90% |
 | Drivers | 90.58% | 3322 | 313 | 90% ✅ |
-| Core plumbing | 92.20% | 1000 | 78 | 90% ✅ |
+| MCP server | 91.15% | 644 | 57 | 90% ✅ |
 | In-band channels | 92.40% | 263 | 20 | 90% ✅ |
+| Core plumbing | 92.62% | 1003 | 74 | 90% ✅ |
 | **Safety & approval** | **98.21%** | 447 | 8 | **95%** ✅ |
-| **Blended (the gate)** | **89.93%** | **8672** | **873** | — |
+| **Blended (the gate)** | **90.61%** | **8675** | **815** | — |
+
+Six of eight categories are at or above target. The two that are not — Vision
+and Health & evidence — sit within ~2 points and are not currently a priority.
 
 The targets are deliberately **not uniform** — see below.
 
@@ -151,6 +154,16 @@ demonstrates:
 The per-category targets in the table above are the alternative: high where a
 regression is expensive, realistic where the remaining lines are plumbing.
 
+**Where the MCP server stopped, and why.** Taking it from 82.76% to 91.15% was
+worth doing — the tests that got it there pin real contracts (a closed gate
+denies before any config probing; an unconfigured channel is an actionable error,
+not a crash; disabling AMT user-consent needs its own gate). The 57 lines left
+are a different animal: fragmented across **30 functions**, almost entirely
+`except` branches for device failures that need a mocked transport to provoke,
+plus receipt-denial paths reachable only by replaying a consumed receipt.
+Covering them would mean mock-heavy tests asserting implementation. That is the
+point at which more coverage buys less assurance, so the target is 90 and not 95.
+
 **Revisit trigger.** Go granular when either happens:
 
 1. A coverage-caused defect traces to a file whose contribution to the blended
@@ -176,8 +189,8 @@ The blended floor buys most of the value for a fraction of the machinery.
 |---|---|
 | Measured at introduction | 85.66% line coverage (7427 / 8670 lines, post-exclusion) |
 | Initial floor | 85.0 |
-| **Current** | **89.93%** (7799 / 8672) — subprocess measurement, approval-path + CLI tests |
-| **Current floor** | **89.43** |
+| **Current** | **90.61%** (7860 / 8675) — subprocess measurement + approval-path, CLI and MCP-tool tests |
+| **Current floor** | **90.11** |
 
 Measuring the subprocess costs about **8% wall clock** on the suite (236s vs
 218s locally) — worth it to stop 82 end-to-end tests reporting as nothing.

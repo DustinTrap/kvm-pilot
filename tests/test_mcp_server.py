@@ -1815,3 +1815,256 @@ def test_wake_dry_run_reports_without_sending(config_file):
     assert is_error(result) is False
     text = result.content[0].text
     assert '"dry_run": true' in text and "aa:bb:cc:dd:ee:ff" in text
+
+
+# ===========================================================================
+# Tool paths that had no functional coverage (#246). These run through the real
+# stdio session like the rest of this file, so they exercise the server as a
+# client actually reaches it.
+# ===========================================================================
+
+
+def test_calibrate_mouse_is_gated_like_hid_input(config_file):
+    """Pointer moves only — but it drives the live cursor for 10-30s, so it
+    rides the HID gate. With the gate closed it must deny, not calibrate."""
+
+    async def interact(session):
+        return await session.call_tool("calibrate_mouse", {"confirm": True})
+
+    payload = result_json(run_session(server_env(config_file), interact))
+    assert payload["approved"] is False
+    assert payload["outcome"] == "gate_closed"
+
+
+def test_calibrate_mouse_dry_run_moves_nothing(config_file):
+    """Pointer moves are NOT in DESTRUCTIVE_OPS, so the driver's own dry-run
+    guard would not intercept them — the tool has to skip explicitly."""
+
+    async def interact(session):
+        return await session.call_tool("calibrate_mouse", {"confirm": True})
+
+    env = server_env(config_file, KVM_PILOT_MCP_ALLOW_HID="1", KVM_PILOT_MCP_DRY_RUN="1")
+    payload = result_json(run_session(env, interact))
+    assert payload["approved"] is True
+    assert payload["dry_run"] is True
+    assert "would calibrate" in payload["detail"]
+
+
+def test_calibrate_mouse_reports_a_calibration_failure_as_a_tool_error(config_file):
+    """The fake driver's screen has no findable cursor, so calibration refuses.
+    That must surface as an actionable ToolError, not an approval that lies."""
+
+    async def interact(session):
+        return await session.call_tool("calibrate_mouse", {"confirm": True})
+
+    env = server_env(config_file, KVM_PILOT_MCP_ALLOW_HID="1")
+    result = run_session(env, interact)
+    assert result.isError
+    text = result.content[0].text.lower()
+    # Names a precondition the operator can act on.
+    assert "could not be decoded" in text or "snapshot" in text
+
+
+def test_mouse_pixel_coords_need_a_driver_that_reports_resolution(config_file):
+    """pixel/raw are the caller saying 'exactly here'; a driver without pixel
+    support must say so rather than silently reinterpreting the coordinates."""
+
+    async def interact(session):
+        return await session.call_tool(
+            "mouse", {"x": 100, "y": 100, "coord_space": "pixel", "confirm": True}
+        )
+
+    env = server_env(config_file, KVM_PILOT_MCP_ALLOW_HID="1")
+    result = run_session(env, interact)
+    assert result.isError
+    assert "pixel" in result.content[0].text.lower()
+
+
+def test_mouse_raw_coordinates_are_never_calibrated(config_file):
+    """Raw is the escape hatch: no percent mapping, no stored correction."""
+
+    async def interact(session):
+        return await session.call_tool(
+            "mouse", {"x": 10000, "y": 10000, "coord_space": "raw", "confirm": True}
+        )
+
+    env = server_env(config_file, KVM_PILOT_MCP_ALLOW_HID="1")
+    payload = result_json(run_session(env, interact))
+    assert payload["approved"] is True
+    assert payload.get("calibrated") is False
+
+
+def test_ssh_discover_refuses_without_an_explicit_confirmation(config_file):
+    """An active network scan is noisy and only acceptable on networks the user
+    owns — the tool must not run one just because it was called."""
+
+    async def interact(session):
+        return await session.call_tool("ssh_discover", {"cidr": "10.0.0.0/30"})
+
+    result = run_session(server_env(config_file), interact)
+    assert result.isError
+    assert "not confirmed" in result.content[0].text
+
+
+def test_ssh_discover_rejects_an_over_broad_range(config_file):
+    """A /8 is not a scan anyone meant to run."""
+
+    async def interact(session):
+        return await session.call_tool(
+            "ssh_discover", {"cidr": "10.0.0.0/8", "confirm": True}
+        )
+
+    result = run_session(server_env(config_file), interact)
+    assert result.isError
+    assert "narrow" in result.content[0].text.lower() or "addresses" in result.content[0].text
+
+
+def test_ssh_discover_rejects_a_malformed_cidr(config_file):
+    async def interact(session):
+        return await session.call_tool(
+            "ssh_discover", {"cidr": "not-a-network", "confirm": True}
+        )
+
+    result = run_session(server_env(config_file), interact)
+    assert result.isError
+
+
+def test_ssh_discover_scans_a_tiny_range_when_confirmed(config_file):
+    """A /31 on loopback is two addresses — proves the scan path runs without
+    making this test a network probe of anything real."""
+
+    async def interact(session):
+        return await session.call_tool(
+            "ssh_discover", {"cidr": "127.0.0.2/31", "port": 9, "confirm": True}
+        )
+
+    payload = result_json(run_session(server_env(config_file), interact))
+    assert payload["cidr"] == "127.0.0.2/31"
+    assert payload["port"] == 9
+    assert isinstance(payload["candidates"], list)
+
+
+def test_ssh_exec_gate_is_checked_before_any_config_probing(config_file):
+    """The gate is the floor: a closed SSH gate must deny before the server even
+    looks at whether ssh_host is configured."""
+
+    async def interact(session):
+        return await session.call_tool("ssh_exec", {"command": "uptime", "confirm": True})
+
+    payload = result_json(run_session(server_env(config_file), interact))
+    assert payload["approved"] is False and payload["outcome"] == "gate_closed"
+
+
+def test_ssh_exec_missing_ssh_host_is_a_clean_tool_error(config_file):
+    """Gate open, approved, then dispatch: an unconfigured channel surfaces as
+    an actionable error (and is audited as a dispatch exception), not a crash."""
+
+    async def interact(session):
+        return await session.call_tool("ssh_exec", {"command": "uptime", "confirm": True})
+
+    env = server_env(config_file, KVM_PILOT_MCP_ALLOW_SSH="1")
+    result = run_session(env, interact)
+    assert result.isError
+    text = result.content[0].text
+    assert "ssh_host" in text  # names the missing setting
+
+
+def test_appliance_reboot_without_appliance_ssh_is_a_clean_tool_error(config_file):
+    """Same shape for the appliance channel — opt-in, key-only, and absent here."""
+
+    async def interact(session):
+        return await session.call_tool("appliance_reboot", {"confirm": True})
+
+    env = server_env(config_file, KVM_PILOT_MCP_ALLOW_APPLIANCE="1")
+    result = run_session(env, interact)
+    assert result.isError
+    assert "appliance_ssh" in result.content[0].text
+
+
+def test_amt_enable_on_a_non_amt_driver_says_so(config_file):
+    """The fake driver has no AMT enablement; the tool must name the driver
+    requirement rather than failing on a missing attribute."""
+
+    async def interact(session):
+        return await session.call_tool(
+            "amt_enable", {"feature": "sol", "confirm": True}
+        )
+
+    env = server_env(config_file, KVM_PILOT_MCP_ALLOW_CONFIG="1")
+    result = run_session(env, interact)
+    assert result.isError
+    assert "amt driver" in result.content[0].text.lower()
+
+
+def test_amt_consent_off_needs_its_own_gate(config_file):
+    """Disabling KVM user-consent is a separate, deliberate posture change — the
+    config gate alone must not authorize it (#233)."""
+
+    async def interact(session):
+        return await session.call_tool(
+            "amt_enable", {"feature": "kvm", "consent_off": True, "confirm": True}
+        )
+
+    env = server_env(config_file, KVM_PILOT_MCP_ALLOW_CONFIG="1")
+    result = run_session(env, interact)
+    assert result.isError
+    text = result.content[0].text.lower()
+    assert "consent" in text
+
+
+def test_observe_power_is_honest_when_the_atx_read_itself_fails():
+    """An unreadable sensor is 'unverifiable', never a confident answer. The
+    whole point of #149/#173: the tool must not convert a failed read into a
+    power state it then reports as fact."""
+    from kvm_pilot.errors import KVMPilotError
+    from kvm_pilot.mcp.server import _observe_power
+
+    class _Broken:
+        def get_atx_state(self):
+            raise KVMPilotError("ATX bus timeout")
+
+    observed, source = _observe_power(_Broken())
+    assert observed is None
+    assert "unverifiable" in source
+    assert "ATX bus timeout" in source  # carries the underlying cause
+
+
+def test_preflight_gate_blocks_a_destructive_op_on_an_unacknowledged_critical(monkeypatch):
+    """The intake gate is a gate: automation fails CLOSED on a critical nobody
+    has acknowledged, and the tool error says why rather than proceeding."""
+    from kvm_pilot import health as health_mod
+    from kvm_pilot.health import HealthGateError
+    from kvm_pilot.mcp import server as server_mod
+    from kvm_pilot.mcp._sdk import ToolError
+
+    # _preflight imports these lazily inside the function, so patch the source.
+    monkeypatch.delenv("KVM_PILOT_MCP_DRY_RUN", raising=False)
+    monkeypatch.delenv("KVM_PILOT_SKIP_HEALTHCHECK", raising=False)
+
+    def blocked(*_a, **_kw):
+        raise HealthGateError("no out-of-band recovery path")
+
+    monkeypatch.setattr(health_mod, "preflight", blocked)
+
+    with pytest.raises(ToolError) as ei:
+        server_mod._preflight(object(), enforce=True)
+    msg = str(ei.value)
+    assert "preflight blocked this operation" in msg
+    assert "no out-of-band recovery path" in msg  # names the finding
+
+
+def test_informational_preflight_never_breaks_a_read(monkeypatch):
+    """The non-enforcing audit is advisory: if it explodes, the read it was
+    informing must still succeed."""
+    from kvm_pilot import health as health_mod
+    from kvm_pilot.mcp import server as server_mod
+
+    monkeypatch.delenv("KVM_PILOT_MCP_DRY_RUN", raising=False)
+    monkeypatch.delenv("KVM_PILOT_SKIP_HEALTHCHECK", raising=False)
+
+    def boom(*_a, **_kw):
+        raise RuntimeError("cache corrupted")
+
+    monkeypatch.setattr(health_mod, "preflight_once", boom)
+    # Returns rather than raising — an advisory audit is not a gate.
+    assert server_mod._preflight(object(), enforce=False) is None

@@ -300,3 +300,16 @@ def test_bare_probe_finds_any_stored_resolution(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_CACHE_HOME", str(tmp_path))
     save_calibration(_cal("box", "1920x1080"))
     assert load_calibration("box") is not None
+
+
+def test_an_undecodable_snapshot_is_a_precondition_failure_not_a_crash():
+    """A device can hand back an HTML error body, a truncated frame, or (GL at
+    native res) a lone H.264 NAL mislabeled image/jpeg. Raw Pillow errors tell
+    an operator nothing actionable."""
+    from kvm_pilot.calibrate import default_decoder
+
+    with pytest.raises(CalibrationError) as ei:
+        default_decoder(b"<html>404 not found</html>")
+    msg = str(ei.value)
+    assert "could not be decoded" in msg
+    assert "snapshot" in msg  # names what to check first
