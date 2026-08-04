@@ -55,6 +55,10 @@ class AmtRfbEmulator:
         # handshake failures
         self.bad_protocol = False       # server banner is not "RFB "
         self.reason_drop = False        # security-type count 0 -> reason string, then drop
+        # Real hardware variant: count 0 and then NOTHING — the ME just closes.
+        # Observed on a Latitude 5411 @ 14.1.79 whose KVM service declined every
+        # session on both transports (#245).
+        self.refuse_silently = False
         self.no_vnc_auth = False        # offer security types without VNC-auth (2)
         self.bad_bpp = False            # ServerInit reports a non-16-bpp framebuffer
         # transport drops
@@ -131,6 +135,9 @@ class AmtRfbEmulator:
             return
         conn.sendall(b"RFB 004.000\n")        # AMT announces RFB 4.0
         self._recv(conn, 12)                  # client ProtocolVersion (it downgrades to 003.008)
+        if self.refuse_silently:
+            conn.sendall(struct.pack(">B", 0))   # 0 types, no reason, socket closes
+            return
         if self.reason_drop:
             reason = b"no redirection sessions available"
             conn.sendall(struct.pack(">B", 0) + struct.pack(">I", len(reason)) + reason)

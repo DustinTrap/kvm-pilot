@@ -107,6 +107,9 @@ class AmtDriver(PowerMixin, CapabilityMixin):
         self._ssl_ca_file = ssl_ca_file
         self._sol_port = sol_port
         self._kvm_port = kvm_port
+        # Which KVM transport answered last: 'standard' (5900) or
+        # 'redirection' (16994). None until the first successful connect (#245).
+        self._kvm_transport: str | None = None
         self._ider: IderSession | None = None
         # The KVM/RFB password is a separate MEBx credential; fall back to the
         # WS-Man admin password when it isn't configured separately.
@@ -920,17 +923,56 @@ class AmtDriver(PowerMixin, CapabilityMixin):
     # over a short-lived session; HID reuses one persistent session so a
     # move-then-click land on the same connection. Uses the KVM/RFB password.
 
-    def _rfb_snapshot_session(self) -> Rfb:
-        from .rfb import Rfb
+    def _rfb_on(self, transport: str) -> Rfb:
+        """An unconnected RFB session bound to one transport (see :meth:`_connect_rfb`)."""
+        from .rfb import RedirKvmStream, Rfb
 
-        return Rfb(self.host, self._kvm_port, self._kvm_password, timeout=self._timeout)
+        if transport == "standard":
+            return Rfb(self.host, self._kvm_port, self._kvm_password, timeout=self._timeout)
+        stream = RedirKvmStream(
+            self.host, self._user, self._passwd,
+            port=self._sol_port, timeout=self._timeout,
+        )
+        # The RFB password is still the KVM credential once the tunnel is up.
+        return Rfb(self.host, self._sol_port, self._kvm_password,
+                   timeout=self._timeout, stream_factory=stream.connect)
+
+    def _connect_rfb(self) -> Rfb:
+        """A CONNECTED RFB session, over whichever KVM transport this ME serves.
+
+        AMT offers KVM two ways: the legacy plain-RFB listener on 5900, and the
+        same protocol tunnelled through a redirection session on 16994 (the port
+        SOL and IDE-R use). Newer ME builds harden the 5900 path off and keep
+        only the tunnel (#245).
+
+        Chosen by ATTEMPT, not by inspection. ``Is5900PortEnabled=false`` cannot
+        distinguish "this firmware dropped the 5900 path" from the much more
+        common "KVM simply has not been enabled yet", and those want opposite
+        advice — so we try the historical port and fall back, then remember which
+        one answered so a burst pays the probe once.
+        """
+        order: tuple[str, ...] = ("standard", "redirection")
+        if self._kvm_transport is not None:
+            order = (self._kvm_transport,)
+        first_error: ConnectionError | None = None
+        for transport in order:
+            session = self._rfb_on(transport)
+            try:
+                session.connect()
+            except ConnectionError as exc:
+                first_error = first_error or exc
+                continue
+            self._kvm_transport = transport
+            return session
+        assert first_error is not None
+        raise first_error
+
+    def _rfb_snapshot_session(self) -> Rfb:
+        return self._connect_rfb()
 
     def _hid_session(self) -> Rfb:
-        from .rfb import Rfb
-
         if self._hid is None or getattr(self._hid, "_sock", None) is None:
-            self._hid = Rfb(self.host, self._kvm_port, self._kvm_password, timeout=self._timeout)
-            self._hid.connect()
+            self._hid = self._connect_rfb()
         return self._hid
 
     def reset_kvm_session(self) -> None:

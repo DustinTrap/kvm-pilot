@@ -1374,3 +1374,84 @@ def test_unsupported_feature_blames_the_5900_path_not_the_operator(amt_emu):
     assert "16994" in msg                       # names the path that DOES work
     assert "MEBx is probably NOT the problem" in msg
     assert "G3" not in msg                      # neither wrong cause may lead
+
+
+# -- #245: KVM over the redirection port (16994) ---------------------------
+
+
+def test_redirection_kvm_stream_speaks_the_open_handshake():
+    """The ME says nothing until the client opens the session — a naive
+    connect-and-read just times out. Sequence measured on a Latitude 5411:
+    client sends 0x40 OPEN_SESSION, ME replies 0x41 OPEN_REPLY (byte[1]==0),
+    then the RFB greeting follows on the same stream.
+    """
+    import struct
+
+    from kvm_pilot.drivers.amt.rfb import RedirKvmStream
+
+    class FakeChan:
+        def __init__(self):
+            self.sent = b""
+            # OPEN_REPLY and the greeting arrive in ONE segment — the packing
+            # that made an exact-8 read swallow the greeting (#245).
+            self.pending = bytes([0x41, 0, 0, 0, 0, 0, 0, 0]) + b"RFB 004.000\n"
+
+        def open(self, tag):
+            return self
+
+        def send(self, data):
+            self.sent += data
+
+        def recv(self, n=65536):
+            out, self.pending = self.pending[:n], self.pending[n:]
+            return out
+
+        def close(self):
+            pass
+
+    chan = FakeChan()
+    st = RedirKvmStream("h", "admin", "pw")
+    st._chan = chan
+    st._chan.open(None)
+    st._chan.send(bytes([0x40, 0, 0, 0]) + struct.pack("<HHHI", 30000, 0, 20000, 1))
+    reply = st._recv_exact(8)
+    assert reply[0] == 0x41 and reply[1] == 0
+    # The greeting must survive the exact-read, not be consumed with the reply.
+    assert st.recv(12) == b"RFB 004.000\n"
+
+
+def test_redir_stream_recv_never_overreads():
+    """RedirectionChannel.recv() returns its whole buffer regardless of the size
+    asked for; the RFB reader needs exact framing or the stream desynchronizes.
+    """
+    from kvm_pilot.drivers.amt.rfb import RedirKvmStream
+
+    class Chan:
+        pending = b"ABCDEFGHIJ"
+
+        def recv(self, n=65536):
+            out, self.pending = self.pending, b""   # deliberately ignores n
+            return out
+
+        def close(self):
+            pass
+
+    st = RedirKvmStream("h", "u", "p")
+    st._chan = Chan()
+    assert st.recv(4) == b"ABCD"
+    assert st.recv(3) == b"EFG"
+    assert st._recv_exact(3) == b"HIJ"
+
+
+def test_zero_security_types_names_a_declining_service(amt_rfb):
+    """0 offered security types means the KVM service declined the session, not
+    that a credential was wrong — the two need different responses from an
+    operator, and AMT sends no reason string (#245).
+    """
+    from kvm_pilot.drivers.amt.rfb import Rfb
+
+    amt_rfb.refuse_silently = True
+    with pytest.raises(AuthError) as ei:
+        Rfb("127.0.0.1", amt_rfb.port, "Chang3M!", timeout=5).connect()
+    msg = str(ei.value)
+    assert "NO security types" in msg and "declined the session" in msg

@@ -38,7 +38,8 @@ import socket
 import struct
 import time
 import zlib
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from typing import Any
 
 from ...errors import AuthError, ConnectionError, KVMPilotError, ProtocolError
 
@@ -206,6 +207,11 @@ def key_to_keysym(name: str) -> int:
 # case) — but RAW is decoded too, for SKUs that do send it.
 _ENC_RAW = 0
 _ENC_RLE = 16
+
+# Redirection-session message types, shared with IDE-R (see ider.py): the KVM
+# tunnel opens with the same OPEN/OPEN_REPLY pair before RFB takes over (#245).
+_REDIR_OPEN = 0x40
+_REDIR_OPEN_REPLY = 0x41
 _ENC_DESKTOP_SIZE = -223  # 0xFFFFFF21
 
 
@@ -292,12 +298,104 @@ def _decode_zrle_tile(u: bytes, w: int, h: int) -> list[int]:
     raise ProtocolError(f"AMT RFB: unknown RLE sub-encoding {sub}")
 
 
-class Rfb:
-    """One RFB session to an AMT KVM-redirection endpoint (connect → auth →
-    ServerInit). Short-lived: opened per snapshot / HID burst, then closed."""
+class RedirKvmStream:
+    """RFB byte-stream carried by an authenticated AMT redirection session (16994).
 
-    def __init__(self, host: str, port: int, password: str, *, timeout: float = 15.0):
+    AMT offers KVM two ways: the legacy plain-RFB listener on the standard VNC
+    port 5900, and the same pixel protocol tunnelled inside a redirection
+    session on 16994 — the port SOL and IDE-R already use. **Newer ME firmware
+    disables the 5900 path and keeps only this one** (measured on a Latitude
+    5411 at 14.1.79: ``Is5900PortEnabled`` false and un-settable, while a KVMR
+    session on 16994 served pixels), so this is not an alternative transport so
+    much as the surviving one (#245).
+
+    Wire sequence, established against that device — the ME says nothing until
+    the client opens the session, which is why a naive "connect and read"
+    just times out::
+
+        StartRedirectionSession("KVMR") + digest auth   (RedirectionChannel)
+        client -> 0x40 OPEN_SESSION   rx/tx/heartbeat LE16 + version LE32
+        ME     -> 0x41 OPEN_REPLY     byte[1] == 0 on success
+        ME     -> "RFB 004.000\n"     ... the normal AMT RFB handshake follows
+
+    Exposes the ``recv``/``sendall``/``close`` shape :class:`Rfb` needs, so the
+    RFB state machine is identical on both transports.
+    """
+
+    def __init__(self, host: str, user: str, passwd: str, *,
+                 port: int = 16994, timeout: float = 15.0):
+        self.host, self.port = host, port
+        self._user, self._passwd, self._timeout = user, passwd, timeout
+        self._chan: Any = None
+        # Own buffer, because RedirectionChannel.recv() hands back everything it
+        # has buffered regardless of the size asked for. The ME packs OPEN_REPLY
+        # and the "RFB 004.000" greeting into one segment, so an exact-8 read of
+        # the reply would swallow the greeting and drop it — after which the RFB
+        # handshake waits forever for bytes already consumed and the ME resets.
+        self._pending = b""
+
+    def connect(self) -> RedirKvmStream:
+        from .redir import START_KVM, RedirectionChannel
+
+        self._chan = RedirectionChannel(
+            self.host, self._user, self._passwd, port=self.port, timeout=self._timeout
+        )
+        self._chan.open(START_KVM)
+        # Same OPEN_SESSION payload IDE-R sends: rx/tx/heartbeat timeouts then version.
+        self._chan.send(bytes([_REDIR_OPEN, 0, 0, 0]) + struct.pack("<HHHI", 30000, 0, 20000, 1))
+        reply = self._recv_exact(8)
+        if reply[0] != _REDIR_OPEN_REPLY:
+            raise ProtocolError(
+                f"AMT KVM redirection: expected OPEN_REPLY (0x41) from {self.host}, "
+                f"got 0x{reply[0]:02x}"
+            )
+        if reply[1] != 0:
+            raise ProtocolError(
+                f"AMT KVM redirection session refused by {self.host} (status {reply[1]})"
+            )
+        return self
+
+    def _fill(self) -> None:
+        chunk = self._chan.recv(65536)
+        if not chunk:
+            raise ConnectionError(f"AMT KVM redirection to {self.host} closed mid-stream")
+        self._pending += chunk
+
+    def _recv_exact(self, n: int) -> bytes:
+        while len(self._pending) < n:
+            self._fill()
+        out, self._pending = self._pending[:n], self._pending[n:]
+        return out
+
+    def recv(self, n: int) -> bytes:
+        """Up to ``n`` bytes, never more — the framing the RFB reader assumes."""
+        if not self._pending:
+            self._fill()
+        out, self._pending = self._pending[:n], self._pending[n:]
+        return out
+
+    def sendall(self, data: bytes) -> None:
+        self._chan.send(data)
+
+    def close(self) -> None:
+        if self._chan is not None:
+            self._chan.close()
+            self._chan = None
+
+
+class Rfb:
+    """One RFB session to an AMT KVM endpoint (connect → auth → ServerInit).
+    Short-lived: opened per snapshot / HID burst, then closed.
+
+    ``stream_factory`` supplies the byte transport; the default dials the
+    standard VNC port directly. Pass :class:`RedirKvmStream` to run the very
+    same protocol over a redirection session instead (#245).
+    """
+
+    def __init__(self, host: str, port: int, password: str, *, timeout: float = 15.0,
+                 stream_factory: Callable[[], Any] | None = None):
         self.host, self.port, self._passwd, self._timeout = host, port, password, timeout
+        self._stream_factory = stream_factory
         self.width = self.height = 0
         self._sock: socket.socket | None = None
         self._last_xy = (0, 0)
@@ -337,6 +435,15 @@ class Rfb:
             raise ConnectionError(f"AMT RFB {self.host}:{self.port} dropped on send: {e}") from e
 
     def connect(self) -> None:
+        # Idempotent: the driver hands out already-connected sessions (it picks the
+        # transport by attempting one), and `with session as r:` would otherwise
+        # dial a second time and strand the first.
+        if self._sock is not None:
+            return
+        if self._stream_factory is not None:
+            self._sock = self._stream_factory()
+            self._handshake()
+            return
         try:
             self._sock = socket.create_connection((self.host, self.port), timeout=self._timeout)
         except OSError as e:
@@ -357,9 +464,22 @@ class Rfb:
             raise ProtocolError(f"AMT RFB: not an RFB server (got {server_ver!r})")
         self._send(b"RFB 003.008\n")
         n = self._recv(1)[0]
-        if n == 0:  # server sent a reason string then dropped us
-            reason = self._recv(struct.unpack(">I", self._recv(4))[0])
-            raise AuthError(f"AMT RFB refused the connection: {reason.decode('latin-1', 'replace')}")
+        if n == 0:
+            # Spec says a reason string follows; AMT often just drops the socket.
+            try:
+                reason = self._recv(struct.unpack(">I", self._recv(4))[0])
+                detail = reason.decode("latin-1", "replace")
+            except (ConnectionError, struct.error):
+                detail = "(no reason sent — the ME closed the connection)"
+            raise AuthError(
+                f"AMT RFB refused the connection: {detail}. The server offered NO security "
+                "types, which means the KVM service itself declined the session rather than "
+                "rejecting a credential. Measured on a Latitude 5411 at 14.1.79 with consent "
+                "off and a valid 8-char RFB password: the KVM SAP sat at EnabledState=6 "
+                "(enabled but offline), Is5900PortEnabled was false and un-settable, and this "
+                "refusal followed on both transports — i.e. KVM is not serving on that "
+                "firmware at all, independently of which port is used (#245)."
+            )
         sectypes = set(self._recv(n))
         if 2 not in sectypes:  # 2 = VNC Authentication
             raise AuthError(f"AMT RFB: server offers no VNC-auth (types={sorted(sectypes)})")
