@@ -65,6 +65,35 @@ EXCLUDE_PATTERNS = (
 )
 
 
+# Reporting categories, in priority order — FIRST match wins, so a file named by
+# a specific category is never re-claimed by a broader one below it. Reporting
+# only: the gate's pass/fail verdict is the blended number (#246). A per-category
+# breakdown is the cheap half of differential floors, and it is what tells us
+# whether the expensive half is warranted — a small badly-covered area is
+# invisible inside a large well-covered one, which is exactly what a blended
+# floor cannot see.
+CATEGORIES: tuple[tuple[str, tuple[str, ...]], ...] = (
+    # The approval/gate path: where a regression is most expensive.
+    ("Safety & approval", ("*/safety.py", "*/mcp/act.py")),
+    ("MCP server",        ("*/mcp/*",)),
+    ("Drivers",           ("*/drivers/*", "*/client.py")),
+    ("Vision",            ("*/vision/*",)),
+    ("CLI",               ("*/cli.py",)),
+    ("Health & evidence", ("*/health.py", "*/support_matrix.py", "*/maturity.py",
+                           "*/firmware_registry.py", "*/test_report.py")),
+    ("In-band channels",  ("*/ssh.py", "*/remote_ps.py", "*/wol.py", "*/efiboot.py")),
+    ("Core plumbing",     ("*/http.py", "*/config.py", "*/errors.py", "*/detect.py",
+                           "*/router.py", "*/benchmark.py", "*/calibrate.py",
+                           "*/bootstrap.py")),
+)
+
+# Named in docs/coverage-policy.md as the trigger for revisiting per-category
+# floors. Reported, never enforced — tripping it starts a conversation, not a
+# build failure.
+WATCH_FILES = ("safety.py", "mcp/act.py")
+WATCH_FLOOR = 90.0
+
+
 class GateError(Exception):
     """A degenerate input: the gate cannot honestly answer, so it must not pass."""
 
@@ -100,8 +129,17 @@ def read_floor(path: Path) -> float:
         ) from exc
 
 
+def category_of(filename: str) -> str:
+    """The reporting category for ``filename``; first pattern match wins."""
+    candidates = (filename, "/" + filename.lstrip("/"))
+    for name, patterns in CATEGORIES:
+        if any(fnmatch.fnmatch(c, p) for c in candidates for p in patterns):
+            return name
+    return "Other"
+
+
 def measure(report: Path, patterns: tuple[str, ...] = EXCLUDE_PATTERNS) -> tuple[int, int, list[str]]:
-    """``(hit, total, excluded_files)`` line counts from a cobertura report.
+    """``(hit, total, excluded, by_category, watched)`` from a cobertura report.
 
     Line coverage, not branch: it is the measure a floor can be reasoned about
     without knowing how the suite exercises each condition.
@@ -118,15 +156,28 @@ def measure(report: Path, patterns: tuple[str, ...] = EXCLUDE_PATTERNS) -> tuple
 
     hit = total = 0
     excluded: list[str] = []
+    by_cat: dict[str, list[int]] = {}
+    watched: dict[str, list[int]] = {}
     for cls in tree.getroot().iter("class"):
         filename = cls.get("filename") or ""
         if is_excluded(filename, patterns):
             excluded.append(filename)
             continue
+        f_hit = f_total = 0
         for line in cls.iter("line"):
-            total += 1
+            f_total += 1
             if int(line.get("hits", "0") or 0) > 0:
-                hit += 1
+                f_hit += 1
+        hit += f_hit
+        total += f_total
+        # A file can appear as several <class> elements; accumulate, never replace.
+        cat = by_cat.setdefault(category_of(filename), [0, 0])
+        cat[0] += f_hit
+        cat[1] += f_total
+        if any(filename.endswith(w) for w in WATCH_FILES):
+            w = watched.setdefault(filename, [0, 0])
+            w[0] += f_hit
+            w[1] += f_total
 
     if total == 0:
         raise GateError(
@@ -135,7 +186,7 @@ def measure(report: Path, patterns: tuple[str, ...] = EXCLUDE_PATTERNS) -> tuple
             "file matched an exclusion pattern — either way the gate cannot measure "
             "anything and must not report success."
         )
-    return hit, total, excluded
+    return hit, total, excluded, by_cat, watched
 
 
 def write_summary(text: str) -> None:
@@ -151,6 +202,38 @@ def write_summary(text: str) -> None:
         pass  # a broken summary file must never fail the build
 
 
+def format_breakdown(by_cat: dict[str, list[int]], watched: dict[str, list[int]]) -> str:
+    """Per-category table, worst first, plus any watched file under its threshold.
+
+    Reporting only — nothing here changes the verdict. The point is that a
+    blended floor structurally cannot see a small badly-covered area inside a
+    large well-covered one, and this is what makes that visible while the gate
+    stays simple (#246).
+    """
+    rows = sorted(
+        ((name, h, n) for name, (h, n) in by_cat.items() if n),
+        key=lambda r: r[1] / r[2],
+    )
+    lines = ["| Category | Coverage | Lines | Uncovered |", "|---|---:|---:|---:|"]
+    lines += [f"| {name} | {100.0 * h / n:.2f}% | {n} | {n - h} |" for name, h, n in rows]
+
+    tripped = [
+        (fn, 100.0 * h / n)
+        for fn, (h, n) in sorted(watched.items())
+        if n and 100.0 * h / n < WATCH_FLOOR
+    ]
+    if tripped:
+        detail = ", ".join(f"`{fn}` at {pct:.2f}%" for fn, pct in tripped)
+        lines += [
+            "",
+            f"> ⚠️ **Per-category revisit trigger met** — {detail}, below the "
+            f"{WATCH_FLOOR:.0f}% watch threshold for the approval/gate path. "
+            "This does not fail the build; see `docs/coverage-policy.md` for the "
+            "decision it is meant to prompt.",
+        ]
+    return "\n".join(lines)
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     parser.add_argument("--report", default=REPORT_FILE, type=Path,
@@ -161,7 +244,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         floor = read_floor(args.floor)
-        hit, total, excluded = measure(args.report)
+        hit, total, excluded, by_cat, watched = measure(args.report)
     except GateError as exc:
         print(f"coverage gate: {exc}", file=sys.stderr)
         return 2
@@ -170,10 +253,11 @@ def main(argv: list[str] | None = None) -> int:
     detail = (f"{pct:.2f}% line coverage ({hit}/{total} lines"
               + (f", {len(excluded)} file(s) excluded" if excluded else "")
               + f"); floor {floor:.2f}%")
+    breakdown = format_breakdown(by_cat, watched)
 
     if pct + 1e-9 < floor:
         write_summary(
-            f"### ❌ Coverage below the floor\n\n{detail}\n\n"
+            f"### ❌ Coverage below the floor\n\n{detail}\n\n{breakdown}\n"
             f"Short by {floor - pct:.2f} points. Add tests, or — if the drop is "
             f"deliberate — lower the floor in `{args.floor}` **with a tracking issue "
             "explaining why**. Lowering it silently is the failure mode this gate exists "
@@ -184,7 +268,7 @@ def main(argv: list[str] | None = None) -> int:
     if pct - floor >= NUDGE_MARGIN:
         suggested = round(pct - NUDGE_BUFFER, 2)
         write_summary(
-            f"### 📈 Coverage floor can be raised\n\n{detail}\n\n"
+            f"### 📈 Coverage floor can be raised\n\n{detail}\n\n{breakdown}\n"
             f"Clears the floor by {pct - floor:.2f} points. Bank it: set "
             f"`{args.floor}` to **{suggested}**.\n\n"
             "This suggestion repeats on every green run until someone raises the "
@@ -193,7 +277,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
-    print(f"coverage gate: OK — {detail}")
+    write_summary(f"### ✅ Coverage gate passed\n\n{detail}\n\n{breakdown}")
     return 0
 
 

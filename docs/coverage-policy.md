@@ -77,6 +77,39 @@ Both are real, testable surface, and both are partly tested. Hiding the two
 biggest genuine gaps behind an "it's just wiring" label is precisely the
 dishonesty the exclusion rule exists to prevent.
 
+## Per-category reporting
+
+The gate **reports** a per-category breakdown on every run — in the job summary,
+worst first — while the pass/fail verdict stays the single blended number. This
+is the cheap half of differential floors, and it is what tells us whether the
+expensive half is worth building.
+
+It exists because **a blended floor structurally cannot see a small
+badly-covered area inside a large well-covered one.** At introduction:
+
+| Category | Coverage | Lines | Uncovered |
+|---|---:|---:|---:|
+| MCP server | 49.22% | 644 | 327 |
+| CLI | 76.92% | 1053 | 243 |
+| Vision | 87.33% | 371 | 47 |
+| Health & evidence | 89.76% | 1562 | 160 |
+| Safety & approval | 89.93% | 447 | 45 |
+| Drivers | 90.28% | 3322 | 323 |
+| Core plumbing | 92.18% | 998 | 78 |
+| In-band channels | 92.40% | 263 | 20 |
+| **Blended (the gate)** | **85.66%** | **8670** | **1243** |
+
+3,322 lines of drivers at 90% carry the blend; `mcp/server.py` at 48% is nearly
+invisible inside it. That is the finding the breakdown exists to make visible,
+and it is not a reason to panic — the MCP server is thin dispatch over layers
+that *are* tested, and much of the uncovered part is tool-registration wiring.
+It is a reason to know.
+
+Categories are defined in the gate script beside the exclusions, so one file
+still answers "what is measured?". They are matched **first-match-wins**, which
+is why `mcp/act.py` reports under *Safety & approval* rather than being absorbed
+into *MCP server* — the approval path deserves its own line.
+
 ## Why one blended floor, for now
 
 Differential floors — `safety.py` ≥90%, drivers ≥75%, CLI ≥60% — weight the gate
@@ -90,8 +123,21 @@ floors they would be given.
    number hid it, or
 2. `safety.py` or `mcp/act.py` — the gate/approval path — falls below 90%.
 
-Until then the blended floor buys most of the value for a fraction of the
-machinery.
+The gate now **reports** condition 2 automatically: a watched file under the
+threshold prints a warning in the job summary. It does not fail the build —
+tripping the trigger is meant to start a decision, not block a merge.
+
+> **Status at introduction: condition 2 is already met.** `mcp/act.py` measures
+> **89.53%**, a hair under the threshold (`safety.py` is fine at 92.31%). The
+> trigger fired on the day it was written, which is worth stating plainly rather
+> than leaving in a doc nobody re-reads. The honest reading is that 90 was chosen
+> as a round number and `act.py` sits just beneath it — not that the approval
+> path is unguarded. The decision it prompts is small: **bring `act.py` back over
+> 90 with tests for its uncovered branches**, and only then ask whether the
+> threshold deserves to be enforced rather than reported.
+
+Until that decision is made, the blended floor buys most of the value for a
+fraction of the machinery.
 
 ## Baseline
 

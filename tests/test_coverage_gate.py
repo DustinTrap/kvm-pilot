@@ -150,8 +150,10 @@ def test_nudge_stays_quiet_inside_the_margin(tmp_path, monkeypatch, capsys):
     summary = tmp_path / "summary.md"
     rc = _run(tmp_path, {"src/a.py": (855, 145)}, "85.0", monkeypatch, summary=summary)
     assert rc == 0  # 85.50% — above the floor
-    assert not summary.exists() or "can be raised" not in summary.read_text(encoding="utf-8")
-    assert "OK" in capsys.readouterr().out
+    body = summary.read_text(encoding="utf-8") if summary.exists() else ""
+    assert "can be raised" not in body
+    assert "passed" in body            # a quiet pass still reports the verdict
+    assert "passed" in capsys.readouterr().out
 
 
 def test_failure_is_reported_to_the_step_summary(tmp_path, monkeypatch):
@@ -252,3 +254,80 @@ def test_no_second_coverage_floor_competes_with_the_ratchet():
     active = [ln for ln in body.splitlines()
               if ln.strip().startswith("fail_under") and not ln.strip().startswith("#")]
     assert not active, f"a second coverage floor is configured: {active}"
+
+
+# -- per-category reporting (#246) -----------------------------------------
+
+
+def test_categories_are_first_match_wins():
+    """Order matters: a specific category must not be re-claimed by a broader
+    one below it, or `mcp/act.py` lands in 'MCP server' and the approval path
+    stops being visible as its own line."""
+    assert gate.category_of("src/kvm_pilot/mcp/act.py") == "Safety & approval"
+    assert gate.category_of("src/kvm_pilot/safety.py") == "Safety & approval"
+    assert gate.category_of("src/kvm_pilot/mcp/server.py") == "MCP server"
+    assert gate.category_of("src/kvm_pilot/drivers/glkvm.py") == "Drivers"
+    assert gate.category_of("src/kvm_pilot/client.py") == "Drivers"
+    assert gate.category_of("src/kvm_pilot/nowhere.py") == "Other"
+
+
+def test_every_category_pattern_claims_something_real():
+    """A category matching nothing is a stale pattern quietly reporting 0 files."""
+    import xml.etree.ElementTree as ET
+
+    root = Path(__file__).resolve().parents[1]
+    report = root / "coverage.xml"
+    if not report.exists():
+        pytest.skip("no coverage.xml in the tree (run pytest --cov first)")
+    seen = {
+        gate.category_of(cls.get("filename") or "")
+        for cls in ET.parse(report).getroot().iter("class")
+    }
+    named = {name for name, _ in gate.CATEGORIES}
+    assert not (named - seen), f"categories matching no file: {sorted(named - seen)}"
+
+
+def test_breakdown_is_ordered_worst_first(tmp_path, monkeypatch):
+    summary = tmp_path / "s.md"
+    files = {
+        "src/kvm_pilot/drivers/a.py": (95, 5),    # Drivers  95%
+        "src/kvm_pilot/mcp/server.py": (40, 60),  # MCP      40%
+        "src/kvm_pilot/cli.py": (70, 30),         # CLI      70%
+    }
+    _run(tmp_path, files, "50.0", monkeypatch, summary=summary)
+    body = summary.read_text(encoding="utf-8")
+    order = [body.index(c) for c in ("MCP server", "CLI", "Drivers")]
+    assert order == sorted(order), "the worst category must be listed first"
+
+
+def test_breakdown_appears_on_pass_and_on_failure(tmp_path, monkeypatch):
+    # 89.5 keeps the clearance inside the nudge margin so this exercises the
+    # PLAIN pass path; 99.0 exercises the failure path.
+    for floor, expect in (("89.5", "passed"), ("99.0", "below the floor")):
+        summary = tmp_path / f"s{floor}.md"
+        _run(tmp_path, {"src/kvm_pilot/drivers/a.py": (90, 10)},
+             floor, monkeypatch, summary=summary)
+        body = summary.read_text(encoding="utf-8")
+        assert expect in body
+        assert "| Category |" in body, "the breakdown must accompany every verdict"
+
+
+def test_watch_trigger_reports_but_never_fails(tmp_path, monkeypatch):
+    """Tripping the approval-path threshold starts a conversation, not a build
+    failure — the gate's verdict stays the blended number."""
+    summary = tmp_path / "s.md"
+    files = {
+        "src/kvm_pilot/mcp/act.py": (80, 20),     # 80% — under the 90 watch floor
+        "src/kvm_pilot/drivers/a.py": (99, 1),    # keeps the blend well above
+    }
+    rc = _run(tmp_path, files, "85.0", monkeypatch, summary=summary)
+    assert rc == 0, "a tripped watch threshold must not fail the build"
+    body = summary.read_text(encoding="utf-8")
+    assert "revisit trigger met" in body and "act.py" in body
+
+
+def test_watch_trigger_silent_when_the_approval_path_is_healthy(tmp_path, monkeypatch):
+    summary = tmp_path / "s.md"
+    files = {"src/kvm_pilot/mcp/act.py": (95, 5), "src/kvm_pilot/drivers/a.py": (90, 10)}
+    _run(tmp_path, files, "85.0", monkeypatch, summary=summary)
+    assert "revisit trigger" not in summary.read_text(encoding="utf-8")
