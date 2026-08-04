@@ -42,6 +42,7 @@ if TYPE_CHECKING:
     from .ipmi import IpmiDriver
     from .pikvm import BliKVMDriver
     from .redfish import RedfishDriver
+    from .ssh_plane import SshDriver
 
 
 # -- driver registry -------------------------------------------------------
@@ -93,6 +94,12 @@ def _make_amt(**conf: object) -> KVMDriver:
     return AmtDriver(**conf)  # type: ignore[arg-type]
 
 
+def _make_ssh(**conf: object) -> KVMDriver:
+    from .ssh_plane import SshDriver
+
+    return SshDriver(**conf)  # type: ignore[arg-type,return-value]
+
+
 _DRIVER_FACTORIES: dict[str, Callable[..., KVMDriver]] = {
     # PiKVM-family: one base (PiKVMDriver) with thin GLKVM/BliKVM subclasses for
     # the API-compatible forks.
@@ -105,6 +112,9 @@ _DRIVER_FACTORIES: dict[str, Callable[..., KVMDriver]] = {
     "ipmi": _make_ipmi,
     # Intel AMT / vPro (WS-Man + SOL + KVM redirection) — firmware-level OOB.
     "amt": _make_amt,
+    # OS plane: a host reachable only over SSH, with no device beneath it (#248).
+    # Explicit selection only — auto-detect never returns this.
+    "ssh": _make_ssh,
     "fake": _make_fake,
 }
 
@@ -137,7 +147,7 @@ def make_driver(kind: str = "pikvm", **conf: object) -> KVMDriver:
 
 def make_driver_from_config(
     cfg: HostConfig, *, confirm: Callable[[str, str], bool] | None = None, dry_run: bool = False
-) -> KVMClient | FakeDriver | RedfishDriver | IpmiDriver | AmtDriver:
+) -> KVMClient | FakeDriver | RedfishDriver | IpmiDriver | AmtDriver | SshDriver:
     """Build the driver named by ``cfg.driver`` from a resolved ``HostConfig``.
 
     Shared by the CLI and the MCP server so a profile/env that pins
@@ -159,7 +169,7 @@ def make_driver_from_config(
     if kind == "fake":
         from .fake import FakeDriver
 
-        drv: KVMClient | FakeDriver | RedfishDriver | IpmiDriver | AmtDriver = FakeDriver(
+        drv: KVMClient | FakeDriver | RedfishDriver | IpmiDriver | AmtDriver | SshDriver = FakeDriver(
             host=cfg.host, confirm=confirm, dry_run=dry_run
         )
     elif kind in ("pikvm", "glkvm", "blikvm"):
@@ -181,10 +191,14 @@ def make_driver_from_config(
         from .amt import AmtDriver
 
         drv = AmtDriver.from_config(cfg, confirm=confirm, dry_run=dry_run)
+    elif kind == "ssh":
+        from .ssh_plane import SshDriver
+
+        drv = SshDriver.from_config(cfg, confirm=confirm, dry_run=dry_run)
     else:
         raise KVMPilotError(
             f"Driver {kind!r} does not support from-config construction here "
-            "(supported: pikvm, glkvm, blikvm, redfish, ipmi, amt, fake). Build it directly with "
+            "(supported: pikvm, glkvm, blikvm, redfish, ipmi, amt, ssh, fake). Build it directly with "
             f"make_driver({kind!r}, ...) from the library."
         )
     # Attach the in-band SSH channel to the managed host's OS when the profile

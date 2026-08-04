@@ -236,9 +236,15 @@ def resolve_host(
     # assuming pikvm (#235). Resolved to a concrete kind at driver-build time.
     resolved_driver = pick("driver", driver, "KVM_PILOT_DRIVER", "auto")
     resolved_host = pick("host", host, "KVM_PILOT_HOST")
+    resolved_ssh_host = pick("ssh_host", ssh_host, "KVM_PILOT_SSH_HOST")
     if not resolved_host:
         if resolved_driver == "fake":
             resolved_host = "fake"  # the in-process fake driver needs no real host
+        elif resolved_driver == "ssh" and resolved_ssh_host:
+            # OS plane: there is no appliance, so the managed host's own address
+            # IS the target. `host` stays populated so every report, cache key and
+            # audit line still has one identity to key on (#248).
+            resolved_host = resolved_ssh_host
         else:
             raise ValueError(
                 "No host specified. Provide --host, set KVM_PILOT_HOST, or name a "
@@ -271,7 +277,7 @@ def resolve_host(
         totp_secret=pick("totp_secret", totp_secret, "KVM_PILOT_TOTP_SECRET"),
         driver=resolved_driver,
         redfish_auth=pick("redfish_auth", redfish_auth, "KVM_PILOT_REDFISH_AUTH", "session"),
-        ssh_host=pick("ssh_host", ssh_host, "KVM_PILOT_SSH_HOST"),
+        ssh_host=resolved_ssh_host,
         ssh_user=pick("ssh_user", ssh_user, "KVM_PILOT_SSH_USER"),
         ssh_port=int(pick("ssh_port", ssh_port, "KVM_PILOT_SSH_PORT", 22)),
         ssh_key=pick("ssh_key", ssh_key, "KVM_PILOT_SSH_KEY"),

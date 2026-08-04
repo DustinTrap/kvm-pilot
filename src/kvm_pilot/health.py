@@ -165,7 +165,7 @@ _KNOWN_DEFAULT_CREDS = {("admin", "admin"), ("admin", "password"), ("root", "roo
 
 def _driver_kind(driver: Any) -> str:
     name = type(driver).__name__.lower()
-    for kind in ("glkvm", "blikvm", "redfish", "ipmi", "amt", "fake"):
+    for kind in ("glkvm", "blikvm", "redfish", "ipmi", "amt", "ssh", "fake"):
         if kind in name:
             return kind
     return "pikvm"
@@ -380,7 +380,23 @@ def check_recovery_path(driver: Any) -> CheckResult | None:
                 title="Out-of-band recovery path",
                 detail="Driver exposes out-of-band power/reset.",
             )
-        return None
+        # No ATX surface AND no power capability: there is genuinely nothing here
+        # that can reset a hung machine. Previously this returned None and the
+        # check vanished — which reads as "fine" to anyone scanning a report. It
+        # is the single most consequential fact about an OS-plane target (#248),
+        # and it is equally true of any future driver with no power surface.
+        return CheckResult(
+            id="recovery-path",
+            pillar=Pillar.READINESS,
+            severity=Severity.CRITICAL,
+            title="Out-of-band recovery path",
+            detail="No out-of-band reset: this interface has no power control at all. "
+                   "If the machine hangs or loses its network, nothing here can recover "
+                   "it — every capability on this plane needs the OS to be up.",
+            remediation="Pair this target with an out-of-band interface (a KVM appliance, "
+                        "or a BMC via the redfish/ipmi/amt drivers), or accept that "
+                        f"recovery needs physical access. Order when it hangs: {RECOVERY_ORDER}",
+        )
 
     # PiKVM family: ATX must actually be wired to the host header.
     atx_wired = False

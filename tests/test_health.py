@@ -335,7 +335,9 @@ def test_preflight_reprobes_volatile_but_reuses_stable_cache(tmp_path):
             get_firmware_info=lambda: {"version": "1.0", "model": "M"},
             known_quirks=known_quirks,
             has_video_signal=lambda: video_ok,
-            supports=lambda cap: False,
+# A device driver always has a power surface; without one the (correct)
+            # no-OOB-recovery CRITICAL fires and gates these preflight tests (#248).
+            supports=lambda cap: str(cap) == "power",
         )
 
     # First run: populates the stable cache (stable audit runs once).
@@ -358,7 +360,8 @@ def test_preflight_enforces_gate_on_critical(tmp_path):
         get_atx_state=lambda: {"enabled": False},
         get_gpio_state=lambda: {"state": {"outputs": {}}},
         has_video_signal=lambda: True,
-        supports=lambda cap: False,
+# see above: a powerless stub trips the no-OOB-recovery CRITICAL (#248)
+        supports=lambda cap: str(cap) == "power",
     )
     with pytest.raises(HealthGateError):
         preflight(d, cache=HealthCache(tmp_path / "hc.json"), confirm=None)
@@ -794,7 +797,8 @@ def _delta_driver(version, quirks=()):
         get_firmware_info=lambda: {"version": version, "model": "M"},
         known_quirks=lambda firmware=None: list(quirks),
         has_video_signal=lambda: True,
-        supports=lambda cap: False,
+# see above: a powerless stub trips the no-OOB-recovery CRITICAL (#248)
+        supports=lambda cap: str(cap) == "power",
     )
 
 

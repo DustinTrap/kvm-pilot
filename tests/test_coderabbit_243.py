@@ -63,8 +63,11 @@ def test_warm_cache_preflight_still_reports_hid_reachable(tmp_path):
             def get_hid_state(self):
                 return {"online": True, "busy": False, "connected": True}
 
-            def supports(self, _cap):
-                return False
+            def supports(self, cap):
+                # A device driver always has a power surface; without one the
+                # (correct) no-OOB-recovery CRITICAL now fires and gates the
+                # preflight this test is about (#248).
+                return str(cap) == "power"
 
         return _D()
 

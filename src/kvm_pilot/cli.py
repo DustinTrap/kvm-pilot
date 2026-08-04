@@ -64,8 +64,15 @@ if TYPE_CHECKING:
     from .drivers.fake import FakeDriver
     from .drivers.ipmi import IpmiDriver
     from .drivers.redfish import RedfishDriver
+    from .drivers.ssh_plane import SshDriver
 
+    # A DEVICE driver: something out-of-band that can act on a machine. The
+    # capability-specific handlers (power, hid, media) are typed against this.
     AnyDriver = KVMClient | FakeDriver | RedfishDriver | IpmiDriver | AmtDriver
+    # Anything the CLI can build and audit — including an OS-plane target, which
+    # is deliberately NOT a device and has no power/HID surface at all (#248).
+    # Kept separate so mypy objects if a device operation is reached from one.
+    AnyTarget = AnyDriver | SshDriver
     RichDriver = KVMClient | FakeDriver
 
 
@@ -122,7 +129,7 @@ def _resolve_cfg(args):
     )
 
 
-def _build_client(args) -> AnyDriver:
+def _build_client(args) -> AnyTarget:
     confirm = allow_all if getattr(args, "yes", False) else interactive_confirm
     dry_run = getattr(args, "dry_run", False)
     cfg = _resolve_cfg(args)
@@ -215,6 +222,10 @@ def _client(args, capability: Capability) -> AnyDriver:
             f"'{args.command}' needs the {capability.value} capability, which the "
             f"{_driver_label(kvm)} driver does not provide"
         )
+    # The gate above already excludes an OS-plane target — it advertises no
+    # capabilities at all, so it can never satisfy one — which is exactly why the
+    # narrower device type is sound from here on (#248).
+    kvm = cast("AnyDriver", kvm)
     # Preflight healthcheck (#80), run AFTER the capability check so a command the
     # driver cannot serve still fails cleanly without any network probe. Dry-run
     # and --skip-healthcheck bypass both paths.
@@ -806,6 +817,16 @@ def cmd_firmware_check(args) -> int:
     from .firmware_registry import check_currency
 
     kvm = _build_client(args)
+    if getattr(kvm, "VIDEO_SCOPE", None) is not None and _driver_label(kvm) == "ssh":
+        print(
+            "firmware-check needs a DEVICE: this is an OS-plane target (--driver ssh), "
+            "which has no KVM/BMC firmware to check or report. The run ledger and the "
+            "firmware registry join on a device's (vendor, product, firmware_version); "
+            "an operating-system version is a different kind of thing and must not enter "
+            "them (#248). Point this at the KVM appliance or BMC instead.",
+            file=sys.stderr,
+        )
+        return 2
     fw, upd, submission = check_currency(kvm)
     vendor = (fw.get("vendor") or "").strip()
     product = fw.get("product") or ""
@@ -1205,6 +1226,10 @@ def cmd_host_exec(args) -> int:
     from .router import Plane, load_for, save_scorecard, select_interface
 
     cfg = _resolve_cfg(args)
+    # host-exec targets the OS plane, so it no longer demands a device: pass
+    # `--driver ssh` with an --ssh-host and it routes in-band with no KVM at all
+    # (#248). Selection stays EXPLICIT — inferring the OS plane from "an ssh_host
+    # is set" would be the same guessing #235 removed, just with a nicer outcome.
     kvm = make_driver_from_config(cfg, confirm=allow_all, dry_run=False)
     args._driver = kvm
     command_name = "ps_exec" if args.powershell else "exec"
@@ -1284,7 +1309,8 @@ def cmd_events(args) -> int:
 
 def _add_common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--driver",
-                   choices=["auto", "pikvm", "glkvm", "blikvm", "redfish", "ipmi", "amt", "fake"],
+                   choices=["auto", "pikvm", "glkvm", "blikvm", "redfish", "ipmi", "amt",
+                            "ssh", "fake"],
                    help="Device driver (overrides KVM_PILOT_DRIVER / config profile; "
                         "default 'auto' = probe the device and pick, refusing to guess "
                         "when nothing identifies (#235); 'glkvm' = GL.iNet GLKVM fork, "
@@ -1323,6 +1349,15 @@ def _add_common(p: argparse.ArgumentParser) -> None:
     p.add_argument("--skip-healthcheck", dest="skip_healthcheck", action="store_true",
                    help="Skip the device preflight healthcheck gate before a "
                         "destructive action (KVM_PILOT_SKIP_HEALTHCHECK=1 also works)")
+    # The in-band channel to the managed host's OS. Available on every command,
+    # not just the ssh-* ones: it is the whole target for `--driver ssh` (#248),
+    # and on a device driver it is the second recovery plane the healthcheck
+    # probes. Resolved through the usual args > env > profile precedence.
+    p.add_argument("--ssh-host", dest="ssh_host",
+                   help="Managed host's SSH address (the machine itself, not the KVM)")
+    p.add_argument("--ssh-user", dest="ssh_user", help="SSH username for the managed host")
+    p.add_argument("--ssh-port", dest="ssh_port", type=int, help="SSH port (default 22)")
+    p.add_argument("--ssh-key", dest="ssh_key", help="Path to an SSH private key")
 
 
 def _add_ssh_target(p: argparse.ArgumentParser) -> None:

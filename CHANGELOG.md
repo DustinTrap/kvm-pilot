@@ -6,6 +6,28 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **`--driver ssh`: SSH-only machines are now first-class targets** (#248). A host
+  with no KVM and no BMC could not be healthchecked or routed, because those paths
+  built a device driver first — even though the project's own recovery ladder
+  ranks in-band SSH **second** (ahead of KVM-side recovery) and the router already
+  modelled an `OS` plane. That made kvm-pilot unusable on the half of a mixed fleet
+  without BMCs. Now `healthcheck` works on such a target and reports the fact that
+  matters most — **CRITICAL: no out-of-band reset; if it hangs, nothing here can
+  recover it** — which its operator previously could not hear at all. `host-exec`
+  no longer requires a device.
+
+  Two things deliberately unchanged: `--driver auto` still **refuses to guess** on
+  a host that only answers SSH (#235) — this driver is only ever selected
+  explicitly — and `firmware-check` still refuses, now explaining the *category*
+  difference: the run ledger joins on a device's `(vendor, product,
+  firmware_version)`, and an OS version must never enter it.
+
+### Changed
+- An interface with **no power control at all** now reports `recovery-path` as
+  CRITICAL rather than omitting the check. Previously it returned `None` and
+  vanished from the report, which reads as "fine" to anyone scanning one.
+
 ## [0.1.0rc1] — 2026-08-04
 
 **First release candidate.** The line moves from beta to RC: the engineering is
