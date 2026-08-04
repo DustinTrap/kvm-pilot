@@ -60,6 +60,8 @@ PAGES: list[tuple[str, str, str | None, str | None]] = [
     ("docs/getting-started.md", "getting-started.md", "Getting started", "Start here"),
     # Guides — task-oriented: how to accomplish something
     ("docs/amt-onboarding.md", "amt-onboarding.md", "Intel AMT onboarding runbook", "Guides"),
+    ("docs/glkvm-onboarding.md", "glkvm-onboarding.md", "GLKVM onboarding runbook", "Guides"),
+    ("docs/ipmi-onboarding.md", "ipmi-onboarding.md", "IPMI onboarding runbook", "Guides"),
     ("docs/unattended-install.md", "unattended-install.md",
      "Unattended Linux installs", "Guides"),
     ("docs/firmware-update.md", "firmware-update.md", "Remote firmware update", "Guides"),

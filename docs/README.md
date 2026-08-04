@@ -23,6 +23,8 @@ Adding a doc? See "Adding a doc" in [Contributing](CONTRIBUTING.md).
 Task-oriented: how to accomplish something.
 
 - [Intel AMT onboarding runbook](amt-onboarding.md) — the operator/agent guide to bringing an AMT box online: expectations, the ordered bring-up steps (provision → healthcheck → enable listeners), the ME-firmware-update hazard, and symptom→fix troubleshooting.
+- [GLKVM onboarding runbook](glkvm-onboarding.md) — bring a GL.iNet Comet online: enabling the REST API (it ships disabled), the on-demand encoder, the ATX false-report, and the encoder-wedge recovery.
+- [IPMI onboarding runbook](ipmi-onboarding.md) — bring a pre-Redfish BMC online: the `ipmitool` prerequisite, RAKP cipher pinning, SOL (iDRAC6 = COM2), and why there is no video at all.
 - [Unattended Linux installs](unattended-install.md) — prefer text mode + SSH over driving a graphical installer via KVM HID: the per-distro boot-arg matrix (Anaconda `inst.sshd`/`inst.text`, d-i network-console, Subiquity autoinstall, linuxrc `ssh=1`) and the SSH handoff ([#129](https://github.com/DustinTrap/kvm-pilot/issues/129)).
 - [Remote firmware update](firmware-update.md) — the GL `/api/upgrade/*` surface, the reliability/risk model, and the gated `firmware-update` command (#92).
 - [Troubleshooting & FAQ](troubleshooting.md) — symptom-first fixes: GLKVM API 404, snapshot failures, approval cancel, dark-host recovery, mouse calibration, SOL noise.

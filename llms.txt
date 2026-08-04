@@ -36,6 +36,8 @@ install with `pip install --pre kvm-pilot` (CLI `kvm-pilot`, MCP server
 - [Redfish driver reference](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/redfish.md)
 - [Intel AMT / vPro driver reference](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/amt.md): WS-Man power/boot/inventory, SOL serial, firmware-level RFB KVM
 - [Intel AMT onboarding runbook](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/amt-onboarding.md): bring an AMT box online — provision, healthcheck, enable listeners, hazards
+- [GLKVM onboarding runbook](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/glkvm-onboarding.md): bring a GL.iNet Comet online — enable the REST API, on-demand encoder, ATX false-report, encoder-wedge recovery
+- [IPMI onboarding runbook](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/ipmi-onboarding.md): bring a pre-Redfish BMC online — ipmitool prereq, cipher pinning, SOL/COM2, no video at all
 - [Hardware reliability test plan](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/test-plan.md): the reusable full-fleet sweep procedure feeding the support matrix
 - [Writing a first-class driver](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/plugin-development.md): the driver quality bar with a Definition-of-Done checklist
 - [Firmware registry](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/firmware-registry.md) and [remote firmware update](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/firmware-update.md)
