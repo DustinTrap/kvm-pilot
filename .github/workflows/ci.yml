@@ -42,12 +42,23 @@ jobs:
       - name: Pytest
         run: pytest --cov=kvm_pilot --cov-report=term-missing --cov-report=xml
 
+      # The ratchet (#246). Runs in the SAME required job as the tests, right
+      # after them: the measured thing only changes when code changes, so the
+      # correct recurrence is every push/PR that touches code — not a cron.
+      # One version only; the number is identical across the matrix and four
+      # copies of the same verdict is noise.
+      - name: Coverage floor (ratchet)
+        if: matrix.python-version == '3.12'
+        run: python scripts/coverage_gate.py
+
       - name: Upload coverage
         if: matrix.python-version == '3.12'
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: coverage
           path: coverage.xml
+          # Long retention so a trend can be read later without re-running suites.
+          retention-days: 90
           if-no-files-found: ignore
 
       - name: Wiki build smoke (#56) + docs-parity guard (#175)

@@ -66,6 +66,7 @@ Decisions and RFCs, not how-tos.
 ## Project
 
 - [Contributing](CONTRIBUTING.md) — dev setup, the pre-PR checklist, and engineering principles.
+- [Coverage policy](coverage-policy.md) — the ratchet: a committed floor that only moves up.
 - [Writing a first-class driver](plugin-development.md) — the procedural guide for adding a new device driver/plugin to the fleet-wide quality bar: capabilities, the five test layers, every doc surface, and the reliability/maturity evidence chain, with a Definition-of-Done checklist ([#211](https://github.com/DustinTrap/kvm-pilot/issues/211)).
 - [Security policy](SECURITY.md) — reporting a vulnerability and operational guidance.
 

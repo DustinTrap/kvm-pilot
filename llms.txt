@@ -44,5 +44,6 @@ install with `pip install --pre kvm-pilot` (CLI `kvm-pilot`, MCP server
 - [Design decisions](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/decisions.md)
 - [Security policy](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/SECURITY.md)
 - [Contributing](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/CONTRIBUTING.md)
+- [Coverage policy](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/coverage-policy.md)
 - [Changelog](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/CHANGELOG.md)
 - [Hardware-Compatibility list](https://github.com/DustinTrap/kvm-pilot/wiki/Hardware-Compatibility): what has actually been exercised live, per device + firmware + capability
