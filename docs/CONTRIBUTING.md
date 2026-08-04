@@ -38,6 +38,19 @@ pip-audit                                   # dependency CVEs — CI gates on th
 All of these are installed by the `[dev]` extra above; run `pip-audit` inside
 the project venv so it scans the same environment CI does.
 
+**`pytest` alone does not run everything.** The `tests/integration/` suite
+**silently skips** unless its emulator is present, so a change to CLI/driver
+*output* can pass locally and fail in CI's `redfish-integration` /
+`emulator-stack` jobs. Before a PR that touches command output or driver
+behavior, run them:
+
+```bash
+pip install "sushy-tools==2.2.0"    # the version CI pins
+pytest tests/integration -m integration
+```
+
+(`make integration` does the same against the compose stack.)
+
 CI runs the lint/type/test trio on Python 3.11, 3.12, 3.13, and 3.14, **plus** a
 `security` job (`bandit` + `pip-audit`), a `redfish-integration` job that
 drives the Redfish CLI path end-to-end against the DMTF-conformant sushy-tools
