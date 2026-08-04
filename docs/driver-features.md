@@ -11,7 +11,7 @@ expose and — per capability — how reliably it behaves on real hardware and h
 far it has actually been tested. It exists so an operator or agent can answer
 "can this driver do X, and can I trust the result?" without reading the source.
 
-> **Early alpha — read this before you trust a rating.** *Structural* support
+> **Beta — read this before you trust a rating.** *Structural* support
 > (the driver implements a protocol) is **not** the same as *verified* support.
 > Most device+capability combinations here are mock- or emulator-only. The
 > **single source of truth** for what has actually been exercised on real
