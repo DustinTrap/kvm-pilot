@@ -87,23 +87,37 @@ expensive half is worth building.
 It exists because **a blended floor structurally cannot see a small
 badly-covered area inside a large well-covered one.** At introduction:
 
-| Category | Coverage | Lines | Uncovered |
-|---|---:|---:|---:|
-| MCP server | 49.22% | 644 | 327 |
-| CLI | 76.92% | 1053 | 243 |
-| Vision | 87.33% | 371 | 47 |
-| Health & evidence | 89.76% | 1562 | 160 |
-| Safety & approval | 89.93% | 447 | 45 |
-| Drivers | 90.28% | 3322 | 323 |
-| Core plumbing | 92.18% | 998 | 78 |
-| In-band channels | 92.40% | 263 | 20 |
-| **Blended (the gate)** | **85.66%** | **8670** | **1243** |
+| Category | Coverage | Lines | Uncovered | Target |
+|---|---:|---:|---:|---:|
+| CLI | 76.92% | 1053 | 243 | 85% |
+| MCP server | 82.76% | 644 | 111 | 90% |
+| Vision | 87.87% | 371 | 45 | 90% |
+| Health & evidence | 89.76% | 1562 | 160 | 90% |
+| Drivers | 90.58% | 3322 | 313 | 90% ✅ |
+| Core plumbing | 92.18% | 998 | 78 | 90% ✅ |
+| In-band channels | 92.40% | 263 | 20 | 90% ✅ |
+| **Safety & approval** | **98.21%** | 447 | 8 | **95%** ✅ |
+| **Blended (the gate)** | **88.72%** | **8670** | **978** | — |
 
-3,322 lines of drivers at 90% carry the blend; `mcp/server.py` at 48% is nearly
-invisible inside it. That is the finding the breakdown exists to make visible,
-and it is not a reason to panic — the MCP server is thin dispatch over layers
-that *are* tested, and much of the uncovered part is tool-registration wiring.
-It is a reason to know.
+The targets are deliberately **not uniform** — see below.
+
+### The first thing the breakdown found was a measurement bug
+
+`mcp/server.py` originally measured **49%**, which read as the worst-tested area
+in the codebase. It was not. The MCP suite drives the server as a **real
+subprocess over stdio** (82 tests), and a subprocess is invisible to the parent
+process's coverage unless coverage restarts itself inside the child. Those 82
+end-to-end tests were contributing **nothing** to the number.
+
+Enabling subprocess measurement (`parallel` + `COVERAGE_PROCESS_START`, wired in
+`tests/test_mcp_server.py`) moved it from 49% to **82.76%** — 215 lines
+recovered without writing a single test.
+
+That is worth remembering as a general caution: **a coverage number can be wrong
+about which code is untested.** Chasing the original 49% with new tests would
+have produced dozens of low-value tests for code that was already thoroughly
+exercised. Measure what the number actually means before treating it as a
+backlog.
 
 Categories are defined in the gate script beside the exclusions, so one file
 still answers "what is measured?". They are matched **first-match-wins**, which
@@ -117,6 +131,26 @@ by where a regression actually hurts. They also cost roughly ten times the
 machinery, and they are premature while the high-risk files already exceed the
 floors they would be given.
 
+### Why not 95% everywhere
+
+A uniform 95% target is the wrong instrument, for three reasons this codebase
+demonstrates:
+
+1. **It weights a version constant the same as the approval gate.** A missed
+   branch in `mcp/act.py` is a security gate that does not fire; a missed branch
+   in argparse plumbing is nothing. The target should follow the blast radius —
+   which is why *Safety & approval* is held to 95% and `cli.py` is not.
+2. **The last few points are usually unprovokable branches.** Getting there means
+   mocking transports into failure modes the real device cannot produce. Those
+   tests assert *implementation*, so they lock in the code's shape and make
+   honest refactors expensive — the opposite of what coverage is for.
+3. **It creates an incentive to write assertion-free tests.** A test that
+   executes a line without checking behavior raises coverage and adds no
+   assurance. A uniform high bar is exactly the pressure that produces them.
+
+The per-category targets in the table above are the alternative: high where a
+regression is expensive, realistic where the remaining lines are plumbing.
+
 **Revisit trigger.** Go granular when either happens:
 
 1. A coverage-caused defect traces to a file whose contribution to the blended
@@ -127,24 +161,23 @@ The gate now **reports** condition 2 automatically: a watched file under the
 threshold prints a warning in the job summary. It does not fail the build —
 tripping the trigger is meant to start a decision, not block a merge.
 
-> **Status at introduction: condition 2 is already met.** `mcp/act.py` measures
-> **89.53%**, a hair under the threshold (`safety.py` is fine at 92.31%). The
-> trigger fired on the day it was written, which is worth stating plainly rather
-> than leaving in a doc nobody re-reads. The honest reading is that 90 was chosen
-> as a round number and `act.py` sits just beneath it — not that the approval
-> path is unguarded. The decision it prompts is small: **bring `act.py` back over
-> 90 with tests for its uncovered branches**, and only then ask whether the
-> threshold deserves to be enforced rather than reported.
+> **Trigger history.** Condition 2 was met the day it was written — `mcp/act.py`
+> measured 89.53%. It was closed rather than argued away: tests for the
+> elicitation path (accept / decline / cancel / prompt-failure), standing-grant
+> scoping, and frame bookkeeping took it to **96.86%**, and the category to
+> **98.21%**. That is the intended lifecycle — the trigger fires, someone writes
+> the tests, the trigger stops firing.
 
-Until that decision is made, the blended floor buys most of the value for a
-fraction of the machinery.
+The blended floor buys most of the value for a fraction of the machinery.
 
 ## Baseline
 
 | | |
 |---|---|
-| Measured at introduction | **85.66%** line coverage (7427 / 8670 lines, post-exclusion) |
-| Initial floor | **85.0** |
+| Measured at introduction | 85.66% line coverage (7427 / 8670 lines, post-exclusion) |
+| Initial floor | 85.0 |
+| **Current** | **88.72%** (7692 / 8670) — subprocess measurement + approval-path tests |
+| **Current floor** | **88.22** |
 
 Note that pytest's headline figure is **branch** coverage and reads lower
 (~83.7%). The gate measures **lines**; they are different measures, and mixing
