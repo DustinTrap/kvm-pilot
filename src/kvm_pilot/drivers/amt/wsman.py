@@ -61,8 +61,30 @@ def amt(cls: str) -> str:
     return AMT + cls
 
 
+# The ME's own management stack answers but is not functional — the signature of
+# a CSME/ME that came up only partially initialized, which is what an in-band
+# firmware update leaves behind (#217). Its defining trait: NOT repairable over
+# the network, because the one channel that could power-cycle the ME (AMT power
+# control) rides the same wedged plane.
+_ME_NOT_READY_SUBCODE = "timedout"
+ME_NOT_READY_HINT = (
+    "the ME's management stack answered but is not ready. This is the known "
+    "post-firmware-update state: an ME/CSME update (a BIOS capsule carries one) "
+    "completes only after a full power cycle — a warm reboot does NOT clear it. "
+    "Drain power (G3: unplug AC, and on a laptop the battery), boot, then retry. "
+    "No remote path exists once this happens: AMT power control is on the same "
+    "wedged plane (#217)."
+)
+
+
 class WsmanError(KVMPilotError):
-    """A SOAP fault or WS-Man protocol error returned by the AMT device."""
+    """A SOAP fault or WS-Man protocol error returned by the AMT device.
+
+    ``me_not_ready`` marks the wedged-ME signature described above, so callers
+    (and the healthcheck) can act on it instead of re-parsing the message.
+    """
+
+    me_not_ready: bool = False
 
 
 class Wsman:
@@ -120,10 +142,14 @@ class Wsman:
                     "the AMT/MEBx admin credentials (AMT digest realm).",
                     e.code,
                 ) from None
-            raise WsmanError(
-                f"AMT WS-Man HTTP {e.code} from {self.host}: {self._http_error_detail(e.read())}",
-                e.code,
-            ) from None
+            detail = self._http_error_detail(e.read())
+            not_ready = _ME_NOT_READY_SUBCODE in detail.lower()
+            msg = f"AMT WS-Man HTTP {e.code} from {self.host}: {detail}"
+            if not_ready:
+                msg += f" — {ME_NOT_READY_HINT}"
+            err = WsmanError(msg, e.code)
+            err.me_not_ready = not_ready
+            raise err from None
         except urllib.error.URLError as e:
             reason = getattr(e, "reason", e)
             if isinstance(reason, TimeoutError):

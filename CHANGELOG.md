@@ -6,6 +6,20 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **AMT: a wedged ME now diagnoses itself** (#217). An ME/CSME firmware update
+  (a BIOS capsule carries one) resets the redirection listeners and leaves the
+  ME only partially initialized — `enable-kvm` returns a bare HTTP 400 and the
+  whole WS-Man plane can degrade to `HTTP 500 e:TimedOut`, which a warm reboot
+  does not clear. That state was undiagnosable from the error text. Now: the
+  WS-Man layer recognizes the timed-out signature and appends the actual cause
+  and remedy (a full G3 power drain, and the fact that no remote path exists
+  because AMT power control rides the same wedged plane); a rejected
+  `enable-sol`/`enable-kvm` names the firmware-update cause alongside the MEBx
+  one; `healthcheck` reports `amt-redirection` as **CRITICAL** ("the management
+  stack is not ready") instead of an ordinary listener warning; and a
+  `me-firmware-update-needs-g3` quirk carries the whole story.
+
 ### Fixed
 - **A warm-cache preflight silently dropped CRITICAL findings** (#243) — four
   checks emitted `cacheable=False` results while being classified "stable", so

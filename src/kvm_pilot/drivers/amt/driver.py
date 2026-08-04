@@ -26,6 +26,7 @@ import select
 import shutil
 import subprocess  # nosec B404 - fixed argv (no shell), AMT password via env not argv
 import time
+from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
@@ -504,8 +505,9 @@ class AmtDriver(PowerMixin, CapabilityMixin):
         the socket. (Provisioning in MEBx is still a prerequisite.)"""
         if not self.safety.guard("amt.enable_sol", f"Enable AMT SOL/IDE-R redirection on {self.host}"):
             return
-        self._rmw_put(amt("AMT_RedirectionService"), "AMT_RedirectionService",
-                      {"ListenerEnabled": "true", "EnabledState": "32771"}, self._REDIR_SVC_SEL)
+        with self._redirection_context("enable-sol"):
+            self._rmw_put(amt("AMT_RedirectionService"), "AMT_RedirectionService",
+                          {"ListenerEnabled": "true", "EnabledState": "32771"}, self._REDIR_SVC_SEL)
 
     def enable_kvm(self, *, require_consent: bool = True) -> None:
         """Enable KVM redirection on the standard VNC port 5900 over WS-Man.
@@ -527,15 +529,46 @@ class AmtDriver(PowerMixin, CapabilityMixin):
             return
         # SessionTimeout non-zero so a dropped single session self-clears instead
         # of locking the port (0 = infinite); RFBPassword is write-only.
-        self._rmw_put(self._KVM_SD, "IPS_KVMRedirectionSettingData", {
-            "Is5900PortEnabled": "true",
-            "OptInPolicy": "true" if require_consent else "false",
-            "SessionTimeout": "60",
-            "RFBPassword": self._kvm_password,
-        }, self._KVM_SD_SEL)
-        self._kvm_sap_state(2)  # 2 = Enabled (no TimeoutPeriod — AMT quirk)
-        if not require_consent:
-            self._rmw_put(self._OPTIN, "IPS_OptInService", {"OptInRequired": "0"}, self._optin_selectors())
+        with self._redirection_context("enable-kvm"):
+            self._rmw_put(self._KVM_SD, "IPS_KVMRedirectionSettingData", {
+                "Is5900PortEnabled": "true",
+                "OptInPolicy": "true" if require_consent else "false",
+                "SessionTimeout": "60",
+                "RFBPassword": self._kvm_password,
+            }, self._KVM_SD_SEL)
+            self._kvm_sap_state(2)  # 2 = Enabled (no TimeoutPeriod — AMT quirk)
+            if not require_consent:
+                self._rmw_put(self._OPTIN, "IPS_OptInService", {"OptInRequired": "0"},
+                              self._optin_selectors())
+
+    @contextmanager
+    def _redirection_context(self, action: str):
+        """Turn an opaque redirection-write failure into an actionable one (#217).
+
+        A redirection enable that fails right after an ME/CSME firmware update is
+        the single most common cause and the least guessable: the ME reset the
+        listener config and will not accept a new one until a full power cycle.
+        The plane can also be outright wedged (``me_not_ready``), which wsman
+        already annotates — that message wins; this only supplies the
+        firmware-update context an otherwise-bare HTTP 400 lacks.
+
+        Scoped to HTTP-layer rejections (``status_code`` set). A semantic device
+        answer — e.g. RequestStateChange returning a non-zero ReturnValue — means
+        something specific and must surface as itself, not be re-labeled as a
+        firmware-update symptom.
+        """
+        try:
+            yield
+        except WsmanError as exc:
+            if exc.me_not_ready or not exc.status_code:
+                raise
+            raise CapabilityError(
+                f"AMT {action} was rejected by the ME: {exc}\n"
+                "If a BIOS/ME firmware update ran recently, this is expected — the update "
+                "resets the redirection config and the ME only re-initializes after a FULL "
+                "power cycle (G3: unplug AC, and on a laptop the battery). A warm reboot is "
+                "not enough. Otherwise confirm KVM/SOL redirection is enabled in MEBx (#217)."
+            ) from exc
 
     def _kvm_sap_state(self, state: int) -> None:
         sap = cim("CIM_KVMRedirectionSAP")
@@ -586,9 +619,22 @@ class AmtDriver(PowerMixin, CapabilityMixin):
         (each field independent) and **memoized** so a healthcheck's several AMT
         checks share ONE set of WS-Man reads — AMT flood-protects rapid bursts."""
         if getattr(self, "_amt_health_cache", None) is None:
-            redir = self._safe(lambda: self._wsman.get(amt("AMT_RedirectionService"), self._REDIR_SVC_SEL))
-            kvm = self._safe(lambda: self._wsman.get(self._KVM_SD, self._KVM_SD_SEL))
-            optin = self._safe(lambda: self._wsman.get(self._OPTIN))
+            wedged = False
+
+            def _read(fn: Any) -> Any:
+                """Like _safe, but remembers a wedged-ME failure (#217)."""
+                nonlocal wedged
+                try:
+                    return fn()
+                except WsmanError as exc:
+                    wedged = wedged or exc.me_not_ready
+                    return None
+                except KVMPilotError:
+                    return None
+
+            redir = _read(lambda: self._wsman.get(amt("AMT_RedirectionService"), self._REDIR_SVC_SEL))
+            kvm = _read(lambda: self._wsman.get(self._KVM_SD, self._KVM_SD_SEL))
+            optin = _read(lambda: self._wsman.get(self._OPTIN))
 
             def _b(el: Any, tag: str) -> bool | None:
                 if el is None:
@@ -602,6 +648,7 @@ class AmtDriver(PowerMixin, CapabilityMixin):
                 required = (findtext(optin, "OptInRequired") if optin is not None else None)
                 consent = bool(policy) or (required is not None and required.strip() != "0")
             self._amt_health_cache = {
+                "me_not_ready": wedged,
                 "tls": self._tls,
                 "provisioning_state": self._provisioning_state(),
                 "control_mode": self._control_mode(),
@@ -642,6 +689,15 @@ class AmtDriver(PowerMixin, CapabilityMixin):
                   workaround="Use enable_kvm(require_consent=True) in CCM, or re-provision the ME "
                              "in Admin Control Mode.",
                   source="documented"),
+            Quirk(id="me-firmware-update-needs-g3",
+                  summary="An ME/CSME firmware update (a BIOS capsule carries one) resets the "
+                          "redirection listeners and leaves the ME partially initialized — "
+                          "enable-kvm returns HTTP 400 and the whole WS-Man plane can degrade "
+                          "to HTTP 500 e:TimedOut. A warm reboot does not clear it.",
+                  workaround="Full power cycle (G3): drain AC and the laptop battery, boot, then "
+                             "re-run enable-sol/enable-kvm. There is NO remote recovery — AMT "
+                             "power control rides the same wedged plane. Observed on 14.1.79.",
+                  source="observed"),
             Quirk(id="bios-boot-target-firmware-dependent",
                   summary="Some firmware rejects boot-to-BIOS-setup (AMT_BootSettingData."
                           "BIOSSetup=true) with InvalidRepresentation, though pxe/cd/hdd boot "

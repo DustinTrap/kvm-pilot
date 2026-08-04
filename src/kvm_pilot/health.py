@@ -889,6 +889,20 @@ def check_amt_redirection(driver: Any) -> CheckResult | None:
     if health is None:
         return None
     h = health()
+    if h.get("me_not_ready"):
+        # The management plane answers TCP but the ME app is wedged — and this is
+        # the one AMT failure with NO remote recovery, so it must not read as an
+        # ordinary "listener off" warning (#217).
+        return CheckResult(
+            id="amt-redirection", pillar=Pillar.READINESS, severity=Severity.CRITICAL,
+            title="AMT redirection listeners",
+            detail="The ME answered but its management stack is not ready (WS-Man reads time "
+                   "out) — redirection cannot be read or enabled. Typically follows an ME/CSME "
+                   "firmware update, which a BIOS capsule carries.",
+            remediation="Full power cycle (G3): drain AC and, on a laptop, the battery; a warm "
+                        "reboot does NOT clear it. This needs physical access — AMT power "
+                        "control rides the same wedged plane (#217).",
+            cacheable=False)
     off = [name for name, on in (("SOL/IDE-R (16994)", h.get("sol_listener")),
                                  ("KVM (5900)", h.get("kvm_5900"))) if on is False]
     if not off:

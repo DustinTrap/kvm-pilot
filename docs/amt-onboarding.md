@@ -213,7 +213,7 @@ virtual media over AMT ≥ 11 was never a firmware limitation, it's client tooli
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| Every WS-Man call times out (`HTTP 500 e:TimedOut`); null inventory | ME wedged after a firmware update / reset churn (#217) | Full **G3 power cycle**, then `enable-sol`/`enable-kvm` |
+| Every WS-Man call times out (`HTTP 500 e:TimedOut`); null inventory | ME wedged after a firmware update / reset churn (#217) | Full **G3 power cycle**, then `enable-sol`/`enable-kvm`. kvm-pilot names this for you: the error carries the G3 instruction, and `healthcheck` reports `amt-redirection` **CRITICAL** ("management stack is not ready") rather than an ordinary listener warning |
 | `enable-kvm` → `HTTP 400`; 5900 stays closed | KVM redirection reset by a firmware update, or ME not ready | Power-cycle; if it persists, re-check via MEBx that KVM redirection is enabled |
 | `power`/`info` reports **off** while the OS is clearly up (SSH open) | ME degraded/still initializing — power *read* is stale | Power *control* often still works; give the ME time or power-cycle |
 | Keystrokes have no effect at BIOS/GRUB | Pre-boot HID not effective on this platform (some laptops) | Use **IDE-R** or **PXE** for media; physical keyboard for MEBx |

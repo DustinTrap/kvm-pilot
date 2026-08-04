@@ -11,7 +11,7 @@ from __future__ import annotations
 import pytest
 
 from kvm_pilot.drivers.amt import AmtDriver
-from kvm_pilot.drivers.amt.wsman import WsmanError
+from kvm_pilot.drivers.amt.wsman import WsmanError, amt
 from kvm_pilot.drivers.base import Capability
 from kvm_pilot.errors import (
     AuthError,
@@ -1271,3 +1271,72 @@ def test_wsman_small_helpers():
     assert W._local(W._body_child(empty).tag) == "Body"
     el = ET.fromstring("<a xmlns='n'><b/><b/></a>")
     assert len(W.findall_local(el, "b")) == 2
+
+
+# -- ME wedged after a firmware update (#217) ------------------------------
+
+# The live signature: TCP :16992 still accepts, but every WS-Man op answers
+# HTTP 500 with SOAP Subcode e:TimedOut. A warm reboot does not clear it — only
+# a full G3 power drain does, and no remote path exists because AMT power
+# control rides the same wedged plane.
+_TIMED_OUT_FAULT = (
+    '<?xml version="1.0" encoding="UTF-8"?>'
+    '<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" '
+    'xmlns:a="http://www.w3.org/2003/05/soap-envelope" '
+    'xmlns:e="http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd"><s:Body>'
+    "<s:Fault><s:Code><s:Value>a:Receiver</s:Value>"
+    "<s:Subcode><s:Value>e:TimedOut</s:Value></s:Subcode></s:Code>"
+    "<s:Reason><s:Text>The operation has timed out.</s:Text></s:Reason>"
+    "</s:Fault></s:Body></s:Envelope>"
+)
+
+
+def _wedge(emu):
+    emu.state.http_status = 500
+    emu.state.error_body = _TIMED_OUT_FAULT
+
+
+def test_wedged_me_error_names_the_power_cycle(amt_emu):
+    _wedge(amt_emu)
+    with pytest.raises(WsmanError) as ei:
+        make(amt_emu)._wsman.get(amt("AMT_RedirectionService"))
+    msg = str(ei.value)
+    assert "TimedOut" in msg                 # #216's fault surfacing still shows
+    assert "power cycle" in msg and "G3" in msg   # ... plus the actionable cause
+    assert "warm reboot" in msg.lower()
+
+
+def test_enable_kvm_on_a_wedged_me_is_actionable(amt_emu):
+    _wedge(amt_emu)
+    drv = make(amt_emu, kvm_password="Chang3M!")
+    with pytest.raises(KVMPilotError, match="G3"):
+        drv.enable_kvm()
+
+
+def test_enable_sol_rejection_names_the_firmware_update(amt_emu):
+    # The other observed shape: the plane answers, but the redirection write is
+    # refused (HTTP 400) because the ME reset its config during the update.
+    amt_emu.state.http_status = 400
+    amt_emu.state.error_body = None
+    amt_emu.state.fault_reason = "InvalidRepresentation"
+    with pytest.raises(CapabilityError) as ei:
+        make(amt_emu).enable_sol()
+    msg = str(ei.value)
+    assert "firmware update" in msg and "power cycle" in msg
+    assert "MEBx" in msg  # the other plausible cause is named too
+
+
+def test_healthcheck_calls_a_wedged_plane_critical(amt_emu):
+    from kvm_pilot.health import Severity, check_amt_redirection
+
+    _wedge(amt_emu)
+    res = check_amt_redirection(make(amt_emu))
+    assert res is not None
+    assert res.severity is Severity.CRITICAL      # not an ordinary listener WARNING
+    assert "not ready" in res.detail
+    assert "G3" in res.remediation and "physical access" in res.remediation
+
+
+def test_me_wedge_quirk_is_published(amt_emu):
+    ids = {q.id for q in make(amt_emu).known_quirks()}
+    assert "me-firmware-update-needs-g3" in ids
