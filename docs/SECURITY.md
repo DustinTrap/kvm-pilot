@@ -36,6 +36,19 @@ exploits against third-party devices or live hosts in a public report.
   shell history; use ``KVM_PILOT_PASSWD`` / a profile, ``--passwd-file``, or
   ``--ask-passwd`` instead. If the config file holds a password or TOTP secret,
   restrict it (``chmod 600``); the CLI/library warn when it is group/other-readable.
+- **Disabling Intel AMT is a security *tradeoff*, not a free win.** Turning off
+  an enabled-but-unprovisioned ME on an ex-corporate machine is usually the right
+  call — unknown provisioning state is an out-of-band backdoor. But AMT is also
+  the **only firmware-level remote console** most laptops have, and the cost is
+  invisible until months later when you need BIOS access and discover your
+  HDMI-capture KVM is [blind below the OS](driver-features.md#pre-boot-video-video-does-not-mean-you-can-see-bios-210).
+  Before disabling it, decide explicitly: will this host ever need remote
+  firmware/boot work, and is physical access acceptable when it does? The middle
+  path is usually better than either extreme — keep AMT **provisioned and
+  hardened** (own the MEBx password, TLS transport, consent ON, management VLAN)
+  rather than disabled, so the console exists but no one else can reach it. See
+  [`amt-onboarding.md`](amt-onboarding.md) and
+  [#212](https://github.com/DustinTrap/kvm-pilot/issues/212).
 - **The safety layer is advisory, not a sandbox.** `dry_run` and the
   confirmation callback prevent *accidental* destructive calls; they are not a
   privilege boundary. Anyone who can run your script with valid credentials can

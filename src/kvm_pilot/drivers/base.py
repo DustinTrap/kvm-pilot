@@ -49,6 +49,34 @@ class Capability(StrEnum):
     SSH = "ssh"
 
 
+class VideoScope(StrEnum):
+    """WHERE an interface's video comes from — the pre-boot-visibility dimension.
+
+    Structural capability answers "can this interface produce a screenshot?"; it
+    cannot answer "will BIOS/POST/GRUB be *in* that screenshot?", and those are
+    different questions with the same ``VIDEO`` capability behind them (#210).
+
+    * ``FIRMWARE`` — rendered from the host's own framebuffer beneath the OS
+      (AMT KVM redirection, a BMC's built-in KVM). Firmware screens are visible.
+    * ``CAPTURE`` — an external video output is captured (HDMI/DP: PiKVM, GLKVM,
+      BliKVM). What is visible is whatever the host *routes* to that output. On
+      desktops that is usually everything; **on laptops firmware video goes to
+      the internal panel, so BIOS, POST and the bootloader are invisible** and
+      the capture only lights up once an OS framebuffer starts.
+    * ``NONE`` — no video at all (IPMI, a Redfish BMC without KVM). Text-only
+      pre-boot access may still exist over SOL.
+
+    The laptop case cost hours on a Dell Latitude 5411 behind a GL RM1PE: BIOS
+    and GRUB simply never appeared, and the fallback was phone photos of the
+    laptop's own panel. Surfacing this up front sends that work to a firmware
+    interface (AMT/Redfish KVM) immediately.
+    """
+
+    FIRMWARE = "firmware"
+    CAPTURE = "capture"
+    NONE = "none"
+
+
 @runtime_checkable
 class SystemInfo(Protocol):
     """Read device / host information."""
@@ -277,11 +305,28 @@ class CapabilityMixin:
     the capabilities its hardware has.
     """
 
+    #: Where this driver's video comes from (#210). Declared per driver because
+    #: it is a property of the interface, not of any method's presence — a
+    #: capture card and a firmware framebuffer both implement ``Video``.
+    VIDEO_SCOPE: VideoScope | None = None
+
     def capabilities(self) -> set[Capability]:
         return detect_capabilities(self)
 
     def supports(self, capability: Capability | str) -> bool:
         return Capability(capability) in self.capabilities()
+
+    def video_scope(self) -> VideoScope:
+        """This interface's video origin — see :class:`VideoScope`.
+
+        Falls back to the honest structural answer for a driver that has not
+        declared one: video present means an external capture (the common case
+        and the conservative claim — it never promises firmware visibility a
+        driver may not have).
+        """
+        if self.VIDEO_SCOPE is not None:
+            return self.VIDEO_SCOPE
+        return VideoScope.CAPTURE if self.supports(Capability.VIDEO) else VideoScope.NONE
 
     def close(self) -> None:
         """Release any device-side resources. No-op for stateless drivers.
@@ -329,6 +374,7 @@ class KVMDriver(Protocol):
     host: str
 
     def capabilities(self) -> set[Capability]: ...
+    def video_scope(self) -> VideoScope: ...
     def supports(self, capability: Capability | str) -> bool: ...
 
 
@@ -353,5 +399,6 @@ __all__ = [
     "CapabilityMixin",
     "PowerMixin",
     "CAPABILITY_PROTOCOLS",
+    "VideoScope",
     "detect_capabilities",
 ]

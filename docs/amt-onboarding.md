@@ -235,9 +235,26 @@ virtual media over AMT ≥ 11 was never a firmware limitation, it's client tooli
   controlled bench you accept that on.
 - **Credentials:** keep the config file `chmod 600`; the ME admin password and the
   8-char RFB password are distinct. Never pass either on argv (visible in `ps`).
-- **Disabling AMT forfeits your only firmware-level remote console** on a laptop —
-  weigh that before turning it off for "security"
-  ([#212](https://github.com/DustinTrap/kvm-pilot/issues/212)).
+### Before you disable AMT, price the tradeoff (#212)
+
+Disabling an enabled-but-unprovisioned ME on an ex-corporate machine is the right
+security call — but it **forfeits the only firmware-level remote console this
+laptop has**, and that bill arrives later: an HDMI-capture KVM
+[cannot see BIOS, POST or GRUB on a laptop](driver-features.md#pre-boot-video-video-does-not-mean-you-can-see-bios-210),
+so the next firmware job needs hands on the machine. We learned this the
+expensive way on the Latitude 5411 — AMT was disabled during hardening, and every
+firmware-level step of a later install ran on phone photos of the laptop's panel.
+
+Decide deliberately, and prefer the middle path over either extreme:
+
+| Option | Remote firmware console | Exposure |
+|---|---|---|
+| AMT disabled | **None** — physical access only | Lowest |
+| **AMT provisioned + hardened** (recommended) | Full (KVM/SOL/IDE-R) | Own the MEBx password, TLS transport, consent ON, management VLAN |
+| AMT enabled but unprovisioned/unknown | Unknown — possibly someone else's | **Unacceptable** — provision it or disable it |
+
+If you do disable it, write down that this host now requires physical access for
+BIOS/boot work, so the next person doesn't rediscover it mid-incident.
 
 ---
 

@@ -357,3 +357,74 @@ def test_threading_import_is_available_to_ider():
     from kvm_pilot.drivers.amt import ider
 
     assert ider.threading is threading
+
+
+# -- #210: the pre-boot video dimension ------------------------------------
+
+
+def test_video_scope_distinguishes_firmware_from_capture():
+    """"video" alone cannot answer "will BIOS be in that screenshot?" — the two
+    kinds of video that cost hours to tell apart must be distinguishable (#210).
+    """
+    from kvm_pilot.client import PiKVMDriver
+    from kvm_pilot.drivers.amt import AmtDriver
+    from kvm_pilot.drivers.base import Capability, VideoScope
+    from kvm_pilot.drivers.ipmi import IpmiDriver
+
+    amt = AmtDriver("h", "u", "p")
+    pikvm = PiKVMDriver("h", "u", "p")
+    ipmi = IpmiDriver("h", "u", "p")
+    # Both advertise VIDEO; only one sees below the OS.
+    assert amt.supports(Capability.VIDEO) and pikvm.supports(Capability.VIDEO)
+    assert amt.video_scope() is VideoScope.FIRMWARE
+    assert pikvm.video_scope() is VideoScope.CAPTURE
+    # No video at all is its own answer, not "capture".
+    assert not ipmi.supports(Capability.VIDEO)
+    assert ipmi.video_scope() is VideoScope.NONE
+
+
+def test_undeclared_driver_falls_back_conservatively():
+    # A driver that never declares a scope must not accidentally claim firmware
+    # visibility it may not have.
+    from kvm_pilot.drivers.base import CapabilityMixin, VideoScope
+
+    class Videoless(CapabilityMixin):
+        def capabilities(self):
+            return set()
+
+    class WithVideo(CapabilityMixin):
+        def capabilities(self):
+            from kvm_pilot.drivers.base import Capability
+
+            return {Capability.VIDEO}
+
+    assert Videoless().video_scope() is VideoScope.NONE
+    assert WithVideo().video_scope() is VideoScope.CAPTURE
+
+
+def test_preboot_video_check_warns_about_laptops_without_inflating_severity():
+    from kvm_pilot.client import PiKVMDriver
+    from kvm_pilot.health import Severity, check_preboot_video
+
+    res = check_preboot_video(PiKVMDriver("h", "u", "p"))
+    assert res is not None
+    assert "LAPTOP" in res.detail  # the exact trap that cost hours
+    assert "AMT" in res.remediation  # ... and the interface that solves it
+    # A property of the interface is not a defect: it must not move `worst`.
+    assert res.severity is Severity.OK
+
+
+def test_preboot_video_check_confirms_firmware_interfaces():
+    from kvm_pilot.drivers.amt import AmtDriver
+    from kvm_pilot.health import check_preboot_video
+
+    res = check_preboot_video(AmtDriver("h", "u", "p"))
+    assert res is not None and "beneath the OS" in res.detail
+
+
+def test_capabilities_cli_names_the_video_scope(capsys):
+    from kvm_pilot.cli import main
+
+    assert main(["capabilities", "--driver", "pikvm", "--host", "h"]) == 0
+    out = capsys.readouterr().out
+    assert "video scope: capture" in out and "LAPTOPS" in out

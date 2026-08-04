@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING, Any
 
 from ...errors import CapabilityError, ConnectionError, KVMPilotError
 from ...safety import SafetyPolicy
-from ..base import CapabilityMixin, PowerMixin
+from ..base import CapabilityMixin, PowerMixin, VideoScope
 from .ider import IderSession
 from .wsman import Wsman, WsmanError, amt, cim, escape, findtext
 
@@ -75,6 +75,11 @@ _BOOT_TOKENS = sorted(set(_BOOT_SOURCE) | {"bios", "none"})
 
 class AmtDriver(PowerMixin, CapabilityMixin):
     """An Intel AMT / vPro platform over its native OOB channels."""
+
+    # The ME renders the real framebuffer from the chipset iGPU, so BIOS, POST
+    # and GRUB are all visible and controllable — the exact gap HDMI-capture
+    # KVMs cannot close on a laptop (#210).
+    VIDEO_SCOPE = VideoScope.FIRMWARE
 
     def __init__(
         self,

@@ -1063,15 +1063,30 @@ def _apply_auto_fixes(kvm, report, args) -> None:
                 r.auto_fix.apply(kvm)
 
 
+# One line each, matching drivers/base.py VideoScope. Kept short: this prints on
+# every `capabilities` run, and the healthcheck's preboot-video check carries the
+# full explanation and remediation.
+_VIDEO_SCOPE_NOTE = {
+    "firmware": "renders the host's own framebuffer; BIOS/POST/GRUB visible",
+    "capture": "captures an external output; on LAPTOPS firmware screens are invisible",
+    "none": "no video; use a serial console (SOL) or a firmware-level KVM",
+}
+
+
 def cmd_capabilities(args) -> int:
     kvm = _build_client(args)
     caps = kvm.capabilities()  # structural; makes no network call
     # Print in the capability enum's declaration order for stable output.
     ordered = [c.value for c in Capability if c in caps]
+    # "video" alone doesn't say whether BIOS/POST/GRUB are IN that video, and
+    # that is the question that decides which interface a firmware job needs
+    # (#210) — so report it right next to the capability list.
+    scope = kvm.video_scope()
     if args.json:
-        print(json.dumps(ordered))
+        print(json.dumps({"capabilities": ordered, "video_scope": scope.value}))
     else:
         print(", ".join(ordered) if ordered else "(none)")
+        print(f"video scope: {scope.value} — {_VIDEO_SCOPE_NOTE[scope.value]}")
     return 0
 
 

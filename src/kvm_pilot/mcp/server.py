@@ -369,6 +369,18 @@ def healthcheck(profile: str | None = None) -> dict:
         return {**_provenance(cfg), **report.to_dict()}
 
 
+_VIDEO_SCOPE_NOTES = {
+    "firmware": ("video comes from the host's own framebuffer beneath the OS — BIOS, POST "
+                 "and the bootloader are visible and controllable"),
+    "capture": ("an external video output is captured, so only what the host routes there "
+                "is visible. On a LAPTOP firmware video goes to the internal panel: BIOS, "
+                "POST and the bootloader will NOT appear. Use a firmware-level interface "
+                "(AMT KVM redirection, a BMC KVM) for firmware/boot work on laptops"),
+    "none": ("no video on this interface; read firmware state over a serial console (SOL) "
+             "or use a KVM-capable interface"),
+}
+
+
 @mcp.tool(annotations=_READ)
 def capabilities(profile: str | None = None) -> dict:
     """List the capabilities the target's driver supports (read-only, offline).
@@ -376,7 +388,10 @@ def capabilities(profile: str | None = None) -> dict:
     Structural — makes no network call and runs no preflight; it answers "which
     tools/actions can this device serve?" so you can pick the right interface up
     front (a Redfish BMC has no video; a PiKVM has no BootProgress). Returned in
-    the capability enum's declaration order for stable output. ``live_evidence``
+    the capability enum's declaration order for stable output. ``video_scope``
+    answers the question ``video`` cannot — whether BIOS/POST/GRUB are visible
+    through this interface (an HDMI-capture KVM is blind below the OS on a
+    laptop; AMT/BMC firmware video is not). ``live_evidence``
     additionally names which device+firmware combos this driver has real-hardware
     run evidence for — structural support is not live verification; call
     ``support_matrix`` for per-combo evidence and ``healthcheck`` for this exact
@@ -390,6 +405,10 @@ def capabilities(profile: str | None = None) -> dict:
         return {
             **_provenance(cfg),
             "capabilities": [c.value for c in Capability if c in caps],
+            "video_scope": {
+                "value": kvm.video_scope().value,
+                "note": _VIDEO_SCOPE_NOTES[kvm.video_scope().value],
+            },
             "live_evidence": {
                 "combos": [
                     f"{r['vendor']} {r['product']} {r['firmware_version']}" for r in exercised

@@ -27,7 +27,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from .drivers.base import CapabilityMixin, PowerMixin
+from .drivers.base import CapabilityMixin, PowerMixin, VideoScope
 from .errors import (
     ApiDisabledError,
     AuthError,
@@ -80,6 +80,11 @@ class PiKVMDriver(PowerMixin, CapabilityMixin):
         confirm: Optional callback (op, description) -> bool gating destructive ops.
         max_retries: Bounded retries on transient errors (busy/unavailable/network).
     """
+
+    # HDMI/DP capture: what is visible is whatever the host routes to that
+    # output. Desktops usually route everything; laptops route firmware video to
+    # the internal panel, so BIOS/POST/GRUB never reach the capture (#210).
+    VIDEO_SCOPE = VideoScope.CAPTURE
 
     # Subclasses (GLKVMDriver) set this to make a 404 across /api/* surface as a
     # clear ApiDisabledError with device-specific guidance. None for stock PiKVM.

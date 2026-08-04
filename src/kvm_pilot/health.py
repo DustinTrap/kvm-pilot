@@ -304,6 +304,55 @@ RECOVERY_ORDER = (
 )
 
 
+def check_preboot_video(driver: Any) -> CheckResult | None:
+    """Can this interface SEE firmware screens (BIOS/POST/GRUB)? (#210)
+
+    Structural capability says a driver can produce a screenshot; it says nothing
+    about whether firmware screens appear *in* it. An HDMI-capture KVM on a
+    laptop is blind below the OS — the machine routes firmware video to its
+    internal panel and only lights the captured output once an OS framebuffer
+    starts. That expectation gap cost hours on a real Latitude behind a GL RM1PE.
+
+    Severity OK for every scope: this is a PROPERTY of the interface, not a
+    fault, and severity means "how bad" — a capture KVM inflating every report
+    would be crying wolf (on a desktop it usually does see everything). The
+    value is in the always-present detail + remediation, and in the same
+    verdict on ``capabilities`` (CLI and MCP), which is where an agent picks
+    its interface.
+    """
+    scope_fn = getattr(driver, "video_scope", None)
+    if scope_fn is None:
+        return None
+    from .drivers.base import VideoScope
+
+    scope = scope_fn()
+    if scope is VideoScope.FIRMWARE:
+        return CheckResult(
+            id="preboot-video", pillar=Pillar.READINESS, severity=Severity.OK,
+            title="Pre-boot (firmware) video",
+            detail="This interface renders the host's own framebuffer from beneath the OS — "
+                   "BIOS, POST and the bootloader are visible and controllable.")
+    if scope is VideoScope.NONE:
+        return CheckResult(
+            id="preboot-video", pillar=Pillar.READINESS, severity=Severity.OK,
+            title="Pre-boot (firmware) video",
+            detail="This interface has no video at all, so no firmware screen can be read "
+                   "through it.",
+            remediation="For BIOS/boot work use a firmware-level console: a serial console "
+                        "(SOL) if the platform redirects it, a BMC's own KVM, or Intel AMT "
+                        "KVM redirection on a vPro host.")
+    return CheckResult(
+        id="preboot-video", pillar=Pillar.READINESS, severity=Severity.OK,
+        title="Pre-boot (firmware) video",
+        detail="This interface CAPTURES an external video output, so it shows only what the "
+               "host routes there. On a desktop that is usually everything; on a LAPTOP "
+               "firmware video goes to the internal panel, so BIOS, POST and the bootloader "
+               "are invisible here and the capture starts only once the OS framebuffer does.",
+        remediation="If this host is a laptop and you need firmware/boot work, plan for a "
+                    "firmware-level interface instead — Intel AMT KVM redirection on a vPro "
+                    "host, a BMC's built-in KVM, or IPMI SOL for text-mode firmware.")
+
+
 def check_recovery_path(driver: Any) -> CheckResult | None:
     """Is there ANY out-of-band reset if the guest hangs? (Stable posture.)
 
@@ -1282,6 +1331,7 @@ CHECKS: list[Check] = [
     check_driver_identity,
     check_ssh_reachable,
     check_recovery_path,
+    check_preboot_video,
     check_video_signal,
     check_hid_reachable,
     check_encoder_wedge,

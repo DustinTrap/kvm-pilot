@@ -246,9 +246,11 @@ def test_redfish_capabilities_are_offline(capsys):
     # capabilities() is structural — a BMC's set, no network, no key.
     rc = main(["capabilities", "--driver", "redfish", "--host", "h"])
     assert rc == 0
-    out = capsys.readouterr().out
-    assert "power" in out and "virtual_media" in out and "system_info" in out
-    assert "hid" not in out and "video" not in out  # a BMC has neither
+    # Line 1 is the capability list; line 2 is the video-scope verdict (#210).
+    caps, scope = capsys.readouterr().out.splitlines()
+    assert "power" in caps and "virtual_media" in caps and "system_info" in caps
+    assert "hid" not in caps and "video" not in caps  # a BMC has neither
+    assert scope.startswith("video scope: none")
 
 
 @pytest.mark.parametrize(
@@ -1058,10 +1060,11 @@ def test_driver_ipmi_capabilities_offline(capsys):
     # (structural, no ipmitool call) works with no IPMI-specific CLI code.
     rc = main(["capabilities", "--driver", "ipmi", "--host", "10.0.1.99"])
     assert rc == 0
-    out = capsys.readouterr().out
+    caps, scope = capsys.readouterr().out.splitlines()
     for cap in ("power", "system_info", "boot_config", "sensors", "logs"):
-        assert cap in out
-    assert "hid" not in out and "video" not in out  # IPMI has neither
+        assert cap in caps
+    assert "hid" not in caps and "video" not in caps  # IPMI has neither
+    assert scope.startswith("video scope: none")
 
 
 def test_driver_amt_capabilities_offline(capsys):

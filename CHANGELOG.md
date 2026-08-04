@@ -7,6 +7,23 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Added
+- **Pre-boot video is now a first-class dimension** (#210). `video` says an
+  interface can produce a screenshot; it never said whether BIOS/POST/GRUB would
+  be *in* it — and an HDMI-capture KVM is **blind below the OS on a laptop**,
+  which cost hours on real hardware before anyone could name why. Every driver
+  now reports a **video scope**: `firmware` (the host's own framebuffer, beneath
+  the OS — AMT), `capture` (an external output, so laptops hide firmware screens
+  — PiKVM/GLKVM/BliKVM), or `none` (Redfish/IPMI). It shows in `kvm-pilot
+  capabilities`, the MCP `capabilities` tool, and a new `preboot-video`
+  healthcheck result that names the laptop trap and the interfaces that solve it.
+  Deliberately not a warning severity — on a desktop a capture card usually does
+  see everything, so it is a property to plan around, not a defect.
+- **The AMT security-vs-operability tradeoff is documented at decision time**
+  (#212) — disabling an unprovisioned ME is usually the right security call, but
+  it forfeits the only firmware-level remote console most laptops have, and the
+  cost only surfaces later. `SECURITY.md` and the AMT onboarding runbook now
+  price all three options and recommend the middle path (provisioned **and**
+  hardened) over either extreme.
 - **AMT: a wedged ME now diagnoses itself** (#217). An ME/CSME firmware update
   (a BIOS capsule carries one) resets the redirection listeners and leaves the
   ME only partially initialized — `enable-kvm` returns a bare HTTP 400 and the

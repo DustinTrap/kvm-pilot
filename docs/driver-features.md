@@ -91,6 +91,7 @@ is stated explicitly rather than left blank.
 | `hid` | `HID` | Emulated keyboard + mouse. |
 | `video` | `Video` | Still-frame capture (feeds the vision layer). |
 | `virtual_media` | `VirtualMedia` | Attach/detach an ISO or USB image. |
+| `boot_config` | `BootConfig` | Choose what the host boots next (one-time or persistent). |
 | `gpio` | `GPIO` | Drive relays / power buttons / LEDs. |
 | `events` | `Events` | Stream async device events. |
 | `logs` | `Logs` | Device/host event log (`seek` = seconds of lookback). |
@@ -100,6 +101,32 @@ is stated explicitly rather than left blank.
 | `watchdog` | `Watchdog` | Arm/pet/inspect a hardware watchdog (IPMI). |
 | `firmware_update` | `FirmwareUpdate` | Flash the **KVM/BMC's own** firmware over the network. |
 | `ssh` | `RemoteShell` | In-band control of the managed **host's** OS over SSH. **Not a driver capability** — a per-profile channel (see note in each table). |
+
+### Pre-boot video: `video` does not mean you can see BIOS (#210)
+
+`video` says an interface can produce a screenshot. It does **not** say whether
+BIOS, POST and the bootloader will be *in* that screenshot — and those are
+different questions with the same capability behind them. Every driver therefore
+also reports a **video scope**, shown by `kvm-pilot capabilities`, the MCP
+`capabilities` tool, and the healthcheck's `preboot-video` result:
+
+| Scope | Where the pixels come from | Firmware screens (BIOS/POST/GRUB) | Drivers |
+|---|---|---|---|
+| `firmware` | The host's own framebuffer, rendered beneath the OS | **Visible and controllable** | `amt` |
+| `capture` | An external video output (HDMI/DP) is captured | **Only if the host routes them there** — desktops usually do; **laptops do not** | `pikvm`, `glkvm`, `blikvm` |
+| `none` | No video on this interface | Not available (text-only via SOL, if the platform redirects it) | `redfish`, `ipmi` |
+
+The `capture` row is the expensive one. A laptop routes firmware video to its
+**internal panel** and only lights the captured output once an OS framebuffer
+starts, so an HDMI-capture KVM is **blind below the OS**: BIOS setup, POST, and
+the GRUB menu never appear, while the OS console renders fine. On a real Dell
+Latitude 5411 behind a GL RM1PE this cost hours and forced phone photos of the
+laptop's own screen for every firmware-level step.
+
+**If you need firmware/boot work on a laptop, pick a `firmware`-scope interface**
+— Intel AMT KVM redirection on a vPro host, or a BMC's built-in KVM. The scope is
+deliberately *not* a warning severity: on a desktop a capture card usually does
+see everything, so it is a property to plan around, not a defect to fix.
 
 ---
 
