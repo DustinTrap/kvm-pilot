@@ -125,7 +125,10 @@ class TestCapabilities:
 
     def test_satisfies_protocols(self, ipmi):
         drv, _ = ipmi
-        assert isinstance(drv, Power | SystemInfo | Sensors | Logs | BootConfig | SerialConsole)
+        # One protocol at a time: `isinstance(drv, A | B | C)` is an OR, so it
+        # would still pass if the driver stopped satisfying all but one (#243).
+        for proto in (Power, SystemInfo, Sensors, Logs, BootConfig, SerialConsole):
+            assert isinstance(drv, proto), proto.__name__
 
 
 class TestCommandConstruction:

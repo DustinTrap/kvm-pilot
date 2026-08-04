@@ -54,7 +54,7 @@ def test_shipped_package_imports_the_sdk_only_through_the_shim():
     offenders = {
         path.relative_to(_SRC).as_posix()
         for path in _SRC.rglob("*.py")
-        if path != _SHIM and _imports_mcp_server(path.read_text())
+        if path != _SHIM and _imports_mcp_server(path.read_text(encoding="utf-8"))
     }
     assert not offenders, (
         f"{sorted(offenders)} import mcp's server package directly; import from "

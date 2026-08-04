@@ -856,9 +856,9 @@ def test_wake_sends_magic_packet(monkeypatch, capsys):
         wol_mod, "send_magic_packet",
         lambda mac, **kw: sent.update(mac=mac, **kw) or b"",
     )
-    rc = main(["wake", "--mac", "5c:60:ba:bb:cf:63", "--host", "fake", "--yes"])
+    rc = main(["wake", "--mac", "02:00:5e:10:00:01", "--host", "fake", "--yes"])
     assert rc == 0
-    assert sent["mac"] == "5c:60:ba:bb:cf:63"
+    assert sent["mac"] == "02:00:5e:10:00:01"
     assert sent["broadcast"] == "255.255.255.255"
     assert "sent WoL" in capsys.readouterr().out
 
@@ -880,7 +880,7 @@ def test_wake_dry_run_does_not_send(monkeypatch):
     import kvm_pilot.wol as wol_mod
     called = []
     monkeypatch.setattr(wol_mod, "send_magic_packet", lambda *a, **k: called.append(1))
-    rc = main(["wake", "--mac", "5c:60:ba:bb:cf:63", "--host", "fake", "--dry-run"])
+    rc = main(["wake", "--mac", "02:00:5e:10:00:01", "--host", "fake", "--dry-run"])
     assert rc == 0
     assert called == []
 
@@ -896,7 +896,7 @@ def test_wake_requires_mac(capsys):
 _EFI_FIXTURE = (
     "BootCurrent: 0005\nBootOrder: 0005,0001,0003,0004\n"
     "Boot0001* SAMSUNG NVMe\tNVMe(0x1)\n"
-    "Boot0003* IPV4 Network Intel I219-LM\tMAC(5c60babbcf63)/IPv4\n"
+    "Boot0003* IPV4 Network Intel I219-LM\tMAC(02005e100001)/IPv4\n"
     "Boot0004* USB\tUSB(0x1)\n"
     "Boot0005* redhat\tHD(1)/shimx64.efi\n"
 )
@@ -1010,13 +1010,13 @@ def test_power_on_falls_back_to_wol_when_atx_unavailable(monkeypatch, capsys):
     from kvm_pilot import wol as wol_mod
     from kvm_pilot.drivers.fake import FakeDriver
     monkeypatch.setattr(FakeDriver, "power_on", _fake_power_on_raises_no_atx)
-    monkeypatch.setenv("KVM_PILOT_MAC", "5c:60:ba:bb:cf:63")
+    monkeypatch.setenv("KVM_PILOT_MAC", "02:00:5e:10:00:01")
     sent = {}
     monkeypatch.setattr(wol_mod, "send_magic_packet",
                         lambda mac, **kw: sent.update(mac=mac, **kw) or b"")
     rc = main(["power", "on", "--driver", "fake", "--yes"])
     assert rc == 0
-    assert sent["mac"] == "5c:60:ba:bb:cf:63"
+    assert sent["mac"] == "02:00:5e:10:00:01"
     assert "Wake-on-LAN" in capsys.readouterr().out
 
 
@@ -1037,7 +1037,7 @@ def test_power_on_no_fallback_when_atx_works(monkeypatch):
     from kvm_pilot import wol as wol_mod
     called = []
     monkeypatch.setattr(wol_mod, "send_magic_packet", lambda *a, **k: called.append(1))
-    monkeypatch.setenv("KVM_PILOT_MAC", "5c:60:ba:bb:cf:63")
+    monkeypatch.setenv("KVM_PILOT_MAC", "02:00:5e:10:00:01")
     rc = main(["power", "on", "--driver", "fake", "--yes"])  # fake power_on succeeds
     assert rc == 0
     assert called == []                   # fallback only fires on CapabilityError
@@ -1049,7 +1049,7 @@ def test_power_off_never_falls_back_to_wol(monkeypatch):
     from kvm_pilot import wol as wol_mod
     called = []
     monkeypatch.setattr(wol_mod, "send_magic_packet", lambda *a, **k: called.append(1))
-    monkeypatch.setenv("KVM_PILOT_MAC", "5c:60:ba:bb:cf:63")
+    monkeypatch.setenv("KVM_PILOT_MAC", "02:00:5e:10:00:01")
     rc = main(["power", "off", "--driver", "fake", "--yes"])
     assert rc == 0
     assert called == []
@@ -1169,9 +1169,11 @@ def test_mcp_hint_fires_in_agent_context(monkeypatch, capsys):
     monkeypatch.setenv("CLAUDECODE", "1")
     monkeypatch.delenv("KVM_PILOT_NO_HINTS", raising=False)
     _maybe_mcp_hint("snapshot")
-    err = capsys.readouterr().err
-    assert "mcp__kvm-pilot__snapshot" in err and "frame_ref" in err
-    assert capsys.readouterr().out == ""  # never on stdout
+    # ONE capture: readouterr() drains the buffer, so a second call always sees
+    # an empty stdout and proves nothing (#243).
+    captured = capsys.readouterr()
+    assert "mcp__kvm-pilot__snapshot" in captured.err and "frame_ref" in captured.err
+    assert captured.out == ""  # never on stdout
 
 
 def test_mcp_hint_respects_opt_outs_and_unknown_commands(monkeypatch, capsys):

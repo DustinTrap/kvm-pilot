@@ -18,8 +18,8 @@ BootCurrent: 0005
 Timeout: 0 seconds
 BootOrder: 0005,0001,0004,0002,0003,0006,0007
 Boot0001* SAMSUNG MZVL2256HCHQ-00BH1-S63XNX0T339238\tPciRoot(0x0)/Pci(0x1b,0x0)/Pci(0x0,0x0)/NVMe(0x1,00-25-38-B3-21-C6-70-70)
-Boot0002* IPV6 Network - Intel(R) Ethernet Connection (17) I219-LM\tPciRoot(0x0)/Pci(0x1f,0x6)/MAC(5c60babbcf63,0)/IPv6([::])
-Boot0003* IPV4 Network - Intel(R) Ethernet Connection (17) I219-LM\tPciRoot(0x0)/Pci(0x1f,0x6)/MAC(5c60babbcf63,0)/IPv4(0.0.0.0)
+Boot0002* IPV6 Network - Intel(R) Ethernet Connection (17) I219-LM\tPciRoot(0x0)/Pci(0x1f,0x6)/MAC(02005e100001,0)/IPv6([::])
+Boot0003* IPV4 Network - Intel(R) Ethernet Connection (17) I219-LM\tPciRoot(0x0)/Pci(0x1f,0x6)/MAC(02005e100001,0)/IPv4(0.0.0.0)
 Boot0004* USB\tPciRoot(0x0)/Pci(0x14,0x0)
 Boot0005* redhat\tHD(1,GPT,ad2dec7d-34e4-4de5-8952-29bfea127409)/File(\\EFI\\redhat\\shimx64.efi)
 Boot0006  USB NETWORK BOOT\tPciRoot(0x0)/Pci(0x0,0x0)/IPv4(0.0.0.0,DHCP)

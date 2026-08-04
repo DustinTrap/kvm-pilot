@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import pytest
+
 from kvm_pilot.benchmark import CommandResult, Scorecard
 from kvm_pilot.router import (
     INTERFACES,
@@ -104,7 +106,10 @@ def test_record_nudges_p50_via_ewma_and_counts_the_sample():
     r = card.results[0]
     assert r.samples == 6
     assert r.capable is True
-    assert r.p50_ms == 130.0  # EWMA(100, 200, alpha=0.3) = 0.7*100 + 0.3*200
+    # approx, not ==: the incremental form p50 + a*(x - p50) yields
+    # 130.00000000000003, so exact equality would pin the arithmetic order
+    # rather than the value (#243).
+    assert r.p50_ms == pytest.approx(130.0)  # EWMA(100, 200, alpha=0.3)
 
 
 def test_record_failure_marks_row_incapable():

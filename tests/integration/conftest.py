@@ -54,6 +54,13 @@ def _wait_healthy(url: str, proc: subprocess.Popen | None, timeout: float = 30.0
 
 @pytest.fixture(scope="session")
 def redfish_emulator_url() -> str:
+    """Base URL of an external DMTF Redfish emulator (sushy-tools).
+
+    **Must be a disposable emulator, never real hardware** — the integration
+    tests apply real power transitions and boot-device writes through it (#243).
+    Set ``KVM_PILOT_REDFISH_URL`` to reuse a running one, else a local
+    ``sushy-emulator`` is started (and skipped if it isn't installed).
+    """
     url = os.environ.get("KVM_PILOT_REDFISH_URL")
     if url:
         _wait_healthy(url.rstrip("/") + "/redfish/v1/", None)
@@ -94,6 +101,11 @@ def ipmi_bmc():
     ``ipmi_sim`` (or a real BMC) via ``KVM_PILOT_IPMI_HOST`` [+ ``_PORT`` /
     ``_USER`` / ``_PASSWD`` / ``_CIPHER``]. Skips when unset so the default suite
     stays hermetic (macOS has no ipmi_sim build).
+
+    **Point this at a disposable simulator, not production hardware.** The
+    state-changing verbs in the integration suite are opt-in behind
+    ``KVM_PILOT_IPMI_ALLOW_DESTRUCTIVE=1``, and they hard-power the chassis and
+    rewrite its boot device (#243).
     """
     host = os.environ.get("KVM_PILOT_IPMI_HOST")
     if not host:

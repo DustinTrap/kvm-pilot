@@ -1,6 +1,9 @@
 # End-to-end operator tasks, a13 → a14: the "leaner cut"
 
-**Date:** 2026-07-08 · **Versions:** kvm-pilot `0.1.0a13` → `0.1.0a14` · **Fleet:** `.11` (server11/Fedora 44) · `.20` (RHEL 10) · `.39` (WHITESKELETON/Win11)
+**Date:** 2026-07-08 · **Versions:** kvm-pilot `0.1.0a13` → `0.1.0a14` · **Fleet:** `unit-A` (unit-A-host/Fedora 44) · `unit-B` (RHEL 10) · `unit-C` (unit-C-host/Win11)
+
+> Device identifiers in this report are redacted to stable labels (`unit-A`/`unit-B`/`unit-C`); exact addresses live in the operator's private ledger, not in the published repo (#209/#243).
+
 
 The first analysis ([2026-07-08-perf-a13-a14](2026-07-08-perf-a13-a14.md)) timed *library micro-ops*. This one times **whole operator tasks the way a user performs them, start → result** — "check the system's health," "grab a screenshot," "wake it," "run a command," "find its IP" — done to the *connected system* through the KVM, a13 vs a14.
 
@@ -15,44 +18,44 @@ The first analysis ([2026-07-08-perf-a13-a14](2026-07-08-perf-a13-a14.md)) timed
 
 | KVM | task | a13 | a14 | verdict |
 |---|---|--:|--:|---|
-| **.11** | **health** (5 in-band) | 1501 | **700** | **2.1× faster** ✅ |
-| .11 | health_fresh (control) | 1486 | 1569 | equal (+5.6%) — control holds |
-| .11 | run_command | 312 | 277 | flat |
-| .11 | discover_ip | 332 | 346 | flat |
-| .11 | screenshot | 80 | 565 | ⚠️ anomaly (state-dependent, see below) |
-| .11 | wake | 102 | 166 | flat (small absolute) |
-| **.20** | **health** (5 in-band) | 1105* | **439** | **~2.5× faster** ✅ |
-| .20 | health_fresh (control) | 1127 | 1084 | equal (−3.8%) — control holds |
-| .20 | run_command | 191 | 211 | flat |
-| .20 | discover_ip | 259 | 302 | flat (variance) |
-| .20 | screenshot | 107 | 85 | flat (variance, NOT an a14 gain) |
-| .20 | wake | 83 | 109 | flat (small absolute) |
-| **.39** | screenshot | 115 | 132 | flat |
-| .39 | wake | 113 | 124 | flat |
+| **unit-A** | **health** (5 in-band) | 1501 | **700** | **2.1× faster** ✅ |
+| unit-A | health_fresh (control) | 1486 | 1569 | equal (+5.6%) — control holds |
+| unit-A | run_command | 312 | 277 | flat |
+| unit-A | discover_ip | 332 | 346 | flat |
+| unit-A | screenshot | 80 | 565 | ⚠️ anomaly (state-dependent, see below) |
+| unit-A | wake | 102 | 166 | flat (small absolute) |
+| **unit-B** | **health** (5 in-band) | 1105* | **439** | **~2.5× faster** ✅ |
+| unit-B | health_fresh (control) | 1127 | 1084 | equal (−3.8%) — control holds |
+| unit-B | run_command | 191 | 211 | flat |
+| unit-B | discover_ip | 259 | 302 | flat (variance) |
+| unit-B | screenshot | 107 | 85 | flat (variance, NOT an a14 gain) |
+| unit-B | wake | 83 | 109 | flat (small absolute) |
+| **unit-C** | screenshot | 115 | 132 | flat |
+| unit-C | wake | 113 | 124 | flat |
 
-\* .20's a13 health had run-to-run spread (first run 1105 ms, a re-run 1546 ms). Using the **cleanest, within-version** measure — a14's own fresh-vs-persistent on the same run — the speedup is **.11 1569/700 = 2.2×** and **.20 1084/439 = 2.5×**. The cross-version numbers corroborate (2.1× / 2.5×). Any "3.5×" from the re-run is a13 self-variance, not signal — the honest figure is **~2.2–2.5×**.
+\* unit-B's a13 health had run-to-run spread (first run 1105 ms, a re-run 1546 ms). Using the **cleanest, within-version** measure — a14's own fresh-vs-persistent on the same run — the speedup is **unit-A 1569/700 = 2.2×** and **unit-B 1084/439 = 2.5×**. The cross-version numbers corroborate (2.1× / 2.5×). Any "3.5×" from the re-run is a13 self-variance, not signal — the honest figure is **~2.2–2.5×**.
 
 ## The one win, stated honestly
 **Persistent SSH makes a multi-probe health check ~2.2–2.5× faster.** a13 pays full connection setup on every probe; a14 pays it once and reuses the channel for the other four. The `health_fresh` control is equal across versions on both in-band hosts (+5.6% / −3.8%, both inside noise), so the win is the persistence, not a contaminated baseline. This reconfirms the [micro-op baseline](2026-07-08-perf-a13-a14.md) (~2.5× on a 5-command SSH task) — now at the **operator-task** level with real commands.
 
 ## What is flat, and why
-`run_command`, `discover_ip` (single in-band commands — persistence can't help a cold single connection), `screenshot`, and `wake` (KVM-plane — a14 didn't touch snapshot encoding or HID) are all inside the noise floor. `.39` is KVM-plane-only (its in-band key is still pending) and both its tasks are flat. **No non-health task got faster because of a14, and none is claimed to.** The `.20` screenshot reading 21% *faster* under a14 is variance (a13's first snapshot threw and was re-run) — it would be an overclaim to credit it, and we don't.
+`run_command`, `discover_ip` (single in-band commands — persistence can't help a cold single connection), `screenshot`, and `wake` (KVM-plane — a14 didn't touch snapshot encoding or HID) are all inside the noise floor. `unit-C` is KVM-plane-only (its in-band key is still pending) and both its tasks are flat. **No non-health task got faster because of a14, and none is claimed to.** The `unit-B` screenshot reading 21% *faster* under a14 is variance (a13's first snapshot threw and was re-run) — it would be an overclaim to credit it, and we don't.
 
 ## The one thing to re-measure (not a regression)
-`.11 screenshot` went **80 ms → 565 ms (~7×)** between the a13 and a14 runs. a14 did not touch the snapshot plane, so this is **snapshot state-dependence** — the GL snapshot's cost/format is resolution × encoder-mode × cache-state (the #107/#181 finding), and .11's on-demand streamer was in a different state during the a14 pass (in a hand check minutes earlier both versions measured ~81 ms). It's flagged to re-measure, **not** attributed to a14 code. The durable fix for the underlying snapshot fragility is **#187** (flip the encoder to MJPEG for a native-res JPEG) — discovered this session.
+`unit-A screenshot` went **80 ms → 565 ms (~7×)** between the a13 and a14 runs. a14 did not touch the snapshot plane, so this is **snapshot state-dependence** — the GL snapshot's cost/format is resolution × encoder-mode × cache-state (the #107/#181 finding), and unit-A's on-demand streamer was in a different state during the a14 pass (in a hand check minutes earlier both versions measured ~81 ms). It's flagged to re-measure, **not** attributed to a14 code. The durable fix for the underlying snapshot fragility is **#187** (flip the encoder to MJPEG for a native-res JPEG) — discovered this session.
 
 ## Operator translation (real terms)
 - **Faster in a14:** multi-step in-band diagnostics — gathering a batch of vitals, running several remote commands in a row — by **~2.2–2.5×** (and larger per *additional* command). If your task is "SSH in and run five things," a14 is the upgrade.
 - **Unchanged in a14:** seeing the screen (screenshot), waking, logging in, running a single command, finding the IP. These are the KVM plane or single-shot ops; a14 was a router/persistence release, not a video/HID one. The next lever for the KVM plane is HTTP keep-alive (**#185**) and the MJPEG snapshot fix (**#187**).
 
 ## Scope run vs deferred
-- **Run (a13 vs a14, clean):** health, run_command, discover_ip, screenshot, wake — on .11 + .20 (in-band + KVM plane) and .39 (KVM plane). `identify_state` ≈ screenshot cost + classification (same snapshot → flat).
+- **Run (a13 vs a14, clean):** health, run_command, discover_ip, screenshot, wake — on unit-A + unit-B (in-band + KVM plane) and unit-C (KVM plane). `identify_state` ≈ screenshot cost + classification (same snapshot → flat).
 - **#6 reboot → confirm recovery — RUN on all three (observational, system-bound, flat a13≈a14):** OS-initiated (no OOB power on the fleet), recovery confirmed at a usable login/lock screen.
-  - `.11` server11 (Fedora) — in-band `sudo systemctl reboot`, back to SSH-usable in **~2–2.5 min** (in-band confirmed).
-  - `.20` RHEL — in-band reboot, back to the GDM login in **~130 s** (console-confirmed; **the reboot reverted the `br0` route fix**, so in-band to `.165` needs re-applying).
-  - `.39` WHITESKELETON — console `shutdown /r`, back to the Windows lock screen in **~130 s** (console-confirmed).
+  - `unit-A` unit-A-host (Fedora) — in-band `sudo systemctl reboot`, back to SSH-usable in **~2–2.5 min** (in-band confirmed).
+  - `unit-B` RHEL — in-band reboot, back to the GDM login in **~130 s** (console-confirmed; **the reboot reverted the `br0` route fix**, so in-band to `.165` needs re-applying).
+  - `unit-C` unit-C-host — console `shutdown /r`, back to the Windows lock screen in **~130 s** (console-confirmed).
   - a14 doesn't change reboot — the whole time is the machine's own boot; the only thing measured is that a14 doesn't *add* overhead (it doesn't).
-- **Deferred:** `.39` in-band health/run-command/discover (WHITESKELETON's in-band key install stays gated on the operator), and `#9 BIOS` / `#10 ISO-boot` (dropped from the leaner cut). `#1 wake` and `#2 login` were exercised interactively (both succeeded; login to .20's GDM took a few seconds).
+- **Deferred:** `unit-C` in-band health/run-command/discover (unit-C-host's in-band key install stays gated on the operator), and `#9 BIOS` / `#10 ISO-boot` (dropped from the leaner cut). `#1 wake` and `#2 login` were exercised interactively (both succeeded; login to unit-B's GDM took a few seconds).
 
 ## Reproduce
 - Harness: `e2eharness.py` — `<a13py|a14py> e2eharness.py <label> <profile> [ssh_host ssh_user ssh_key]`.

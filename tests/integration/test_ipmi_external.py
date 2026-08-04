@@ -32,6 +32,8 @@ independent BMC.
 
 from __future__ import annotations
 
+import os
+
 import pytest
 
 from kvm_pilot.drivers.base import BootConfig, Logs, Power, Sensors, SystemInfo
@@ -40,6 +42,22 @@ from kvm_pilot.errors import KVMPilotError
 from kvm_pilot.safety import allow_all
 
 pytestmark = pytest.mark.integration
+
+# The fixture takes ANY KVM_PILOT_IPMI_HOST — "an ipmi_sim or real BMC" — and the
+# driver is built with confirm=allow_all, so the state-changing verbs below would
+# hard-power or re-target the boot device of whatever that variable names. The
+# repo rule is absolute: tests never direct destructive operations at real
+# hardware. Reads stay available by default; anything that mutates needs a second,
+# deliberate opt-in (#243).
+_ALLOW_DESTRUCTIVE = os.environ.get("KVM_PILOT_IPMI_ALLOW_DESTRUCTIVE") == "1"
+_needs_optin = pytest.mark.skipif(
+    not _ALLOW_DESTRUCTIVE,
+    reason=(
+        "state-changing IPMI verbs are opt-in: set KVM_PILOT_IPMI_ALLOW_DESTRUCTIVE=1 "
+        "and only ever point KVM_PILOT_IPMI_HOST at a disposable simulator — this "
+        "hard-powers the chassis and rewrites its boot device"
+    ),
+)
 
 
 def _driver(bmc: dict) -> IpmiDriver:
@@ -63,6 +81,7 @@ def test_info_talks_to_ipmi_sim(ipmi_bmc):
     assert info["manufacturer"] is not None or info["bmc_version"] is not None
 
 
+@_needs_optin
 def test_power_verbs_execute_against_live_bmc(ipmi_bmc):
     # Each verb frames a real `chassis power <verb>` the BMC accepts (no non-zero
     # exit). We do NOT assert a state flip: stock ipmi_sim doesn't model chassis
@@ -75,6 +94,7 @@ def test_power_verbs_execute_against_live_bmc(ipmi_bmc):
     assert isinstance(d.is_powered_on(), bool)
 
 
+@_needs_optin
 def test_boot_device_commands_execute_and_feature_detect(ipmi_bmc):
     # set_boot_device frames a real `chassis bootdev` the BMC accepts; get_boot_options
     # degrades gracefully where the sim omits boot-param-5 GET, yet still reports the

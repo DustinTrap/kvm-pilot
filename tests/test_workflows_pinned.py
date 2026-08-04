@@ -12,9 +12,16 @@ from pathlib import Path
 
 import pytest
 
-_WORKFLOWS = sorted((Path(__file__).resolve().parents[1] / ".github" / "workflows").glob("*.yml"))
+# Both extensions: GitHub honors *.yaml too, so globbing only *.yml would let an
+# unpinned action ride in through a file this guard never opened (#243).
+_WF_DIR = Path(__file__).resolve().parents[1] / ".github" / "workflows"
+_WORKFLOWS = sorted([*_WF_DIR.glob("*.yml"), *_WF_DIR.glob("*.yaml")])
 _USES = re.compile(r"uses:\s*(\S+)")
 _SHA_PINNED = re.compile(r"^[^@]+@[0-9a-f]{40}$")
+# A bare 40-char SHA is unreviewable — the trailing `# vX.Y.Z` comment is what
+# lets a human (and dependabot) see what is actually pinned. The docstring
+# always required it; only the SHA half was enforced (#243).
+_USES_LINE = re.compile(r"^\s*(?:-\s*)?uses:\s*\S+\s*#\s*\S+")
 
 
 def test_workflows_exist():
@@ -23,10 +30,24 @@ def test_workflows_exist():
 
 @pytest.mark.parametrize("wf", _WORKFLOWS, ids=[w.name for w in _WORKFLOWS])
 def test_every_action_is_sha_pinned(wf: Path):
-    refs = _USES.findall(wf.read_text())
+    text = wf.read_text(encoding="utf-8")
+    refs = _USES.findall(text)
     assert refs, f"{wf.name} has no `uses:` steps"
     unpinned = [r for r in refs if not _SHA_PINNED.match(r)]
     assert not unpinned, f"{wf.name} has non-SHA-pinned actions: {unpinned}"
+
+
+@pytest.mark.parametrize("wf", _WORKFLOWS, ids=[w.name for w in _WORKFLOWS])
+def test_every_pin_names_its_version(wf: Path):
+    uncommented = [
+        line.strip()
+        for line in wf.read_text(encoding="utf-8").splitlines()
+        if "uses:" in line and not _USES_LINE.match(line)
+    ]
+    assert not uncommented, (
+        f"{wf.name} pins an action without a `# vX.Y.Z` comment naming the version: "
+        f"{uncommented}"
+    )
 
 
 def test_dependabot_config_present():
@@ -48,7 +69,12 @@ def test_release_publish_needs_a_test_gate():
     # The publish job must be gated on both `build` and `test`; additional gates
     # (e.g. the `smoke-install` pre-publish check) are allowed, so match the
     # publish job's own `needs:` list and require build+test to be present.
-    m = re.search(r"^  publish:\n(?:.*\n)*?    needs:\s*\[([^\]]+)\]", rel, re.M)
+    # Extract the publish job's OWN block first: `(?:.*\n)*?` would happily run
+    # past the end of `publish` and match a LATER job's `needs:`, so the test
+    # passed even when publish had no gate at all (#243).
+    block = re.search(r"^  publish:\n(?P<body>(?:(?!^  \S).*\n)*)", rel, re.M)
+    assert block, "release.yml must define a publish job"
+    m = re.search(r"^    needs:\s*\[([^\]]+)\]", block.group("body"), re.M)
     assert m, "publish job must declare a `needs:` list"
     needs = {n.strip() for n in m.group(1).split(",")}
     assert {"build", "test"} <= needs, \

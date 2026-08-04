@@ -361,8 +361,12 @@ def test_redirect_is_refused_and_credentials_never_forwarded():
         assert "redirect" in str(ei.value).lower()
         assert seen == []  # the off-origin sink never received the credentials
     finally:
+        # shutdown() only stops serve_forever; the listening socket stays open and
+        # leaks an fd for the rest of the session (#243).
         sink.shutdown()
         redir.shutdown()
+        sink.server_close()
+        redir.server_close()
 
 
 # -- #167: 409/503 retry is method-gated ------------------------------------ #

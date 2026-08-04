@@ -106,13 +106,18 @@ def test_unknown_profile_keys_warn_loudly(tmp_path, caplog):
     assert any("password" in r.message and "IGNORED" in r.message for r in caplog.records)
 
 
-def test_scheme_http_defaults_port_80(monkeypatch):
+def test_scheme_http_defaults_port_80(monkeypatch, tmp_path):
+    # config_path + delenv like every other case here: without them this reads the
+    # developer's real ~/.config/kvm-pilot/config.toml and an inherited
+    # KVM_PILOT_SCHEME can flip the last assertion (#243).
     monkeypatch.delenv("KVM_PILOT_PORT", raising=False)
-    resolved = resolve_host(host="box", scheme="http")
+    monkeypatch.delenv("KVM_PILOT_SCHEME", raising=False)
+    none = tmp_path / "none.toml"
+    resolved = resolve_host(host="box", scheme="http", config_path=none)
     assert resolved.port == 80
-    resolved = resolve_host(host="box", scheme="http", port=8443)
+    resolved = resolve_host(host="box", scheme="http", port=8443, config_path=none)
     assert resolved.port == 8443  # explicit port always wins
-    resolved = resolve_host(host="box")
+    resolved = resolve_host(host="box", config_path=none)
     assert resolved.port == 443  # https default unchanged
 
 
@@ -211,14 +216,18 @@ def test_default_config_path_ends_with_kvm_pilot_config(monkeypatch):
 
 def test_wol_mac_and_broadcast_precedence(monkeypatch, tmp_path):
     none = tmp_path / "none.toml"
+    # An inherited KVM_PILOT_MAC / _WOL_BROADCAST would break the default
+    # assertions below (#243).
+    monkeypatch.delenv("KVM_PILOT_MAC", raising=False)
+    monkeypatch.delenv("KVM_PILOT_WOL_BROADCAST", raising=False)
     # default
     cfg = resolve_host(host="h", config_path=none)
     assert cfg.mac is None
     assert cfg.wol_broadcast == "255.255.255.255"
     # arg wins
-    cfg = resolve_host(host="h", mac="5c:60:ba:bb:cf:63",
+    cfg = resolve_host(host="h", mac="02:00:5e:10:00:01",
                        wol_broadcast="10.0.1.255", config_path=none)
-    assert cfg.mac == "5c:60:ba:bb:cf:63"
+    assert cfg.mac == "02:00:5e:10:00:01"
     assert cfg.wol_broadcast == "10.0.1.255"
     # env
     monkeypatch.setenv("KVM_PILOT_MAC", "aa:bb:cc:dd:ee:ff")
@@ -229,9 +238,9 @@ def test_wol_mac_from_profile(tmp_path):
     cfg_file = tmp_path / "c.toml"
     cfg_file.write_text(
         '[hosts.box]\nhost = "10.0.1.16"\n'
-        'mac = "5c:60:ba:bb:cf:63"\nwol_broadcast = "10.0.1.255"\n'
+        'mac = "02:00:5e:10:00:01"\nwol_broadcast = "10.0.1.255"\n'
     )
     cfg = resolve_host(profile="box", config_path=cfg_file)
     assert cfg.host == "10.0.1.16"
-    assert cfg.mac == "5c:60:ba:bb:cf:63"
+    assert cfg.mac == "02:00:5e:10:00:01"
     assert cfg.wol_broadcast == "10.0.1.255"

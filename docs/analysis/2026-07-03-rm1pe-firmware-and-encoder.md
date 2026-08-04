@@ -1,14 +1,17 @@
 # 2026-07-03 — RM1PE: remote firmware update declined; native-res encoder wedge
 
 *Session-level analysis (see `docs/analysis/`): a field report from a real GL
-**RM1PE** (homelab2, 10.0.1.20, firmware V1.5.1 release2). Two operator-facing
+
+> Device identifiers in this report are redacted to stable labels (`unit-A`/`unit-B`/`unit-C`); exact addresses live in the operator's private ledger, not in the published repo (#209/#243).
+
+**RM1PE** (unit-B, unit-B, firmware V1.5.1 release2). Two operator-facing
 conclusions for anyone running this hardware — **do not remote-flash an RM1PE
 from kvm-pilot yet**, and **keep RM1PE guests at ≤1080p** or you lose stills and
 pin the box at load ~10.*
 
 ## The ask
 
-Run kvm-pilot against 10.0.1.20 for a status report; restore snapshot "vision";
+Run kvm-pilot against unit-B for a status report; restore snapshot "vision";
 and, *if it can be done safely*, perform the remote firmware upgrade
 (V1.5.1 release2 → the registry's latest, V1.9.1 release1) — then publish a
 report so other operators benefit.

@@ -343,7 +343,7 @@ def build(out: Path) -> None:
         src = ROOT / src_rel
         if not src.exists():
             raise SystemExit(f"missing doc source: {src_rel}")
-        page = _transform(src.read_text(), posixpath.dirname(src_rel))
+        page = _transform(src.read_text(encoding="utf-8"), posixpath.dirname(src_rel))
         if "](../" in page or "](./" in page:
             raise SystemExit(f"unresolved relative link left in {wiki_name}")
         (out / wiki_name).write_text(page, encoding="utf-8")

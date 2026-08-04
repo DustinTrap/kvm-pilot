@@ -1,8 +1,10 @@
 """Tests for Wake-on-LAN (#199).
 
 Packet construction and ethtool parsing are pure/unit-tested; the single socket
-call is exercised with a fake socket. The ethtool fixture is real output
-captured from the .20 homelab host's wired NIC (eno1, Intel I219-LM).
+call is exercised with a fake socket. The ethtool fixture mirrors real output
+from a wired Intel NIC, with the address replaced by a locally-administered one:
+a published MAC is an asset identifier, and the repo already treats fleet detail
+as non-publishing (the same call that made RESUME.md untracked, #209/#243).
 """
 
 import socket
@@ -11,8 +13,9 @@ import pytest
 
 from kvm_pilot import wol
 
-MAC = "5c:60:ba:bb:cf:63"          # real .20-host wired NIC
-MAC_RAW = bytes.fromhex("5c60babbcf63")
+# Locally-administered (bit 1 of the first octet set) — reserved for exactly this.
+MAC = "02:00:5e:10:00:01"
+MAC_RAW = bytes.fromhex("02005e100001")
 
 
 class TestNormalizeMac:
@@ -20,16 +23,16 @@ class TestNormalizeMac:
         assert wol.normalize_mac(MAC) == MAC_RAW
 
     def test_dash_bare_dot_forms_all_equal(self):
-        assert wol.normalize_mac("5C-60-BA-BB-CF-63") == MAC_RAW
-        assert wol.normalize_mac("5c60babbcf63") == MAC_RAW
-        assert wol.normalize_mac("5c60.babb.cf63") == MAC_RAW  # Cisco dotted
+        assert wol.normalize_mac("02-00-5E-10-00-01") == MAC_RAW
+        assert wol.normalize_mac("02005e100001") == MAC_RAW
+        assert wol.normalize_mac("0200.5e10.0001") == MAC_RAW  # Cisco dotted
 
     def test_case_and_whitespace_insensitive(self):
-        assert wol.normalize_mac("  5C:60:BA:BB:CF:63 ") == MAC_RAW
+        assert wol.normalize_mac("  02:00:5E:10:00:01 ") == MAC_RAW
 
     @pytest.mark.parametrize(
         "bad",
-        ["", "5c:60:ba:bb:cf", "5c:60:ba:bb:cf:63:00", "zz:60:ba:bb:cf:63", "notamac"],
+        ["", "02:00:5e:10:00", "02:00:5e:10:00:01:00", "zz:00:5e:10:00:01", "notamac"],
     )
     def test_invalid_raises(self, bad):
         with pytest.raises(ValueError):
@@ -37,7 +40,7 @@ class TestNormalizeMac:
 
     def test_non_string_raises(self):
         with pytest.raises(ValueError):
-            wol.normalize_mac(b"\x5c\x60\xba\xbb\xcf\x63")  # type: ignore[arg-type]
+            wol.normalize_mac(b"\x02\x00\x5e\x10\x00\x01")  # type: ignore[arg-type]
 
 
 class TestMagicPacket:
@@ -115,7 +118,8 @@ class TestSend:
 
 
 class TestParseEthtoolWol:
-    # Real capture from the .20 host wired NIC (eno1) during the SNO build-out.
+    # Shape of a real `ethtool` reply from a wired Intel NIC (captured during the
+    # SNO build-out, host identifiers stripped).
     REAL_FIXTURE = (
         "Settings for eno1:\n"
         "\tSupported ports: [ TP ]\n"

@@ -25,8 +25,8 @@ _PACKET_LEN = 6 + 6 * 16  # 102
 def normalize_mac(mac: str) -> bytes:
     """Parse a MAC in colon/dash/dot/bare-hex form into 6 raw bytes.
 
-    Accepts ``5c:60:ba:bb:cf:63``, ``5C-60-BA-BB-CF-63``, ``5c60.babb.cf63``
-    (Cisco), or ``5c60babbcf63`` (case/space-insensitive). Raises ``ValueError``
+    Accepts ``02:00:5e:10:00:01``, ``02-00-5E-10-00-01``, ``0200.5e10.0001``
+    (Cisco), or ``02005e100001`` (case/space-insensitive). Raises ``ValueError``
     on anything that is not exactly six hex octets.
     """
     if not isinstance(mac, str):

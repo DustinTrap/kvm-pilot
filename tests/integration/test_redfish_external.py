@@ -13,6 +13,12 @@ disabled would need. It applies power transitions with a short simulated delay,
 which the driver's wait loop absorbs; that delay is exactly why state assertions
 go through ``power_on()``/``power_off_hard()`` (which block on the real GET) and
 not a fire-and-forget call.
+
+**``KVM_PILOT_REDFISH_URL`` must name a disposable emulator, never real hardware.**
+Several tests below apply real power transitions and boot-device writes with
+``confirm=allow_all``; the hard-coded ``admin``/``password`` credentials make an
+accidental hit on a real BMC unlikely, but that is luck, not a contract — so the
+requirement is stated here and in the fixture (#243).
 """
 
 from __future__ import annotations

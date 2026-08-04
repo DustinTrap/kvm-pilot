@@ -323,8 +323,8 @@ Structural set: `system_info, power, hid, video, virtual_media, gpio, events, lo
 > `src/kvm_pilot/data/test_runs.jsonl`; `kvm_pilot.maturity` derived the levels
 > below (drift-checked in CI).
 
-A full-fleet reliability sweep of **`.11`** (`homelab`), **`.20`** (`homelab2`),
-and **`.39`** (`bench`) — all GL-RM1PE — ran every CLI subcommand + MCP tool
+A full-fleet reliability sweep of three GL-RM1PE units (labelled `unit-A` /
+`unit-B` / `unit-C` here; exact addresses stay in the operator's private ledger) ran every CLI subcommand + MCP tool
 multiple times, cross-checked against appliance-SSH + native-REST ground truth
 per the [test plan](test-plan.md). Headline results that changed the `glkvm`
 ratings above:
