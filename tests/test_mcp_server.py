@@ -1859,7 +1859,7 @@ def test_calibrate_mouse_reports_a_calibration_failure_as_a_tool_error(config_fi
 
     env = server_env(config_file, KVM_PILOT_MCP_ALLOW_HID="1")
     result = run_session(env, interact)
-    assert result.isError
+    assert is_error(result)
     text = result.content[0].text.lower()
     # Names a precondition the operator can act on.
     assert "could not be decoded" in text or "snapshot" in text
@@ -1876,7 +1876,7 @@ def test_mouse_pixel_coords_need_a_driver_that_reports_resolution(config_file):
 
     env = server_env(config_file, KVM_PILOT_MCP_ALLOW_HID="1")
     result = run_session(env, interact)
-    assert result.isError
+    assert is_error(result)
     assert "pixel" in result.content[0].text.lower()
 
 
@@ -1902,7 +1902,7 @@ def test_ssh_discover_refuses_without_an_explicit_confirmation(config_file):
         return await session.call_tool("ssh_discover", {"cidr": "10.0.0.0/30"})
 
     result = run_session(server_env(config_file), interact)
-    assert result.isError
+    assert is_error(result)
     assert "not confirmed" in result.content[0].text
 
 
@@ -1915,7 +1915,7 @@ def test_ssh_discover_rejects_an_over_broad_range(config_file):
         )
 
     result = run_session(server_env(config_file), interact)
-    assert result.isError
+    assert is_error(result)
     assert "narrow" in result.content[0].text.lower() or "addresses" in result.content[0].text
 
 
@@ -1926,7 +1926,7 @@ def test_ssh_discover_rejects_a_malformed_cidr(config_file):
         )
 
     result = run_session(server_env(config_file), interact)
-    assert result.isError
+    assert is_error(result)
 
 
 def test_ssh_discover_scans_a_tiny_range_when_confirmed(config_file):
@@ -1964,7 +1964,7 @@ def test_ssh_exec_missing_ssh_host_is_a_clean_tool_error(config_file):
 
     env = server_env(config_file, KVM_PILOT_MCP_ALLOW_SSH="1")
     result = run_session(env, interact)
-    assert result.isError
+    assert is_error(result)
     text = result.content[0].text
     assert "ssh_host" in text  # names the missing setting
 
@@ -1977,7 +1977,7 @@ def test_appliance_reboot_without_appliance_ssh_is_a_clean_tool_error(config_fil
 
     env = server_env(config_file, KVM_PILOT_MCP_ALLOW_APPLIANCE="1")
     result = run_session(env, interact)
-    assert result.isError
+    assert is_error(result)
     assert "appliance_ssh" in result.content[0].text
 
 
@@ -1992,7 +1992,7 @@ def test_amt_enable_on_a_non_amt_driver_says_so(config_file):
 
     env = server_env(config_file, KVM_PILOT_MCP_ALLOW_CONFIG="1")
     result = run_session(env, interact)
-    assert result.isError
+    assert is_error(result)
     assert "amt driver" in result.content[0].text.lower()
 
 
@@ -2007,7 +2007,7 @@ def test_amt_consent_off_needs_its_own_gate(config_file):
 
     env = server_env(config_file, KVM_PILOT_MCP_ALLOW_CONFIG="1")
     result = run_session(env, interact)
-    assert result.isError
+    assert is_error(result)
     text = result.content[0].text.lower()
     assert "consent" in text
 

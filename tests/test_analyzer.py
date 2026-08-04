@@ -374,3 +374,37 @@ def test_hostile_classification_triggers_no_destructive_action():
     assert state.phase == "grub_menu"
     assert d.actions == []          # no power/hid/msd/gpio call happened
     assert d.is_powered_on() is True  # host untouched
+
+
+def test_a_failed_snapshot_is_a_visionerror_not_a_raw_device_error():
+    """The analyzer's callers catch VisionError; a device exception escaping
+    raw would break a wait loop instead of letting it retry."""
+    from kvm_pilot.errors import VisionError
+
+    class Broken:
+        def snapshot_base64(self, quality: int = 85) -> str:
+            raise RuntimeError("streamer offline")
+
+    analyzer = ScreenAnalyzer(Broken(), FakeBackend(["bios_menu"]))
+    with pytest.raises(VisionError) as ei:
+        analyzer.classify()
+    assert "snapshot failed" in str(ei.value)
+    assert "streamer offline" in str(ei.value)  # keeps the underlying cause
+
+
+def test_a_raising_state_change_callback_never_breaks_the_loop():
+    """An on_state_change hook is caller code; a bug in it must not take down
+    the watch that was informing it."""
+    calls = {"n": 0}
+
+    def boom(_old, _new):
+        calls["n"] += 1
+        raise RuntimeError("callback bug")
+
+    analyzer = ScreenAnalyzer(
+        FakeKVM(), FakeBackend(["bios_menu", "grub_menu"]), on_state_change=boom
+    )
+    analyzer.classify()
+    second = analyzer.classify()   # phase changes -> callback fires and raises
+    assert calls["n"] >= 1
+    assert second.phase == "grub_menu"  # the classification still returned

@@ -190,3 +190,42 @@ def test_rollup_without_conditions_is_unchanged():
     cap = rollup(records)[0]["capabilities"]["snapshot"]
     assert "pass_conditions" not in cap
     assert "fail_conditions" not in cap
+
+
+# -- malformed ledger rows must be skipped, not crash (#246) ---------------
+#
+# Ledger rows arrive from outside contributors via the hardware-report issue
+# template, so the parser meets whatever a human typed.
+
+
+def test_rows_missing_device_identity_are_skipped():
+    """A row with no vendor/product/firmware cannot be joined to anything —
+    skip it rather than grouping under empty keys."""
+    from kvm_pilot.support_matrix import rollup
+
+    rows = [
+        {"vendor": "", "product": "P", "firmware_version": "1", "capabilities": []},
+        {"vendor": "V", "product": "", "firmware_version": "1", "capabilities": []},
+        {"vendor": "V", "product": "P", "firmware_version": "", "capabilities": []},
+        {"vendor": "V", "product": "P", "firmware_version": "1",
+         "source": "real", "utc_date": "2026-01-01T00:00:00Z",
+         "capabilities": [{"capability": "info", "passed": True, "outcome": "ok"}]},
+    ]
+    out = rollup(rows)
+    assert len(out) == 1, "only the fully-identified row should survive"
+    assert out[0]["vendor"] == "V"
+
+
+def test_capabilities_with_no_name_are_skipped():
+    from kvm_pilot.support_matrix import rollup
+
+    rows = [{
+        "vendor": "V", "product": "P", "firmware_version": "1",
+        "source": "real", "utc_date": "2026-01-01T00:00:00Z",
+        "capabilities": [
+            {"capability": "", "passed": True, "outcome": "nameless"},
+            {"capability": "info", "passed": True, "outcome": "ok"},
+        ],
+    }]
+    caps = rollup(rows)[0]["capabilities"]
+    assert set(caps) == {"info"}

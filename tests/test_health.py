@@ -892,3 +892,43 @@ def test_support_evidence_flags_condition_blind_snapshot_passes(monkeypatch):
                         lambda: [_ledger_run([("snapshot", True, "")])])
     r = health.check_support_evidence(_fw(product="RM1PE", version="V1.5.1 release2"))
     assert "verified only under unknown resolution/encoder" in r.detail
+
+
+# -- honest sensing when a probe itself fails (#246) ------------------------
+
+
+def test_access_paths_marks_rest_down_when_the_probe_raises():
+    """A path whose liveness probe throws is DOWN, not unknown-and-omitted —
+    the lockout view is only useful if a failed probe still shows up."""
+    from kvm_pilot.errors import KVMPilotError
+    from kvm_pilot.health import access_paths
+
+    class Unreachable:
+        host = "h"
+
+        def get_info(self):
+            raise KVMPilotError("connection refused")
+
+    result = access_paths(Unreachable())
+    rest = next(p for p in result["paths"] if p["path"] == "kvmd-rest")
+    assert rest["configured"] is True
+    assert rest["live"] is False
+    assert result["summary"]["live_count"] == 0
+
+
+def test_video_signal_check_treats_a_raising_probe_as_no_signal():
+    """A probe that throws must not read as 'signal present' — the whole
+    false-report doctrine is that an unanswerable question is not a yes."""
+    from kvm_pilot.errors import KVMPilotError
+    from kvm_pilot.health import Severity, check_video_signal
+
+    class Broken:
+        host = "h"
+
+        def has_video_signal(self):
+            raise KVMPilotError("streamer unreachable")
+
+    res = check_video_signal(Broken())
+    assert res is not None
+    assert res.severity >= Severity.INFO
+    assert "no" in res.detail.lower() or "signal" in res.detail.lower()

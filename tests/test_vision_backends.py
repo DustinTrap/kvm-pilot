@@ -164,3 +164,76 @@ def test_request_json_429_http_date_retry_after_is_none(monkeypatch):
         request_json("POST", "http://x", headers={}, timeout=1, payload={})
     assert ei.value.status_code == 429
     assert ei.value.retry_after is None
+
+
+# -- the VisionError contract (#246) ---------------------------------------
+#
+# Wait loops catch VisionError and keep polling, so EVERY transport failure has
+# to arrive as one. A raw urllib/OSError escaping here would break a `watch`
+# mid-install instead of retrying.
+
+
+def test_a_network_error_arrives_as_a_visionerror(monkeypatch):
+    import urllib.error
+
+    from kvm_pilot.vision import base
+    from kvm_pilot.vision.base import request_json
+
+    def boom(*_a, **_k):
+        raise urllib.error.URLError("name or service not known")
+
+    monkeypatch.setattr(base._OPENER, "open", boom)
+    with pytest.raises(VisionError) as ei:
+        request_json("POST", "http://x", headers={}, timeout=1, payload={})
+    assert "network error" in str(ei.value)
+
+
+def test_a_dropped_connection_arrives_as_a_visionerror(monkeypatch):
+    """Read timeouts and resets surface raw from urllib — the contract has to
+    hold for them too, not just for clean HTTP errors."""
+    from kvm_pilot.vision import base
+    from kvm_pilot.vision.base import request_json
+
+    def boom(*_a, **_k):
+        raise TimeoutError("read timed out")
+
+    monkeypatch.setattr(base._OPENER, "open", boom)
+    with pytest.raises(VisionError) as ei:
+        request_json("POST", "http://x", headers={}, timeout=1, payload={})
+    assert "connection failed" in str(ei.value)
+
+
+class _Resp:
+    def __init__(self, body: bytes):
+        self._body = body
+
+    def read(self):
+        return self._body
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        return False
+
+
+def test_non_json_from_the_model_endpoint_is_a_visionerror(monkeypatch):
+    """A proxy or captive portal answering HTML with a 200 is the realistic
+    case; the caller must get a VisionError, not a JSONDecodeError."""
+    from kvm_pilot.vision import base
+    from kvm_pilot.vision.base import request_json
+
+    monkeypatch.setattr(base._OPENER, "open", lambda *_a, **_k: _Resp(b"<html>hi</html>"))
+    with pytest.raises(VisionError) as ei:
+        request_json("POST", "http://x", headers={}, timeout=1, payload={})
+    assert "non-JSON" in str(ei.value)
+
+
+def test_json_that_is_not_an_object_is_a_visionerror(monkeypatch):
+    from kvm_pilot.vision import base
+    from kvm_pilot.vision.base import request_json
+
+    monkeypatch.setattr(base._OPENER, "open", lambda *_a, **_k: _Resp(b'["not", "a", "dict"]'))
+    with pytest.raises(VisionError) as ei:
+        request_json("POST", "http://x", headers={}, timeout=1, payload={})
+    assert "non-object" in str(ei.value)
