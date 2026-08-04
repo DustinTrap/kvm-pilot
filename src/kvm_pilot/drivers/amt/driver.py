@@ -590,12 +590,14 @@ class AmtDriver(PowerMixin, CapabilityMixin):
         # but firmware phrasing varies and either alone is a clear enough signal.
         if "unsupportedfeature" in detail or "not supported" in detail:
             return (
-                "The ME reports this feature as UNSUPPORTED, which on a provisioned system "
-                "almost always means it is switched off in firmware setup rather than broken: "
-                "reboot into MEBx (Ctrl-P at POST) and enable KVM redirection under "
-                "AMT Configuration -> Remote Setup / Redirection. Note SOL and IDE-R are "
-                "toggled separately — SOL can be listening while KVM is disabled, which is "
-                "exactly what this looks like. A power cycle will NOT change it (#217)."
+                "The ME refuses to enable the STANDARD VNC PORT (5900) for KVM. Measured on "
+                "a Latitude 5411 at 14.1.79: the KVM SAP was present and enabled "
+                "(EnabledState=6, RequestedState=2) with its settings intact, only "
+                "Is5900PortEnabled was false and un-settable — newer ME builds harden off "
+                "the legacy plain-RFB port while keeping KVM on the authenticated "
+                "redirection port 16994 (a KVMR session there was accepted on the same "
+                "firmware). So KVM is probably NOT broken and MEBx is probably NOT the "
+                "problem; kvm-pilot just cannot drive the 16994 path yet (#245)."
             )
         return (
             "If a BIOS/ME firmware update ran recently, this is expected — the update "

@@ -341,8 +341,13 @@ class Rfb:
             self._sock = socket.create_connection((self.host, self.port), timeout=self._timeout)
         except OSError as e:
             raise ConnectionError(
-                f"AMT RFB connect to {self.host}:{self.port} failed: {e} "
-                "(is KVM redirection + standard-port 5900 enabled in MEBx?)"
+                f"AMT RFB connect to {self.host}:{self.port} failed: {e}. "
+                "kvm-pilot speaks KVM only over the STANDARD VNC PORT (5900), and newer "
+                "ME firmware disables that path while keeping KVM available over the "
+                "authenticated redirection port 16994 — measured on a Latitude 5411 at "
+                "14.1.79, where 5900 was refused but a KVMR session on 16994 was accepted. "
+                "So this may be a kvm-pilot gap rather than a disabled feature: check "
+                "`healthcheck` (amt-redirection) before touching MEBx (#245)."
             ) from e
         self._handshake()
 

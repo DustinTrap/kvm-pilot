@@ -1342,11 +1342,19 @@ def test_me_wedge_quirk_is_published(amt_emu):
     assert "me-firmware-update-needs-g3" in ids
 
 
-def test_unsupported_feature_points_at_mebx_not_a_power_cycle(amt_emu):
-    """Live finding on a Latitude 5411 @ 14.1.79: SOL/IDE-R listening, but
-    enable-kvm returned `e:UnsupportedFeature` — KVM redirection was disabled in
-    MEBx, which a power cycle cannot fix. The message must not send the operator
-    hunting the #217 wedge instead.
+def test_unsupported_feature_blames_the_5900_path_not_the_operator(amt_emu):
+    """Measured on a Latitude 5411 @ 14.1.79.
+
+    `enable-kvm` returns `e:UnsupportedFeature`, but KVM is NOT broken: the SAP
+    was present and enabled (EnabledState=6, RequestedState=2) with its settings
+    intact, only `Is5900PortEnabled` was false and un-settable — and a KVMR
+    session on the redirection port 16994 was accepted on that same firmware.
+    Newer ME builds harden off the legacy plain-RFB port while keeping KVM on
+    the authenticated one.
+
+    Two earlier versions of this message were wrong: the first blamed a
+    firmware-update wedge (#217), the second blamed MEBx. Both would have sent
+    an operator to the machine for a problem that is a gap in this tool (#245).
     """
     # The exact envelope the live device returned, subcode included.
     amt_emu.state.http_status = 400
@@ -1363,5 +1371,6 @@ def test_unsupported_feature_points_at_mebx_not_a_power_cycle(amt_emu):
         make(amt_emu, kvm_password="Chang3M!").enable_kvm()
     msg = str(ei.value)
     assert "UnsupportedFeature" in msg          # #216's surfacing still shows the subcode
-    assert "MEBx" in msg and "SOL and IDE-R are toggled separately" in msg
-    assert "G3" not in msg  # the wrong cause must NOT lead
+    assert "16994" in msg                       # names the path that DOES work
+    assert "MEBx is probably NOT the problem" in msg
+    assert "G3" not in msg                      # neither wrong cause may lead
