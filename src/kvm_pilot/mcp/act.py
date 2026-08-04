@@ -32,6 +32,7 @@ import hashlib
 import hmac
 import json
 import logging
+import math
 import os
 import secrets
 import threading
@@ -43,10 +44,9 @@ from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any
 
-from mcp.types import ClientCapabilities, ElicitationCapability
 from pydantic import BaseModel
 
-from kvm_pilot.mcp._sdk import Context, ToolError
+from kvm_pilot.mcp._sdk import ClientCapabilities, Context, ElicitationCapability, ToolError
 from kvm_pilot.safety import EffectClass
 
 # --------------------------------------------------------------------------- #
@@ -500,9 +500,12 @@ def _receipt_ttl() -> float:
     if not raw:
         return 60.0
     try:
-        return min(max(float(raw), 1.0), 3600.0)
+        value = float(raw)
     except ValueError:
         return 60.0
+    if not math.isfinite(value):
+        return 60.0  # float("nan") slips through min/max and never expires (#243)
+    return min(max(value, 1.0), 3600.0)
 
 
 @dataclass(frozen=True)
@@ -709,9 +712,12 @@ def _standing_ceiling_min() -> float:
     if not raw:
         return 0.0
     try:
-        return min(max(float(raw), 0.0), _STANDING_CEILING_MAX_MIN)
+        value = float(raw)
     except ValueError:
         return 0.0
+    if not math.isfinite(value):
+        return 0.0  # nan defeats the clamp; treat like any unusable value (#243)
+    return min(max(value, 0.0), _STANDING_CEILING_MAX_MIN)
 
 
 def standing_enabled() -> bool:

@@ -147,7 +147,9 @@ def test_get_info_survives_partial_failure(amt_emu):
         "manufacturer", "model", "serial_number", "uuid",
         "amt_version", "provisioning_state", "power_state",
     }
-    assert info["power_state"] == "off"  # is_powered_on failed -> reported off
+    # An unanswered power read is UNKNOWN, not "off" — reporting off is a lie the
+    # operator can act on (#243, honest-sensor doctrine).
+    assert info["power_state"] is None
 
 
 # -- boot config ----------------------------------------------------------

@@ -1643,10 +1643,20 @@ def preflight_once(
 
 # Volatile checks are re-probed live every time; stable ones may come from cache.
 def _is_volatile(check: Check) -> bool:
+    # INVARIANT: every check that emits ``cacheable=False`` results must be
+    # listed here. A non-cacheable result from a "stable"-classified check is
+    # dropped by ``store_stable`` and then never re-runs on a warm cache — the
+    # finding (e.g. a CRITICAL amt-provisioning) silently vanishes exactly when
+    # ``preflight`` consults the cache to gate a destructive op (#243).
+    # ``test_health.py::test_warm_cache_preflight_reports_every_check`` guards it.
     return getattr(check, "__name__", "") in {
         "check_api_reachable",
         "check_ssh_reachable",
         "check_video_signal",
+        "check_hid_reachable",
         "check_encoder_wedge",
         "check_msd_online",
+        "check_amt_provisioning",
+        "check_amt_redirection",
+        "check_amt_rfb_password",
     }

@@ -48,7 +48,14 @@ class RemotePowerShell:
     address — a different machine from the KVM appliance).
     """
 
+    _SHELLS = ("powershell", "pwsh")
+
     def __init__(self, ssh: SSHChannel, *, shell: str = "powershell"):
+        # `shell` is interpolated into the remote command line — an arbitrary
+        # value would be remote command injection, so pin it to the two
+        # interpreters this class supports (#243).
+        if shell not in self._SHELLS:
+            raise ValueError(f"shell must be one of {self._SHELLS}, got {shell!r}")
         self.ssh = ssh
         self.shell = shell
 

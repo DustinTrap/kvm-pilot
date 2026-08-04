@@ -164,6 +164,7 @@ class AmtDriver(PowerMixin, CapabilityMixin):
         provisioning state, power, and platform UUID. Each lookup is independent
         so a firmware that omits one field never blanks the rest."""
         chassis = self._safe(self._chassis) or {}
+        powered = self._safe(self.is_powered_on)
         info: dict[str, Any] = {
             "manufacturer": chassis.get("manufacturer"),
             "model": chassis.get("model"),
@@ -171,7 +172,9 @@ class AmtDriver(PowerMixin, CapabilityMixin):
             "uuid": self._system_uuid(),
             "amt_version": self._amt_version(),
             "provisioning_state": self._provisioning_state(),
-            "power_state": "on" if self._safe(self.is_powered_on) else "off",
+            # None when the ME did not answer — "off" would be a lie the operator
+            # can act on (#243); every other failed field here stays None too.
+            "power_state": None if powered is None else ("on" if powered else "off"),
         }
         if fields:
             info = {k: v for k, v in info.items() if k in fields}

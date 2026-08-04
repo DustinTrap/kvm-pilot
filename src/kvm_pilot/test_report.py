@@ -222,18 +222,37 @@ def probe_power(kvm: Any) -> dict[str, Any]:
     lies (GL: quirk atx-power-state-always-off) this honestly FAILs, which is
     the finding. The restore attempt always runs.
     """
-    baseline = kvm.is_powered_on()
+    # Every read in here is guarded: "failures are DATA, not harness errors",
+    # and an unguarded read that raises AFTER the toggle already ran would
+    # abort the whole run and discard every collected row (#243).
+    try:
+        baseline = kvm.is_powered_on()
+    except SafetyError:
+        raise  # a declined confirm is a SKIP (run_probes' terminal), not a FAIL
+    except KVMPilotError as exc:
+        return _row("power", False, f"baseline power read failed: {exc}")
     away = kvm.power_off if baseline else kvm.power_on
     back = kvm.power_on if baseline else kvm.power_off
+
+    def _reads(target: bool) -> bool:
+        try:
+            return kvm.is_powered_on() == target
+        except KVMPilotError:
+            return False
+
     try:
         away()
-        flipped = _wait_until(lambda: kvm.is_powered_on() != baseline)
+        flipped = _wait_until(lambda: _reads(not baseline))
+    except SafetyError:
+        raise  # declined confirm -> skipped, not failed
+    except KVMPilotError as exc:
+        return _row("power", False, f"power toggle dispatch failed: {exc}")
     finally:
         try:
             back()
         except KVMPilotError:
             pass
-    restored = _wait_until(lambda: kvm.is_powered_on() == baseline)
+    restored = _wait_until(lambda: _reads(baseline))
     if flipped and restored:
         return _row("power", True,
                     f"observed {'on->off->on' if baseline else 'off->on->off'}")
@@ -247,19 +266,32 @@ def probe_virtual_media(kvm: Any, iso: str) -> dict[str, Any]:
     """Mount (drivers verify by default, #77/#169), then observe the eject."""
     try:
         name = kvm.mount_iso(iso)
+    except SafetyError:
+        raise  # declined confirm -> skipped, not failed
     except KVMPilotError as exc:
         return _row("virtual_media", False, f"mount: {exc}")
-    online = bool((kvm.get_msd_state() or {}).get("online"))
+    try:
+        online = bool((kvm.get_msd_state() or {}).get("online"))
+    except SafetyError:
+        raise
+    except KVMPilotError as exc:
+        return _row("virtual_media", False, f"MSD state read after mount failed: {exc}")
     if not online:
         return _row("virtual_media", False,
                     f"mount of {name!r} accepted but MSD never reported online")
     try:
         kvm.msd_disconnect()
+    except SafetyError:
+        raise  # declined confirm -> skipped, not failed
     except KVMPilotError as exc:
         return _row("virtual_media", False, f"eject: {exc}")
-    ejected = _wait_until(
-        lambda: not bool((kvm.get_msd_state() or {}).get("online")), timeout=5.0
-    )
+    def _offline() -> bool:
+        try:
+            return not bool((kvm.get_msd_state() or {}).get("online"))
+        except KVMPilotError:
+            return False
+
+    ejected = _wait_until(_offline, timeout=5.0)
     if not ejected:
         return _row("virtual_media", False,
                     f"mounted {name!r} ok but eject effect not observed (still online)")

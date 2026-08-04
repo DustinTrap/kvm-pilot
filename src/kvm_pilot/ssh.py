@@ -21,11 +21,20 @@ import shutil
 import socket
 import subprocess  # nosec B404 - intentional: shells out to the system `ssh` (no SSH lib)
 import tempfile
+import weakref
 from concurrent.futures import ThreadPoolExecutor
 
 from .config import HostConfig
 from .errors import CapabilityError, TimeoutError
 from .safety import SafetyPolicy
+
+
+def _unlink_quiet(path: str) -> None:
+    """Finalizer target: remove the askpass helper, ignoring a lost race."""
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
 
 logger = logging.getLogger("kvm_pilot.ssh")
 
@@ -118,6 +127,7 @@ class SSHChannel:
         # env var — so no `sshpass` binary and no third-party library are needed.
         self.password = password
         self._askpass_path: str | None = None
+        self._askpass_finalizer: weakref.finalize | None = None
 
     @classmethod
     def from_config(
@@ -245,6 +255,10 @@ class SSHChannel:
             fh.write("#!/bin/sh\nprintf '%s\\n' \"$" + self._ASKPASS_ENV + "\"\n")
         os.chmod(path, 0o700)  # nosec B103 - owner-only exec, no secret in the file
         self._askpass_path = path
+        # Callers that build a throwaway channel (the MCP ssh_exec tool) never
+        # call close(); without a finalizer every password-auth call would leave
+        # an executable helper in the temp dir (#243).
+        self._askpass_finalizer = weakref.finalize(self, _unlink_quiet, path)
         return path
 
     def _auth_run_kwargs(self) -> tuple[dict | None, dict]:
@@ -268,12 +282,10 @@ class SSHChannel:
 
         Safe to call always: a no-op when nothing was started.
         """
-        if self._askpass_path:
-            try:
-                os.unlink(self._askpass_path)
-            except OSError:
-                pass
-            self._askpass_path = None
+        if self._askpass_finalizer is not None:
+            self._askpass_finalizer()  # unlinks the helper; safe to call twice
+            self._askpass_finalizer = None
+        self._askpass_path = None
         if not self.persist or shutil.which("ssh") is None:
             return
         try:
@@ -390,7 +402,7 @@ class ApplianceChannel(SSHChannel):
         # Fire-and-forget: the reboot tears down our SSH session, so a normal exit
         # never returns — detach it and treat the dropped connection as success.
         try:
-            subprocess.run(  # nosec B603 - fixed constant command, no shell
+            proc = subprocess.run(  # nosec B603 - fixed constant command, no shell
                 self._ssh_argv() + ["nohup /sbin/reboot >/dev/null 2>&1 &"],
                 capture_output=True,
                 text=True,
@@ -398,6 +410,16 @@ class ApplianceChannel(SSHChannel):
             )
         except subprocess.TimeoutExpired:
             pass  # session torn down by the reboot — expected
+        else:
+            # A non-zero exit is a real failure (auth refused, no route, no
+            # /sbin/reboot) — reporting "rebooting" for it left the operator
+            # waiting on a reboot that never happened (#243). Only the
+            # torn-down-session path above may assume success.
+            if proc.returncode != 0:
+                return _result(
+                    "reboot", returncode=proc.returncode,
+                    stdout=proc.stdout, stderr=proc.stderr, dry_run=False,
+                )
         return _result("reboot", returncode=0, stdout="rebooting", stderr="", dry_run=False)
 
 

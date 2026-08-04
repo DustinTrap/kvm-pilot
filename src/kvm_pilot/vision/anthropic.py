@@ -24,6 +24,7 @@ from .base import (
     ScreenState,
     VisionBackend,
     build_user_text,
+    media_type_of_b64,
     parse_classification,
     request_json,
 )
@@ -123,7 +124,7 @@ class AnthropicBackend(VisionBackend):
                             "type": "image",
                             "source": {
                                 "type": "base64",
-                                "media_type": "image/jpeg",
+                                "media_type": media_type_of_b64(image_b64),
                                 "data": image_b64,
                             },
                         },

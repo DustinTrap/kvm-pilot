@@ -252,9 +252,19 @@ class TestBootConfig:
 
     def test_usb_rejected(self, ipmi):
         drv, calls = ipmi
-        with pytest.raises(KVMPilotError):
+        with pytest.raises(KVMPilotError, match="floppy"):
             drv.set_boot_device("usb")          # IPMI has no usb bootdev
         assert not any("bootdev" in c for c in calls)
+
+    def test_every_readable_target_is_settable(self, ipmi):
+        # get_boot_options() must never report a token set_boot_device() rejects,
+        # or a read-then-write round-trip fails (#243).
+        drv, _ = ipmi
+        from kvm_pilot.drivers.ipmi import _BOOT_SELECTOR_REVERSE, _BOOTDEV_MAP
+
+        for _phrase, token in _BOOT_SELECTOR_REVERSE:
+            assert token in _BOOTDEV_MAP, f"{token!r} is readable but not settable"
+        assert "floppy" in drv.get_boot_options()["allowable"]
 
 
 class TestSensorsAndLogs:

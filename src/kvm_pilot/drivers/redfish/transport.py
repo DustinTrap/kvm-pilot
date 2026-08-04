@@ -306,15 +306,20 @@ class RedfishHTTP:
     ) -> RedfishResponse:
         data = json.dumps(json_body).encode() if json_body is not None else None
         url = self._url(path)
-        # Never send credentials to an off-origin URL the BMC handed us.
-        authed_eff = authed and self._same_origin(url)
-        if authed and not authed_eff:
-            logger.warning("Refusing to send Redfish credentials to off-origin URL")
+        # Refuse an off-origin URL the BMC handed us (e.g. a hostile
+        # Links.Sessions.@odata.id) instead of merely stripping the auth
+        # headers: login() carries the credentials in the BODY, and even a
+        # credential-free request is an SSRF the BMC chose the target of (#243).
+        if not self._same_origin(url):
+            raise ConnectionError(
+                f"Refusing off-origin Redfish URL {url!r} — kvm-pilot never follows "
+                "a BMC-supplied URL to another host"
+            )
         req = urllib.request.Request(
             url,
             data=data,
             method=method,
-            headers=self._headers(authed=authed_eff, json_body=data is not None),
+            headers=self._headers(authed=authed, json_body=data is not None),
         )
         try:
             with self._opener.open(req, timeout=self._timeout) as resp:
@@ -391,11 +396,6 @@ class RedfishHTTP:
         token = resp.header("x-auth-token")
         if not token:
             raise AuthError("Redfish session created but no X-Auth-Token was returned")
-        if self._password_change_required(resp.body):
-            raise AuthError(
-                "Account requires a password change before API use "
-                "(Redfish PasswordChangeRequired on session create)"
-            )
         self._token = token
         # Prefer the (spec-required) Location header; fall back to the session
         # resource's self-link in the body for non-compliant firmware that omits
@@ -406,6 +406,15 @@ class RedfishHTTP:
                 "Redfish session created but the BMC returned no session URI (no "
                 "Location header or body @odata.id) — the session cannot be DELETEd "
                 "on logout and will occupy a slot until the BMC expires it (#169)"
+            )
+        # Checked only after the token/session URI are stored: the session WAS
+        # created, and raising before recording it would leak a BMC session
+        # slot on every login attempt against such an account (#243).
+        if self._password_change_required(resp.body):
+            self.logout()  # never raises
+            raise AuthError(
+                "Account requires a password change before API use "
+                "(Redfish PasswordChangeRequired on session create)"
             )
 
     def logout(self) -> None:

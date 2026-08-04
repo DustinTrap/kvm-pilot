@@ -16,7 +16,9 @@ a stray ``from mcp.server.fastmcp import ...`` elsewhere silently reintroduces
 
 from __future__ import annotations
 
-from mcp.types import ToolAnnotations  # unmoved across majors; only the fields renamed
+# mcp.types is unmoved across majors (only model fields renamed) — but it is
+# still SDK surface, so it routes through this shim like everything else (#243).
+from mcp.types import ClientCapabilities, ElicitationCapability, ToolAnnotations
 
 try:  # mcp 2.x
     from mcp.server.mcpserver import Context, Image, MCPServer
@@ -65,7 +67,9 @@ def read_only_hint(annotations: object | None) -> bool | None:
 
 __all__ = [
     "SDK_MAJOR",
+    "ClientCapabilities",
     "Context",
+    "ElicitationCapability",
     "Image",
     "MCPServer",
     "ToolError",

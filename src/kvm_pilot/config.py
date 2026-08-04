@@ -71,7 +71,6 @@ class HostConfig:
     # endpoints without a SessionService, e.g. emulators or BMCs with session
     # auth disabled). Ignored by the PiKVM family.
     redfish_auth: str = "session"
-    # In-band SSH to the managed HOST's OS (the machine behind the KVM), NOT the
     # In-band channel to the managed host behind the KVM (a *separate* machine
     # from the appliance). Used by the SSH channel (src/kvm_pilot/ssh.py) for
     # reachability probes and recovery commands on the target OS. Auth is
@@ -137,7 +136,9 @@ def _warn_if_secrets_world_readable(path: Path, data: dict[str, Any]) -> None:
         return
     hosts = data.get("hosts", {}) if isinstance(data, dict) else {}
     has_secret = any(
-        isinstance(h, dict) and (h.get("passwd") or h.get("totp_secret"))
+        isinstance(h, dict)
+        and (h.get("passwd") or h.get("totp_secret") or h.get("ssh_password")
+             or h.get("amt_kvm_password"))
         for h in hosts.values()
     )
     if not has_secret:

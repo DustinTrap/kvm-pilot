@@ -192,8 +192,10 @@ OP_EFFECT: dict[str, EffectClass] = {
     "amt.serial_console": EffectClass.HID_INPUT,  # SOL can inject keystrokes
     "amt.enable_sol": EffectClass.CONFIG_MUTATION,
     "amt.enable_kvm": EffectClass.CONFIG_MUTATION,
-    "amt.mount_iso": EffectClass.CONFIG_MUTATION,
-    "amt.eject": EffectClass.CONFIG_MUTATION,
+    # Virtual media rides the MEDIA gate like msd.*/redfish.virtual_media_* —
+    # an ALLOW_MEDIA operator grant must cover AMT IDE-R too (#243).
+    "amt.mount_iso": EffectClass.MEDIA,
+    "amt.eject": EffectClass.MEDIA,
     # HID input
     "hid.type_text": EffectClass.HID_INPUT,
     "hid.press_key": EffectClass.HID_INPUT,

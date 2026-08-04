@@ -96,6 +96,28 @@ def build_user_text(hint: str) -> str:
     return base
 
 
+def media_type_of_b64(image_b64: str) -> str:
+    """``image/png`` or ``image/jpeg`` from the base64 payload's magic bytes.
+
+    The kvmd family snapshots JPEG but AMT renders its framebuffer to PNG, and
+    the vision APIs reject an image whose declared media type is wrong (#243).
+    Canonical base64 starts at offset 0, so the prefix is deterministic:
+    ``\\x89PNG`` -> ``iVBOR``, ``\\xff\\xd8\\xff`` -> ``/9j/``.
+    """
+    return "image/png" if image_b64.startswith("iVBOR") else "image/jpeg"
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    """Refuse 3xx: never replay a request (API key headers included) to a
+    redirect target — same policy as http.py's _NoRedirect (#243)."""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):  # type: ignore[override]
+        return None
+
+
+_OPENER = urllib.request.build_opener(_NoRedirect())
+
+
 def request_json(
     method: str,
     url: str,
@@ -114,9 +136,18 @@ def request_json(
     data = json.dumps(payload).encode() if payload is not None else None
     req = urllib.request.Request(url, data=data, method=method, headers=headers)
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _OPENER.open(req, timeout=timeout) as resp:
             raw = resp.read().decode()
     except urllib.error.HTTPError as exc:
+        if 300 <= exc.code < 400:
+            # Refused by _NoRedirect: the default handler would replay the
+            # request — API key headers included — to whatever host Location
+            # names, across an https->http downgrade too (#243; same policy
+            # and rationale as http.py's _NoRedirect).
+            raise VisionError(
+                f"{label} answered HTTP {exc.code}; kvm-pilot never forwards "
+                f"the API key to a redirect target ({exc.headers.get('Location')!r})"
+            ) from exc
         body = exc.read().decode(errors="replace")
         # Carry the status so wait loops can back off on retryable errors
         # (429 rate_limit, 529 overloaded, 500/503), and parse Retry-After on a
@@ -249,6 +280,7 @@ __all__ = [
     "ScreenState",
     "parse_classification",
     "build_user_text",
+    "media_type_of_b64",
     "request_json",
     "SYSTEM_PROMPT",
     "ALL_PHASES",

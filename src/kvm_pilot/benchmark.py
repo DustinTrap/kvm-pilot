@@ -322,14 +322,18 @@ def benchmark_winrm(
         rp = RemotePowerShell.from_config(cfg, confirm=_allow, shell=shell)  # type: ignore[arg-type]  # nosec B604 - 'shell' is a PowerShell interpreter name, not subprocess shell=True
     except CapabilityError:
         return [CommandResult("ps_exec", "winrm", False, None, 0, "ssh_host not configured (winrm-over-ssh)")]
-    if not rp.reachable():
-        return [CommandResult("ps_exec", "winrm", False, None, 0, "target not reachable")]
+    try:
+        if not rp.reachable():
+            return [CommandResult("ps_exec", "winrm", False, None, 0, "target not reachable")]
 
-    def _probe() -> None:
-        _nonzero_raises(rp.run_ps(probe))
+        def _probe() -> None:
+            _nonzero_raises(rp.run_ps(probe))
 
-    p50, ok, err = _time_calls(_probe, samples, clock)
-    return [CommandResult("ps_exec", "winrm", ok > 0, p50, ok, "" if ok > 0 else (err or "ps_exec failed"))]
+        p50, ok, err = _time_calls(_probe, samples, clock)
+        return [CommandResult(
+            "ps_exec", "winrm", ok > 0, p50, ok, "" if ok > 0 else (err or "ps_exec failed"))]
+    finally:
+        rp.ssh.close()  # tears down the ControlMaster + askpass helper (#243)
 
 
 def benchmark_all(

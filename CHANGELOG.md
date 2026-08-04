@@ -6,6 +6,68 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **A warm-cache preflight silently dropped CRITICAL findings** (#243) — four
+  checks emitted `cacheable=False` results while being classified "stable", so
+  `store_stable` discarded them and a cache hit skipped re-running them. The
+  worst case: `amt-provisioning` (a CRITICAL the destructive gate consults) was
+  absent from every warm-cache preflight, so the gate passed. `_is_volatile` now
+  covers every non-cacheable check, with a guard test that fails if a new one
+  drifts out.
+- **Redfish: a BMC-supplied off-origin URL was still requested** (#243) — auth
+  headers were stripped, but `login()` carries the credentials in the request
+  *body*, and the request itself was an SSRF the BMC chose the target of.
+  Off-origin URLs are now refused before the request is built.
+- **Redfish: `PasswordChangeRequired` leaked a BMC session slot** on every login
+  attempt — the session was created, then the error raised before the token was
+  stored, so it could never be `DELETE`d. It is now recorded and logged out first.
+- **AMT virtual media rode the wrong MCP gate** — `amt.mount_iso`/`amt.eject`
+  were classed `CONFIG_MUTATION`, so an `ALLOW_MEDIA` grant didn't cover AMT
+  IDE-R (and `ALLOW_CONFIG` wrongly did). Both are `MEDIA` now, like `msd.*`.
+- **`KVM_PILOT_MCP_RECEIPT_TTL=nan` disabled receipt expiry entirely** (fail-open)
+  — `nan` passes `float()` and defeats `min`/`max` clamping. Non-finite values now
+  fall back to the default; same guard on the standing-grant ceiling.
+- **The MCP act layer blocked the event loop** — `_act`/`_channel_act` dispatched
+  blocking network I/O inline (power's verify polls up to ~10s, `ssh_exec` up to
+  the full timeout), freezing pings and every concurrent tool call. Both now use
+  the same `anyio.to_thread` pattern as `wait_for_state`.
+- **Appliance `reboot` reported success when the SSH command failed** — auth
+  refused, no route, or a missing `/sbin/reboot` all returned `"rebooting"`.
+  Non-zero exits now surface; only a torn-down session counts as success.
+- **The SSH askpass helper leaked** for callers that never call `close()` (the
+  MCP `ssh_exec` path), leaving an executable file per password-auth call. It is
+  now removed by a `weakref.finalize`.
+- **Vision transport forwarded the API key across redirects** — the default
+  handler replays headers to whatever host `Location` names, including an
+  https→http downgrade. It now refuses 3xx, matching `http.py`'s policy.
+- **Vision requests mislabeled PNG snapshots as JPEG** — AMT renders its
+  framebuffer to PNG and the APIs reject a wrong media type, so AMT screenshots
+  could not be classified. The media type is now sniffed from the image bytes.
+- `OPENAI_API_KEY` is no longer sent to a non-OpenAI `--vision-url` (a local VLM,
+  a typo, or a hostile proxy would have received the real credential).
+- **AMT `get_info` reported `power_state: "off"` when the ME didn't answer** —
+  now `None`, like every other failed field (honest-sensor doctrine).
+- **IPMI boot-device round-trips failed**: `get_boot_options()` reported `usb` for
+  the BMC's floppy selector while `set_boot_device("usb")` rejects it. The
+  readable token is now `floppy` — IPMI's actual removable-media target, and
+  settable; `usb` stays rejected with a message that points at it.
+- **`test-report`'s destructive probes could abort the whole run** — unguarded
+  `is_powered_on`/`get_msd_state` reads raised *after* the power toggle or ISO
+  mount had already executed, discarding every row collected so far. They are
+  now `FAIL` rows ("failures are DATA"), while a declined confirmation still
+  registers as a skip, not a failure.
+- AMT IDE-R `stop()` now joins the serving thread before closing the ISO (it
+  could raise inside the loop's catch-all and be swallowed); `READ_CAPACITY`
+  answers with the CD device flag like the other CD responses.
+- `RemotePowerShell` validates its interpreter name (`powershell`/`pwsh`) — it is
+  interpolated into a remote command line.
+- `save_scorecard` accepts a bare filename; the WinRM benchmark probe closes its
+  SSH transport; `FakeDriver.msd_attached` is initialized in `__init__`;
+  `VirtualMedia.msd_connect/disconnect` declare the return type the drivers
+  actually have; an unknown vision backend raises `VisionError` (not
+  `ValueError`); the config secret-permission warning also covers `ssh_password`
+  and `amt_kvm_password`.
+
 ### Changed
 - **The default driver is now `auto` — the CLI/MCP no longer silently assume
   `pikvm`** (#235). With no `--driver` / `KVM_PILOT_DRIVER` / profile `driver`

@@ -39,7 +39,7 @@ def make_backend(
         if not model:
             raise VisionError(f"backend kind={kind!r} requires model=")
         return OpenAICompatBackend(base_url=base_url, model=model, api_key=api_key, **kw)
-    raise ValueError(f"Unknown vision backend kind: {kind!r}")
+    raise VisionError(f"Unknown vision backend kind: {kind!r}")
 
 
 __all__ = [

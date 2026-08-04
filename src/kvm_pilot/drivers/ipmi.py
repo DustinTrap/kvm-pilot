@@ -30,10 +30,16 @@ from .base import CapabilityMixin, PowerMixin
 if TYPE_CHECKING:
     from ..config import HostConfig
 
-# Normalized boot-device token -> ipmitool `chassis bootdev` selector. IPMI has no
-# USB selector (usb boot is board-specific); reject it with a clear message.
+# Normalized boot-device token -> ipmitool `chassis bootdev` selector. IPMI has
+# no USB selector (usb boot is board-specific); `usb` stays rejected with a clear
+# message. Its nearest relative is IPMI's own `floppy` = "Force boot from
+# Floppy/primary removable media", which is settable and therefore a first-class
+# token here — the READ side reports that phrase as `floppy` so a
+# get_boot_options() -> set_boot_device() round-trip is always valid (#243: the
+# reverse map used to emit `usb`, which this map rejects).
 _BOOTDEV_MAP = {
     "pxe": "pxe", "hdd": "disk", "disk": "disk", "cd": "cdrom", "dvd": "cdrom",
+    "floppy": "floppy",
     "bios": "bios", "setup": "bios", "diag": "diag", "none": "none",
 }
 # FRU string fields are frequently unset or filled with vendor placeholders; treat
@@ -52,7 +58,7 @@ _BOOT_SELECTOR_REVERSE = [
     ("hard drive", "hdd"),
     ("cd/dvd", "cd"),
     ("bios setup", "bios"),
-    ("floppy", "usb"),
+    ("floppy", "floppy"),
 ]
 
 
@@ -260,7 +266,7 @@ class IpmiDriver(PowerMixin, CapabilityMixin):
             raise KVMPilotError(
                 f"unknown boot device {device!r}; IPMI supports "
                 f"{sorted({v for v in _BOOTDEV_MAP if v != 'setup'})} "
-                "(no 'usb' selector in IPMI)"
+                "(IPMI has no 'usb' selector; 'floppy' is its removable-media target)"
             )
         selector = _BOOTDEV_MAP[key]
         opts = []

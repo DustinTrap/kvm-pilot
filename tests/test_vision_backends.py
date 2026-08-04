@@ -139,7 +139,7 @@ def test_request_json_429_carries_status_and_retry_after(monkeypatch):
     def boom(req, timeout=None):
         raise urllib.error.HTTPError(req.full_url, 429, "rate", hdrs, io.BytesIO(b'{"e":"x"}'))
 
-    monkeypatch.setattr("urllib.request.urlopen", boom)
+    monkeypatch.setattr("kvm_pilot.vision.base._OPENER.open", boom)
     with pytest.raises(VisionError) as ei:
         request_json("POST", "http://x", headers={}, timeout=1, payload={})
     assert ei.value.status_code == 429
@@ -159,7 +159,7 @@ def test_request_json_429_http_date_retry_after_is_none(monkeypatch):
     def boom(req, timeout=None):
         raise urllib.error.HTTPError(req.full_url, 429, "rate", hdrs, io.BytesIO(b"{}"))
 
-    monkeypatch.setattr("urllib.request.urlopen", boom)
+    monkeypatch.setattr("kvm_pilot.vision.base._OPENER.open", boom)
     with pytest.raises(VisionError) as ei:
         request_json("POST", "http://x", headers={}, timeout=1, payload={})
     assert ei.value.status_code == 429

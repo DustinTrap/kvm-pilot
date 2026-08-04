@@ -137,6 +137,13 @@ class IderSession:
     def stop(self) -> None:
         self._stop.set()
         self._chan.close()
+        # The serving thread may be mid-_handle_scsi on self._iso; closing the
+        # file under it raises inside the loop's catch-all and the failure is
+        # silent (#243). Join first (never self-join: stop() can be called from
+        # the serving thread's own error path).
+        thread = self._thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout=5)
         if self._iso is not None:
             try:
                 self._iso.close()
@@ -309,7 +316,7 @@ class IderSession:
             self._data_to_host(dev, struct.pack(">I", 8) + bytes([0, 0, 0x0b, 0x40, 0x02, 0, 0x02, 0]), dma)
         elif op == 0x25:                                 # READ_CAPACITY
             last = max(self._blocks - 1, 0)
-            self._data_to_host(device_flags, struct.pack(">I", last) + bytes([0, 0, 0x08, 0]), dma)
+            self._data_to_host(dev, struct.pack(">I", last) + bytes([0, 0, 0x08, 0]), dma)
         elif op == 0x43:                                 # READ_TOC
             msf = cdb[1] & 0x02
             fmt = cdb[2] & 0x07 or (cdb[9] >> 6)

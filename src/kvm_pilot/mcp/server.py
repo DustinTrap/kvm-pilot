@@ -1155,7 +1155,8 @@ async def _channel_act(
     if denied is not None:
         return {**_provenance(cfg), **denied}
     try:
-        extra = run()
+        # Off the event loop: ssh_exec blocks up to cfg.timeout (#243).
+        extra = await anyio.to_thread.run_sync(run)
     except Exception as exc:
         act.audit_dispatch_error(inv, receipt, exc)
         raise
@@ -1204,7 +1205,11 @@ async def _act(
         if denied is not None:
             return {**_provenance(cfg), **denied}
         try:
-            extra = run(cfg, kvm)
+            # Off the event loop: dispatch does blocking network I/O (power's
+            # verify polls with sleep up to ~10s) and would freeze pings,
+            # progress, and every other tool call meanwhile (#243) — the same
+            # pattern wait_for_state/calibrate_mouse already use.
+            extra = await anyio.to_thread.run_sync(lambda: run(cfg, kvm))
         except Exception as exc:
             act.audit_dispatch_error(inv, receipt, exc)
             raise

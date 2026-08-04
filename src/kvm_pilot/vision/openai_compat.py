@@ -26,6 +26,7 @@ from .base import (
     ScreenState,
     VisionBackend,
     build_user_text,
+    media_type_of_b64,
     parse_classification,
     request_json,
 )
@@ -49,7 +50,17 @@ class OpenAICompatBackend(VisionBackend):
             )
         self._base = base_url.rstrip("/")
         self._model = model
-        self._api_key = api_key or os.environ.get("OPENAI_API_KEY") or "not-needed"
+        # The env fallback applies ONLY to the real OpenAI endpoint: silently
+        # sending OPENAI_API_KEY to an arbitrary --vision-url (a local VLM, a
+        # typo, a hostile proxy) leaks the credential (#243). Local servers
+        # ignore the placeholder; pass api_key= explicitly to authenticate
+        # elsewhere.
+        env_key = (
+            os.environ.get("OPENAI_API_KEY")
+            if base_url.startswith("https://api.openai.com")
+            else None
+        )
+        self._api_key = api_key or env_key or "not-needed"
         self._max_tokens = max_tokens
         self._timeout = timeout
         self._temperature = temperature
@@ -71,7 +82,9 @@ class OpenAICompatBackend(VisionBackend):
                         {"type": "text", "text": build_user_text(hint)},
                         {
                             "type": "image_url",
-                            "image_url": {"url": f"data:image/jpeg;base64,{image_b64}"},
+                            "image_url": {
+                                "url": f"data:{media_type_of_b64(image_b64)};base64,{image_b64}",
+                            },
                         },
                     ],
                 },

@@ -162,7 +162,9 @@ def scorecard_path(host: str, *, base: str | None = None) -> str:
 
 def save_scorecard(card: Scorecard, path: str | None = None) -> str:
     path = path or scorecard_path(card.host)
-    os.makedirs(os.path.dirname(path), exist_ok=True)
+    directory = os.path.dirname(path)
+    if directory:  # a bare filename means the cwd — makedirs("") raises (#243)
+        os.makedirs(directory, exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
         json.dump(card.to_dict(), fh, indent=2)
     return path

@@ -85,6 +85,7 @@ class FakeDriver(PowerMixin, CapabilityMixin):
         self.keys: list[str] = []
         self.shortcuts: list[str] = []
         self.mounted: list[str] = []
+        self.msd_attached = False
         # BootConfig (BootSourceOverride) in-memory state.
         self.boot_enabled = "Disabled"   # Disabled | Once | Continuous
         self.boot_target = "none"        # normalized token
@@ -266,7 +267,7 @@ class FakeDriver(PowerMixin, CapabilityMixin):
         """kvmd-shaped MSD state built from this fake's mount history."""
         images = {n: {"size": 1024, "complete": True} for n in self.mounted}
         current = self.mounted[-1] if self.mounted else None
-        attached = bool(current) and getattr(self, "msd_attached", bool(current))
+        attached = bool(current) and self.msd_attached
         return {
             "online": attached,
             "drive": {"image": current, "connected": attached},
