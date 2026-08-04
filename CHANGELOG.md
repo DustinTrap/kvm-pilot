@@ -6,6 +6,24 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.0rc1] — 2026-08-04
+
+**First release candidate.** The line moves from beta to RC: the engineering is
+where it needs to be, and what stands between here and GA is *validation
+breadth*, not code.
+
+**Be clear-eyed about what that means.** Three of the six device drivers —
+`redfish`, `pikvm`, `blikvm` — have **never run against real hardware**, only
+emulators. Five device+firmware combos have live evidence, all on three physical
+machines. The [run ledger](src/kvm_pilot/data/test_runs.jsonl) and the
+Hardware-Compatibility wiki page are the source of truth; where a doc and the
+ledger disagree, the ledger wins.
+
+GA is gated on: a real BMC exercising the Redfish driver (#29), stock PiKVM on
+real hardware, AMT KVM resolved or characterized across firmware (#245), and a
+stretch with no critical-severity findings.
+
+
 ### Added
 - **One-click install for Claude Desktop** (#148) — releases now attach a
   `kvm-pilot-<version>.mcpb` bundle. Open it and Desktop installs the MCP server
@@ -1650,7 +1668,8 @@ user feedback. **Not validated on real hardware** — see Notes.
   feedback are the explicit goals of this alpha. Reports welcome in the issue
   tracker.
 
-[Unreleased]: https://github.com/DustinTrap/kvm-pilot/compare/v0.1.0b12...HEAD
+[Unreleased]: https://github.com/DustinTrap/kvm-pilot/compare/v0.1.0rc1...HEAD
+[0.1.0rc1]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0rc1
 [0.1.0b12]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0b12
 [0.1.0b11]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0b11
 [0.1.0b10]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0b10

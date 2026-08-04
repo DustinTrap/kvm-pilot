@@ -164,7 +164,11 @@ the CLI covers the full surface in [docs/cli.md](https://github.com/DustinTrap/k
 
 ## Status & maturity
 
-> **Status: beta — ready for broader testing.** (The exact version lives in the
+> **Status: release candidate.** GA is gated on validation breadth, not code:
+> three of the six device drivers (`redfish`, `pikvm`, `blikvm`) have never run
+> against real hardware, only emulators. See the
+> [Hardware-Compatibility list](https://github.com/DustinTrap/kvm-pilot/wiki/Hardware-Compatibility)
+> for what has actually been exercised — and please add to it. (The exact version lives in the
 > [CHANGELOG](https://github.com/DustinTrap/kvm-pilot/blob/main/CHANGELOG.md);
 > install with `pip install --pre kvm-pilot`.) The core paths have graduated
 > from mocked-only to live-verified: a fleet of GL-RM1PE units has exercised

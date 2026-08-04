@@ -11,13 +11,13 @@ description: >-
   choosing between the bundled MCP server (kvm-pilot-mcp), the kvm-pilot CLI,
   the Python library, and SSH for a given action. Intel AMT is the out-of-band
   answer for business laptops where an HDMI-capture KVM is blind below the OS.
-  Beta: treat device+capability combos absent from the support matrix as
+  Release candidate: treat device+capability combos absent from the support matrix as
   unverified and confirm destructive steps with the user.
 ---
 
 # kvm-pilot skill
 
-> ⚠️ **Beta — verify against the matrix.** The core read paths are
+> ⚠️ **Release candidate — verify against the matrix.** The core read paths are
 > live-verified on GL-RM1PE at beta maturity, but many device+capability combos
 > are still unit-tested with mocks only (see the
 > [Hardware-Compatibility list](https://github.com/DustinTrap/kvm-pilot/wiki/Hardware-Compatibility)
