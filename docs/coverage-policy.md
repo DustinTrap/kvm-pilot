@@ -89,15 +89,15 @@ badly-covered area inside a large well-covered one.** At introduction:
 
 | Category | Coverage | Lines | Uncovered | Target |
 |---|---:|---:|---:|---:|
-| CLI | 76.92% | 1053 | 243 | 85% |
 | MCP server | 82.76% | 644 | 111 | 90% |
+| CLI | 86.89% | 1053 | 138 | 85% ✅ |
 | Vision | 87.87% | 371 | 45 | 90% |
 | Health & evidence | 89.76% | 1562 | 160 | 90% |
 | Drivers | 90.58% | 3322 | 313 | 90% ✅ |
-| Core plumbing | 92.18% | 998 | 78 | 90% ✅ |
+| Core plumbing | 92.20% | 1000 | 78 | 90% ✅ |
 | In-band channels | 92.40% | 263 | 20 | 90% ✅ |
 | **Safety & approval** | **98.21%** | 447 | 8 | **95%** ✅ |
-| **Blended (the gate)** | **88.72%** | **8670** | **978** | — |
+| **Blended (the gate)** | **89.93%** | **8672** | **873** | — |
 
 The targets are deliberately **not uniform** — see below.
 
@@ -176,8 +176,11 @@ The blended floor buys most of the value for a fraction of the machinery.
 |---|---|
 | Measured at introduction | 85.66% line coverage (7427 / 8670 lines, post-exclusion) |
 | Initial floor | 85.0 |
-| **Current** | **88.72%** (7692 / 8670) — subprocess measurement + approval-path tests |
-| **Current floor** | **88.22** |
+| **Current** | **89.93%** (7799 / 8672) — subprocess measurement, approval-path + CLI tests |
+| **Current floor** | **89.43** |
+
+Measuring the subprocess costs about **8% wall clock** on the suite (236s vs
+218s locally) — worth it to stop 82 end-to-end tests reporting as nothing.
 
 Note that pytest's headline figure is **branch** coverage and reads lower
 (~83.7%). The gate measures **lines**; they are different measures, and mixing
