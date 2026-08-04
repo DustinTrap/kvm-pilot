@@ -85,10 +85,38 @@ def device_identity(kvm: Any) -> dict[str, str]:
         except KVMPilotError:
             fw = {}
     return {
-        "vendor": (fw.get("vendor") or "fake").strip(),
+        "vendor": _normalize_vendor(fw.get("vendor")),
         "product": fw.get("product") or fw.get("model") or "fake",
         "firmware_version": fw.get("version") or "none",
     }
+
+
+# Corporate suffixes a DMI/WS-Man vendor string carries but a ledger key must not:
+# the rollup groups by (vendor, product, firmware_version), so "Dell Inc." and
+# "dell" split ONE physical device into two non-joining groups — and the
+# firmware-registry join then fails, leaving maturity null. Found live on a
+# Latitude 5411 whose generated row would not join its own hand-authored history.
+_VENDOR_SUFFIXES = (" inc.", " inc", " corporation", " corp.", " corp", " co.",
+                    " ltd.", " ltd", " llc", " gmbh", " s.a.", " technologies")
+
+
+def _normalize_vendor(raw: object) -> str:
+    """Ledger-stable vendor key: lowercased, corporate suffix stripped.
+
+    Matches the convention the shipped ledger already uses (``dell``,
+    ``gl.inet``) so auto-generated rows join hand-authored ones.
+    """
+    name = str(raw or "").strip().lower()
+    if not name:
+        return "fake"
+    changed = True
+    while changed:
+        changed = False
+        for suffix in _VENDOR_SUFFIXES:
+            if name.endswith(suffix):
+                name = name[: -len(suffix)].strip().rstrip(",")
+                changed = True
+    return name or "fake"
 
 
 def snapshot_conditions(kvm: Any) -> dict[str, Any] | None:
@@ -129,10 +157,23 @@ def snapshot_conditions(kvm: Any) -> dict[str, Any] | None:
     return cond or None
 
 
+# A ledger row is meant to be contributed upstream and SHIPS IN THE WHEEL, so an
+# outcome string must not carry the reporter's network. Driver errors quote the
+# address they failed to reach ("AMT RFB connect to 10.0.1.203:5900 failed"),
+# which would publish every contributor's device address.
+_ADDR_RE = re.compile(
+    r"\b(?:\d{1,3}(?:\.\d{1,3}){3}|[0-9a-f]{1,4}(?::[0-9a-f]{1,4}){7})\b", re.I
+)
+
+
+def _redact_addrs(text: str) -> str:
+    return _ADDR_RE.sub("<host>", text)
+
+
 def _row(capability: str, passed: bool, outcome: str,
          conditions: dict[str, Any] | None = None) -> dict[str, Any]:
     out: dict[str, Any] = {"capability": capability, "passed": passed,
-                           "outcome": outcome[:300]}
+                           "outcome": _redact_addrs(outcome)[:300]}
     if conditions:
         out["conditions"] = conditions
     return out

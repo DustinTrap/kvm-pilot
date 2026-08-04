@@ -238,3 +238,45 @@ def test_build_row_uses_driver_normalized_identity():
     assert row["product"] == "RM1PE"
     assert row["firmware_version"] == "V1.9.1 release1"
     assert row["run_id"].startswith("real-rm1pe-")
+
+
+# -- ledger hygiene, found by running against real hardware (#243 follow-on) --
+
+
+def test_vendor_key_is_normalized_so_generated_rows_join_hand_authored_ones():
+    """The rollup groups by (vendor, product, firmware_version). A driver that
+    reports "Dell Inc." where the shipped ledger says "dell" splits ONE physical
+    device into two groups and the firmware-registry join then yields no
+    maturity — observed live on a Latitude 5411.
+    """
+    from kvm_pilot.test_report import _normalize_vendor
+
+    for raw, want in [
+        ("Dell Inc.", "dell"),
+        ("Dell Inc", "dell"),
+        ("DELL INC.", "dell"),
+        ("Hewlett Packard Enterprise", "hewlett packard enterprise"),
+        ("Supermicro Corporation", "supermicro"),
+        ("gl.inet", "gl.inet"),
+        ("  Intel Corp.  ", "intel"),
+        ("", "fake"),
+        (None, "fake"),
+    ]:
+        assert _normalize_vendor(raw) == want, raw
+
+
+def test_ledger_outcomes_do_not_leak_the_reporters_network():
+    """Ledger rows are contributed upstream and ship in the wheel, so an outcome
+    must not carry a device address. Driver errors quote the host they failed to
+    reach ("AMT RFB connect to 10.0.1.203:5900 failed").
+    """
+    from kvm_pilot.test_report import _row
+
+    row = _row("snapshot", False,
+               "AMT RFB connect to 10.0.1.203:5900 failed: [Errno 61] Connection refused")
+    assert "10.0.1.203" not in row["outcome"]
+    assert "<host>" in row["outcome"]
+    # the diagnostic value survives redaction
+    assert "Connection refused" in row["outcome"] and "5900" in row["outcome"]
+    v6 = _row("info", False, "connect to fe80:0000:0000:0000:0202:b3ff:fe1e:8329 failed")
+    assert "fe80" not in v6["outcome"]

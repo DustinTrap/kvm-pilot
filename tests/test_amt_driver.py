@@ -1340,3 +1340,28 @@ def test_healthcheck_calls_a_wedged_plane_critical(amt_emu):
 def test_me_wedge_quirk_is_published(amt_emu):
     ids = {q.id for q in make(amt_emu).known_quirks()}
     assert "me-firmware-update-needs-g3" in ids
+
+
+def test_unsupported_feature_points_at_mebx_not_a_power_cycle(amt_emu):
+    """Live finding on a Latitude 5411 @ 14.1.79: SOL/IDE-R listening, but
+    enable-kvm returned `e:UnsupportedFeature` — KVM redirection was disabled in
+    MEBx, which a power cycle cannot fix. The message must not send the operator
+    hunting the #217 wedge instead.
+    """
+    # The exact envelope the live device returned, subcode included.
+    amt_emu.state.http_status = 400
+    amt_emu.state.error_body = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" '
+        'xmlns:e="http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd"><s:Body>'
+        "<s:Fault><s:Code><s:Value>s:Sender</s:Value>"
+        "<s:Subcode><s:Value>e:UnsupportedFeature</s:Value></s:Subcode></s:Code>"
+        "<s:Reason><s:Text>The specified feature is not supported.</s:Text></s:Reason>"
+        "</s:Fault></s:Body></s:Envelope>"
+    )
+    with pytest.raises(CapabilityError) as ei:
+        make(amt_emu, kvm_password="Chang3M!").enable_kvm()
+    msg = str(ei.value)
+    assert "UnsupportedFeature" in msg          # #216's surfacing still shows the subcode
+    assert "MEBx" in msg and "SOL and IDE-R are toggled separately" in msg
+    assert "G3" not in msg  # the wrong cause must NOT lead

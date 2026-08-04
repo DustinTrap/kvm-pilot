@@ -568,12 +568,41 @@ class AmtDriver(PowerMixin, CapabilityMixin):
             if exc.me_not_ready or not exc.status_code:
                 raise
             raise CapabilityError(
-                f"AMT {action} was rejected by the ME: {exc}\n"
-                "If a BIOS/ME firmware update ran recently, this is expected — the update "
-                "resets the redirection config and the ME only re-initializes after a FULL "
-                "power cycle (G3: unplug AC, and on a laptop the battery). A warm reboot is "
-                "not enough. Otherwise confirm KVM/SOL redirection is enabled in MEBx (#217)."
+                f"AMT {action} was rejected by the ME: {exc}\n{self._redirection_hint(exc)}"
             ) from exc
+
+    @staticmethod
+    def _redirection_hint(exc: WsmanError) -> str:
+        """Name the LIKELIEST cause for a refused redirection write.
+
+        Keyed on the fault subcode, because the two causes need opposite actions
+        and guessing wrong sends the operator to the wrong machine. Observed live
+        on a Latitude 5411 @ 14.1.79: SOL/IDE-R (16994) listening happily while
+        ``enable-kvm`` returned ``e:UnsupportedFeature`` — the ME had KVM
+        redirection switched off in MEBx, which no amount of power-cycling fixes.
+        An earlier version of this message led with the firmware-update story
+        regardless of subcode and would have sent that operator hunting a wedge
+        that was not there.
+        """
+        detail = str(exc).lower()
+        # Match the subcode OR the reason text: the live 5411 sent both
+        # ("The specified feature is not supported. (subcode e:UnsupportedFeature)"),
+        # but firmware phrasing varies and either alone is a clear enough signal.
+        if "unsupportedfeature" in detail or "not supported" in detail:
+            return (
+                "The ME reports this feature as UNSUPPORTED, which on a provisioned system "
+                "almost always means it is switched off in firmware setup rather than broken: "
+                "reboot into MEBx (Ctrl-P at POST) and enable KVM redirection under "
+                "AMT Configuration -> Remote Setup / Redirection. Note SOL and IDE-R are "
+                "toggled separately — SOL can be listening while KVM is disabled, which is "
+                "exactly what this looks like. A power cycle will NOT change it (#217)."
+            )
+        return (
+            "If a BIOS/ME firmware update ran recently, this is expected — the update "
+            "resets the redirection config and the ME only re-initializes after a FULL "
+            "power cycle (G3: unplug AC, and on a laptop the battery). A warm reboot is "
+            "not enough. Otherwise confirm KVM/SOL redirection is enabled in MEBx (#217)."
+        )
 
     def _kvm_sap_state(self, state: int) -> None:
         sap = cim("CIM_KVMRedirectionSAP")

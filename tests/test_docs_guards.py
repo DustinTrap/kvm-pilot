@@ -404,3 +404,36 @@ def test_docs_do_not_tell_users_to_install_a_surface_extra():
     assert not offenders, (
         "these docs still require a now-base dependency via an extra: " + ", ".join(offenders)
     )
+
+
+def test_every_ledger_row_joins_a_registry_entry():
+    """A run-ledger row that cannot join the firmware registry yields no derived
+    maturity, silently.
+
+    Found live: the hand-authored AMT rows carried an ``AMT `` prefix on
+    ``firmware_version`` that the driver never emits, and the auto-generated row
+    said vendor ``Dell Inc.`` where the ledger said ``dell`` — so one physical
+    laptop produced three non-joining identities and `maturity: None`.
+    """
+    import json
+
+    data = _ROOT / "src" / "kvm_pilot" / "data"
+    registry = json.loads((data / "firmware_registry.json").read_text(encoding="utf-8"))
+    known = {
+        (e["vendor"], e["product"], v["version"])
+        for e in registry["firmware"] for v in e.get("versions", [])
+    }
+    orphans = []
+    for line in (data / "test_runs.jsonl").read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        r = json.loads(line)
+        if r.get("source") == "synthetic":
+            continue  # emulator runs are not expected to name real firmware
+        key = (r["vendor"], r["product"], r["firmware_version"])
+        if key not in known:
+            orphans.append(key)
+    assert not orphans, (
+        "ledger rows with no matching firmware-registry entry (they will derive no "
+        f"maturity): {sorted(set(orphans))}"
+    )
