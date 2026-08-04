@@ -3,7 +3,8 @@
 Implementation notes for [`drivers/redfish/`](../src/kvm_pilot/drivers/redfish/),
 grounded in the DMTF Redfish spec and Dell/HPE/Supermicro/Lenovo/OpenBMC docs.
 
-> **Status:** alpha, **mock-tested only — never run against a real BMC.** Behaviors
+> **Status:** alpha, **emulator-tested (in-process fake + sushy-tools in CI) but
+> never run against a real BMC** (#29). Behaviors
 > that can only be confirmed on hardware are tracked in [#29](https://github.com/DustinTrap/kvm-pilot/issues/29).
 > Sources are listed at the bottom.
 

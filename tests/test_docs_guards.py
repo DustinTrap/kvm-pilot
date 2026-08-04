@@ -108,8 +108,15 @@ def _current_doc_files() -> list[Path]:
 
 
 def test_install_command_consistent():
-    """The working install command appears verbatim on every install surface,
-    and a bare (broken) install is only ever shown as a warning."""
+    """The canonical install command appears verbatim on every install surface.
+
+    A bare ``pip install kvm-pilot`` must never be shown as the instruction. Not
+    because it fails — measured 2026-08-03, it resolves to the current beta,
+    since pip falls back to pre-releases when no stable release exists (#243
+    corrected the docs, which claimed it "installs nothing") — but because that
+    behavior flips silently the day a stable release ships. ``--pre`` is
+    unambiguous in both worlds.
+    """
     for doc in _INSTALL_DOCS:
         assert _INSTALL_CMD in doc.read_text(encoding="utf-8"), (
             f"{doc.relative_to(_ROOT)}: missing the canonical install command "
@@ -124,9 +131,9 @@ def test_install_command_consistent():
             window = flat[max(0, m.start() - 120): m.end() + 120]
             assert any(w in window for w in _BARE_OK_WORDS), (
                 f"{doc.relative_to(_ROOT)}: shows `pip install kvm-pilot` "
-                f"without --pre as if it works (context: ...{window}...) — "
-                f"use {_INSTALL_CMD!r}, or mark it as the deliberate "
-                f"no-pre-release warning"
+                f"without --pre as the instruction (context: ...{window}...) — "
+                f"use {_INSTALL_CMD!r}, or keep the surrounding prose that "
+                f"explains why the bare form is not what you want"
             )
 
 
@@ -288,4 +295,80 @@ def test_mcp_add_snippet_consistent():
         "the skill's setup.md `claude mcp add` snippet differs from "
         "getting-started.md beyond the deliberate DRY_RUN-vs-READ_ONLY "
         "trust-ladder gate"
+    )
+
+
+def test_server_json_version_matches_the_package():
+    """The MCP registry manifest must not drift from the shipped version.
+
+    The release workflows rewrite ``server.json``'s version from the release tag
+    at publish time, so a stale literal here never reaches the registry — but it
+    misleads every human who reads the file (it sat at 0.1.0b8 through four
+    releases, #243). Keeping it honest costs one guard.
+    """
+    import json
+
+    manifest = json.loads((_ROOT / "server.json").read_text(encoding="utf-8"))
+    versions = {manifest["version"], *(p["version"] for p in manifest["packages"])}
+    assert versions == {__version__}, (
+        f"server.json declares {sorted(versions)} but the package is {__version__}"
+    )
+
+
+def test_server_json_declares_every_env_var_it_documents():
+    """An env var named in a description must also be declared.
+
+    ``KVM_PILOT_PASSWD``'s description told registry users that
+    ``KVM_PILOT_HOST``/``KVM_PILOT_USER`` accompany it for the no-profile
+    connection path, while the manifest declared neither — so that path was not
+    configurable from the registry entry (#243).
+    """
+    import json
+
+    manifest = json.loads((_ROOT / "server.json").read_text(encoding="utf-8"))
+    declared = {e["name"] for p in manifest["packages"] for e in p["environmentVariables"]}
+    mentioned = set()
+    for p in manifest["packages"]:
+        for e in p["environmentVariables"]:
+            mentioned |= set(re.findall(r"\bKVM_PILOT_[A-Z_]+\b", e["description"]))
+    # Descriptions also use the "_ALLOW_*" shorthand for sibling gates; those are
+    # documented in mcp/README.md, not required to be declared here.
+    missing = {v for v in mentioned - declared if not v.startswith("KVM_PILOT_MCP_")}
+    assert not missing, f"server.json documents {sorted(missing)} but declares none of them"
+
+
+def test_every_mcp_env_gate_is_documented():
+    """Each ``KVM_PILOT_MCP_*`` the server reads must appear in configuration.md.
+
+    Four were undocumented — including ``KVM_PILOT_MCP_READ_ONLY``, the posture
+    the docs elsewhere *recommend for first contact* (#243). An operator can't
+    choose a control they can't find.
+    """
+    mcp_dir = _ROOT / "src" / "kvm_pilot" / "mcp"
+    used = set()
+    for src in mcp_dir.glob("*.py"):
+        used |= set(re.findall(r"\bKVM_PILOT_MCP_[A-Z_]+\b", src.read_text(encoding="utf-8")))
+    documented = (_ROOT / "docs" / "configuration.md").read_text(encoding="utf-8")
+    missing = sorted(v for v in used if v not in documented)
+    assert not missing, f"MCP env gates read by the server but undocumented: {missing}"
+
+
+def test_firmware_registry_updated_covers_its_own_evidence():
+    """``updated`` must not predate the run-ledger evidence the entries derive from.
+
+    It sat at 2026-07-03 while carrying maturity computed from July-15/18 runs, so
+    anything judging registry freshness by that field got a wrong answer (#243).
+    """
+    import json
+
+    data = _ROOT / "src" / "kvm_pilot" / "data"
+    registry = json.loads((data / "firmware_registry.json").read_text(encoding="utf-8"))
+    ledger_dates = [
+        json.loads(line)["utc_date"][:10]
+        for line in (data / "test_runs.jsonl").read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    assert registry["updated"] >= max(ledger_dates), (
+        f"firmware_registry.json says updated={registry['updated']} but the run ledger "
+        f"it derives from has evidence through {max(ledger_dates)}"
     )

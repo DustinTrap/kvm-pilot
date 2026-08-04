@@ -139,4 +139,6 @@ The full per-action matrix is
   or upload an ISO — it may already be in storage.
 - **Once the target OS is up**: prefer `ssh_reachable`/`ssh_exec` over KVM
   keystrokes (the actuation-channel hierarchy, #81).
-- **Firmware, events, serial console (SOL), SSH bootstrap**: CLI only.
+- **Firmware *update*, serial console (SOL), SSH bootstrap**: CLI only.
+  (`events` and `firmware_check` have bounded MCP twins; `file_firmware_report`
+  is the MCP filing twin.)

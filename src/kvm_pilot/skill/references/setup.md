@@ -119,7 +119,7 @@ load:
 ```bash
 # pip install --pre kvm-pilot   installs the CLI, the MCP server, and its deps
 claude mcp add kvm-pilot -s user \
-    -e KVM_PILOT_PROFILE=<profile> -e KVM_PILOT_MCP_DRY_RUN=1 -- \
+    -e KVM_PILOT_PROFILE=mykvm -e KVM_PILOT_MCP_DRY_RUN=1 -- \
     kvm-pilot-mcp
 claude mcp list          # expect: kvm-pilot ... ✔ Connected
 ```

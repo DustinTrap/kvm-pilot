@@ -158,7 +158,7 @@ self-started subprocess — no Docker, no `services:` container). The fixture al
 the local-Docker fallback (`quay.io/metal3-io/sushy-tools`) when sushy-tools isn't on
 PATH.
 
-### Kept the 4 unimplemented sensing protocols (`BootProgress`, `Sensors`, `SerialConsole`, `Watchdog`)
+### Kept the 4 sensing protocols that landed with no implementers (`BootProgress`, `Sensors`, `SerialConsole`, `Watchdog`)
 They landed with zero implementers, which reads like dead code. Kept on purpose:
 they are the documented seam for BMC drivers, and they're no longer speculative —
 `FakeDriver` and `RedfishDriver` implement `BootProgress`, `RedfishDriver` implements

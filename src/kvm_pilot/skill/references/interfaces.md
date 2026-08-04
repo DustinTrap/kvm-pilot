@@ -61,7 +61,7 @@ and cross-check signals:
 ## CLI
 
 The CLI covers the **full surface** and is the only interface for
-`firmware-check`/`firmware-update`, `events`, and `ssh-bootstrap`
+`firmware-update`, follow-mode `events`, the SOL `console`, and `ssh-bootstrap`
 (see the interface matrix above — `watch` has an MCP twin,
 `wait_for_state`, and keyboard/mouse/media/boot-config all have MCP act
 tools). Use the MCP server for the visual loop (`snapshot`/`classify`)

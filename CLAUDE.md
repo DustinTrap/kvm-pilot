@@ -108,7 +108,7 @@ Optimize for the next person reading this, not for cleverness.
 - `src/kvm_pilot/mcp/` — the bundled MCP stdio server (`server.py`, entry point
   `kvm-pilot-mcp`); `src/kvm_pilot/skill/SKILL.md` — the bundled Claude skill. Both
   ship in the wheel (see the batteries-included rule above). The server supports
-  **both mcp SDK majors** (`mcp>=1.10,<3`), which are not source-compatible: import
+  **both mcp SDK majors** (`mcp>=1.17,<3`), which are not source-compatible: import
   every SDK symbol from `kvm_pilot/mcp/_sdk.py`, never from `mcp.server.*` directly
   (#241) — `tests/test_mcp_sdk_shim.py` fails the build if you do.
 - The GitHub wiki is auto-generated from `docs/` by `.github/workflows/wiki-sync.yml`

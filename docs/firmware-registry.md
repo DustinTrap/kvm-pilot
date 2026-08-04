@@ -208,6 +208,8 @@ validation harmlessly.
 
 ## Seed data
 
-The registry ships empty; real `(vendor, product)` entries are added through the
-ingestion pipeline (no fabricated firmware facts — see CLAUDE.md). The mechanism
-is verified end-to-end against a live GLKVM.
+The registry ships with the entries real hardware has actually produced —
+`gl.inet/RM1PE`, `dell/PowerEdge R710`, and `dell/Latitude 5411` — each carrying
+the maturity derived from its run-ledger rows. It started empty and grows only
+through the ingestion pipeline: no fabricated firmware facts (see CLAUDE.md).
+The mechanism is verified end-to-end against a live GLKVM.

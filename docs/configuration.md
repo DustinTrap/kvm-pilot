@@ -92,6 +92,10 @@ All of the per-field vars in the table above, plus:
 | `KVM_PILOT_VISION_MODEL` | Anthropic vision backend | Pin a vision model id; unset = auto-resolve the newest vision-capable model at runtime. |
 | `ANTHROPIC_API_KEY` | Anthropic vision backend | Required for `classify`/`watch` with the default backend (validated lazily, at first network use). |
 | `OPENAI_API_KEY` | local/OpenAI-compatible vision backend | Optional; most local servers ignore it (defaults to `not-needed`). |
+| `KVM_PILOT_MCP_READ_ONLY` | MCP server only | **Least-privilege posture, recommended for first contact.** Only read-only tools are registered and every effect gate is forced closed — a destructive tool isn't merely refused, it isn't there. Also disables standing approvals. |
+| `KVM_PILOT_MCP_ALLOW_CONFIG` | MCP server only | Gates the config-mutation act tools: `set_boot_device`, `amt_enable` (`enable-sol`/`enable-kvm`/`reset-kvm`), `calibrate_mouse`. These change device configuration without touching host power. |
+| `KVM_PILOT_MCP_ALLOW_EXTERNAL_WRITE` | MCP server only | Gates `file_firmware_report`, which writes **outside** the device — it files a GitHub issue via the `gh` CLI (#190). Off by default because an external side effect is not implied by device access. |
+| `KVM_PILOT_MCP_RECEIPT_TTL` | MCP server only | Seconds an approval receipt stays valid before it must be re-approved (default 60, clamped to 1–3600; an unparseable or non-finite value falls back to the default rather than failing open). |
 | `KVM_PILOT_MCP_ALLOW_POWER` | MCP server only | Gates the destructive `power` tool and reboot chords (`ctrl_alt_delete`, Ctrl+Alt+Del via `send_shortcut`) — see [`the MCP server README`](https://github.com/DustinTrap/kvm-pilot/blob/main/src/kvm_pilot/mcp/README.md). |
 | `KVM_PILOT_MCP_ALLOW_HID` | MCP server only | Gates the HID act tools: `type_text`, `press_key`, `send_shortcut` (non-power chords), `mouse`. |
 | `KVM_PILOT_MCP_ALLOW_MEDIA` | MCP server only | Gates the virtual-media act tools: `mount_iso`, `eject`. |

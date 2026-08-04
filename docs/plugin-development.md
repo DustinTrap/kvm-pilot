@@ -52,7 +52,11 @@ These come from [CLAUDE.md](../CLAUDE.md) and apply to every driver:
 Implement the relevant `@runtime_checkable` Protocols from
 [`drivers/base.py`](../src/kvm_pilot/drivers/base.py) — `Power`, `HID`, `Video`,
 `VirtualMedia`, `BootConfig`, `SystemInfo`, `SerialConsole`, `Sensors`, `Logs`,
-`BootProgress`, `Events`. `detect_capabilities()` derives the set structurally
+`BootProgress`, `Events`, `GPIO`, `Watchdog`, `FirmwareUpdate`. (`RemoteShell` is
+the one exception — SSH-to-target is a per-profile channel, not something a
+driver implements.) Also declare `VIDEO_SCOPE` if your driver has video, so
+callers know whether firmware screens are visible through it (#210).
+`detect_capabilities()` derives the set structurally
 from the methods present, so you get `capabilities()`/`supports()` for free via
 `CapabilityMixin`. Subclass `PowerMixin` for `hard_cycle`.
 

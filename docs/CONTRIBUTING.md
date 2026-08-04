@@ -11,6 +11,20 @@ cd kvm-pilot
 pip install -e ".[dev,totp,ws]"
 ```
 
+## Before you start: find or open an issue
+
+This repo is **issue-per-finding** — an issue is the unit of record. Before
+writing code for anything non-trivial:
+
+1. Search [open issues](https://github.com/DustinTrap/kvm-pilot/issues) for one
+   that already covers it.
+2. If none exists, open one stating the problem, the decision, and the plan.
+3. Reference it in the commit/PR (`Closes #N`, or `Refs #N` for partial work).
+4. Post material findings or scope changes back to the issue as you go — a
+   surprise discovered mid-change belongs in the record, not only in the diff.
+
+Small obvious fixes (a typo, a broken link) don't need this ceremony.
+
 ## Before opening a PR
 
 ```bash
@@ -71,6 +85,8 @@ Then, mechanically:
 1. Put the file flat in `docs/` (kebab-case). No new subdirectories —
    structure lives in the navigation manifest, not the filesystem, because
    published wheels and `llms.txt` consumers hold links to today's paths.
+   (`docs/analysis/` is the single grandfathered exception, per the table
+   above; don't add a second one.)
 2. Register it in `PAGES` in
    [`build_wiki.py`](../.github/scripts/build_wiki.py) with its section
    (or `OPT_OUT` with a reason). The wiki sidebar is generated from this.
@@ -129,6 +145,11 @@ kvm-pilot --driver pikvm --host 127.0.0.1 --port 8080 --scheme http \
   --user admin --passwd admin info
 ```
 
+> The emulator examples above pass `--passwd` on the command line because the
+> credentials are published throwaways on loopback. Against a **real** device,
+> argv is visible to any local user via `ps` — use `--ask-passwd`,
+> `--passwd-file`, or a config profile (see [SECURITY.md](SECURITY.md)).
+
 Prerequisites are hard: upstream's recipe runs a privileged container,
 `sudo modprobe`s the `gpio_mockup` kernel module, and passes through a V4L2
 `/dev/video0` (a webcam, or `v4l2loopback-dkms`) — it exits early without
@@ -136,7 +157,10 @@ them, so this target cannot run on macOS or in a stock CI runner. It is not a
 compose service for the same reason. Automated tests against it are tracked in
 #16.
 
-**ipmi_sim** is absent from the stack until #62 lands an IPMI driver.
+**ipmi_sim** is not in the compose stack yet (#21). The `ipmi` driver itself
+shipped in v0.1.0b7 (#62) and is cross-checked against OpenIPMI `ipmi_sim` by
+`tests/integration/test_ipmi_external.py` when you point `KVM_PILOT_IPMI_HOST`
+at one you run yourself (Linux only; macOS has no ipmi_sim build).
 
 ## Recommended Claude skills
 

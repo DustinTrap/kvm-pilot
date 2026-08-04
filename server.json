@@ -6,13 +6,13 @@
     "url": "https://github.com/DustinTrap/kvm-pilot",
     "source": "github"
   },
-  "version": "0.1.0b8",
+  "version": "0.1.0b12",
   "packages": [
     {
       "registryType": "pypi",
       "registryBaseUrl": "https://pypi.org",
       "identifier": "kvm-pilot",
-      "version": "0.1.0b8",
+      "version": "0.1.0b12",
       "transport": {
         "type": "stdio"
       },
@@ -38,6 +38,18 @@
         {
           "name": "KVM_PILOT_MCP_ALLOW_POWER",
           "description": "Operator opt-in enabling power control of the managed host (per-effect gate; see also _ALLOW_HID, _ALLOW_MEDIA, _ALLOW_SSH, _ALLOW_APPLIANCE, _ALLOW_EXTERNAL_WRITE)",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "KVM_PILOT_HOST",
+          "description": "Device address (KVM/BMC) when not using a config-file profile",
+          "isRequired": false,
+          "isSecret": false
+        },
+        {
+          "name": "KVM_PILOT_USER",
+          "description": "Device username when not using a config-file profile",
           "isRequired": false,
           "isSecret": false
         },

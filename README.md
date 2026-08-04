@@ -54,9 +54,9 @@ power-cycle, and the boot console the agent actually saw:
 
 One install gives you the whole product — the **`kvm-pilot` CLI**, the
 **`kvm-pilot-mcp` MCP server**, and the bundled **Claude skill** — nothing to
-clone. The current release line is a **pre-release**, so `--pre` is required
-(a plain `pip install kvm-pilot` deliberately picks up no pre-release;
-`0.1.0a1` is yanked and much older than this README — don't use it).
+clone. The current release line is a **pre-release**: install it with `--pre`,
+which is explicit and keeps selecting the beta line once a stable release ships
+(`0.1.0a1` is yanked and much older than this README — don't pin it).
 
 ```bash
 pip install --pre kvm-pilot                    # CLI + skill + MCP server + WebSocket events
@@ -68,7 +68,7 @@ kvm-pilot install-skill                        # optional: put the bundled skill
 
 ```bash
 claude mcp add kvm-pilot -s user \
-    -e KVM_PILOT_PROFILE=<profile> -e KVM_PILOT_MCP_READ_ONLY=1 -- \
+    -e KVM_PILOT_PROFILE=mykvm -e KVM_PILOT_MCP_READ_ONLY=1 -- \
     kvm-pilot-mcp
 ```
 
@@ -117,7 +117,7 @@ kvm-pilot capabilities --profile homelab                 # what this driver supp
 kvm-pilot snapshot screen.jpg --profile homelab
 kvm-pilot --timeout 60 power-cycle --profile homelab --dry-run   # log, don't send
 kvm-pilot eject --profile homelab                        # detach virtual media
-kvm-pilot events --profile homelab --count 5             # stream events ('ws' extra)
+kvm-pilot events --profile homelab --count 5             # stream device events
 kvm-pilot watch grub_menu --profile homelab \
     --backend local --vision-url http://127.0.0.1:1234/v1 --vision-model qwen2.5-vl-7b
 ```

@@ -373,7 +373,8 @@ The sections above are written around the current GL fleet, but the *method* is
 device-agnostic. To point this plan at a new device kind — another GL model,
 PiKVM, BliKVM, a Redfish BMC (iDRAC/iLO/XCC/OpenBMC), JetKVM — walk this list:
 
-1. **Pick the driver.** `--driver pikvm | glkvm | blikvm | redfish | fake`. If
+1. **Pick the driver.** `--driver auto` (probes the device) or pin one:
+   `pikvm | glkvm | blikvm | redfish | ipmi | amt | fake`. If
    none fits, a new device = a new driver implementing the relevant capability
    protocols (`drivers/base.py`); GL-specific quirks live in `glkvm.py`.
 2. **Establish the capability set.** Run `capabilities` — this tells you which

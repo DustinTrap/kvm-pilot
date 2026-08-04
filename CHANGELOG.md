@@ -1630,7 +1630,19 @@ user feedback. **Not validated on real hardware** — see Notes.
   feedback are the explicit goals of this alpha. Reports welcome in the issue
   tracker.
 
-[Unreleased]: https://github.com/DustinTrap/kvm-pilot/compare/v0.1.0a12...HEAD
+[Unreleased]: https://github.com/DustinTrap/kvm-pilot/compare/v0.1.0b12...HEAD
+[0.1.0b12]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0b12
+[0.1.0b11]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0b11
+[0.1.0b10]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0b10
+[0.1.0b9]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0b9
+[0.1.0b8]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0b8
+[0.1.0b7]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0b7
+[0.1.0b6]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0b6
+[0.1.0b5]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0b5
+[0.1.0b4]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0b4
+[0.1.0b3]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0b3
+[0.1.0b2]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0b2
+[0.1.0b1]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0b1
 [0.1.0a12]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a12
 [0.1.0a11]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a11
 [0.1.0a10]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0a10

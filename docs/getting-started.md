@@ -17,9 +17,11 @@ Desktop, or any MCP host). For the Python library and CLI, see the
 pip install --pre kvm-pilot
 ```
 
-`kvm-pilot` is a pre-release, so `--pre` is required — a bare `pip install
-kvm-pilot` deliberately installs nothing. One install brings the `kvm-pilot` CLI,
-the `kvm-pilot-mcp` server, and the bundled Claude skill.
+`kvm-pilot` is a pre-release. Use `--pre`: it says exactly what you mean, and it
+keeps selecting the beta line once a stable release exists. (A bare `pip install
+kvm-pilot` happens to work *today* only because pip falls back to pre-releases
+when no stable release exists — that silently changes at GA.) One install brings
+the `kvm-pilot` CLI, the `kvm-pilot-mcp` server, and the bundled Claude skill.
 
 The skill ships inside the package; to have **Claude Code** discover it, copy it
 into your skills directory:
@@ -40,7 +42,7 @@ yourself. On **Claude Code**:
 
 ```bash
 claude mcp add kvm-pilot -s user \
-    -e KVM_PILOT_PROFILE=<profile> -e KVM_PILOT_MCP_READ_ONLY=1 -- \
+    -e KVM_PILOT_PROFILE=mykvm -e KVM_PILOT_MCP_READ_ONLY=1 -- \
     kvm-pilot-mcp
 ```
 
@@ -77,8 +79,13 @@ For a quick test, set the KVM's password in your agent's environment — most ag
 accept a plain instruction like:
 
 ```
-set KVM_PILOT_PASSWD=<your-kvm-password>
+Set KVM_PILOT_PASSWD to my KVM password when you run kvm-pilot
 ```
+
+(That is a sentence for the agent, not a shell command — an agent sets the
+variable in the environment it launches the server with. Doing it yourself in a
+POSIX shell is `export KVM_PILOT_PASSWD='...'`; in PowerShell,
+`$env:KVM_PILOT_PASSWD='...'`.)
 
 (and `KVM_PILOT_HOST` / `KVM_PILOT_USER` if you aren't using a profile). This is
 **per-session and stored in plaintext** in the agent's environment — fine for a

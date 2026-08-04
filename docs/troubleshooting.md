@@ -11,7 +11,7 @@ canonical home for its topic — other docs link here rather than restating it.
 | Host went dark — no video, no HID, no ping | [Dark host](#the-host-went-dark-no-video-no-hid-no-ping) |
 | Mouse clicks land in the wrong place | [Calibration](#mouse-clicks-land-in-the-wrong-place) |
 | SOL serial console prints binary noise (iDRAC6) | [SOL on COM2](#sol-serial-console-shows-binary-noise-idrac6) |
-| `pip install kvm-pilot` installs nothing useful | [Install](#pip-install-kvm-pilot-doesnt-install-anything) |
+| Not sure which `pip install` line to use | [Install](#which-pip-install-line-should-i-use) |
 
 ## Every `/api/*` call returns 404 (GLKVM)
 
@@ -122,14 +122,18 @@ Communication → "On with Console Redirection via COM2"**. For Linux serial
 consoles that's `ttyS1` (`console=ttyS1,115200`). SOL is text-only: it drives
 Linux/ESXi text installers and GRUB fine, but not a graphical installer.
 
-## `pip install kvm-pilot` doesn't install anything
+## Which `pip install` line should I use?
 
-The current release line is a **pre-release**, and plain `pip install
-kvm-pilot` deliberately picks up no pre-release. Use:
+This one:
 
 ```bash
 pip install --pre kvm-pilot
 ```
+
+The current release line is a **pre-release**. A bare `pip install kvm-pilot`
+resolves to it today only because pip falls back to pre-releases when no stable
+release exists — the day a stable one ships, the same command silently starts
+picking that instead. `--pre` says what you mean either way.
 
 (`0.1.0a1` is yanked and ancient — don't pin it.)
 
