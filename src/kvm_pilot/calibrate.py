@@ -52,6 +52,9 @@ PARK = (0.02, 0.02)
 # Blobs whose centroid lies within this fraction of the park corner are the
 # cursor's *old* position (or corner UI chrome) — never the observed target.
 PARK_EXCLUDE_RADIUS = 0.08
+# Baseline frames the static-screen gate compares (each `settle` apart, so the
+# default 3 spans ~1.2s — long enough to catch a ~1Hz blinker, #198).
+STATIC_SAMPLES = 3
 
 
 class CalibrationError(KVMPilotError):
@@ -340,15 +343,26 @@ def run_calibration(
 
     move(*PARK)
     base = observe()
-    # Static-screen gate: with the cursor parked, two consecutive frames must
-    # not differ — a video/animation would masquerade as the cursor blob.
-    drift = locate_change(base, observe(), threshold=threshold)
-    if drift is not None:
-        raise CalibrationError(
-            "the screen is changing on its own (video/animation at "
-            f"~({drift[0]:.2f}, {drift[1]:.2f})) — calibrate on a static screen "
-            "(a desktop, BIOS menu, or login prompt)"
-        )
+    # Static-screen gate: with the cursor parked, the screen must not change on
+    # its own — anything that does would masquerade as the cursor blob.
+    #
+    # Sampled over several frames, not one pair (#198): a slow blinker (a tty
+    # login prompt's ~1Hz text cursor) can catch the same blink phase twice and
+    # look static, then produce changed blobs during the grid sweep. The later
+    # defenses caught that (an unmatchable frame, the collinearity/scale checks,
+    # the held-out verification) so no bad calibration could be stored — but the
+    # failure blamed cursor visibility when the honest diagnosis is "something
+    # on this screen is blinking". Comparing EVERY sample against the baseline,
+    # rather than only consecutive pairs, is what makes a periodic blinker hard
+    # to miss; the reported location points straight at it.
+    for _ in range(STATIC_SAMPLES - 1):
+        drift = locate_change(base, observe(), threshold=threshold)
+        if drift is not None:
+            raise CalibrationError(
+                "the screen is changing on its own (video, animation, or a blinking "
+                f"element at ~({drift[0]:.2f}, {drift[1]:.2f})) — calibrate on a static "
+                "screen (a desktop, BIOS menu, or a login prompt with no blinking cursor)"
+            )
 
     # Each diff-vs-baseline holds the arrival blob (the observation) and the
     # departure mark where the cursor sat in the baseline. The departure mark

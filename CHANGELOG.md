@@ -21,6 +21,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `me-firmware-update-needs-g3` quirk carries the whole story.
 
 ### Fixed
+- **`calibrate-mouse`'s static-screen gate could be fooled by a slow blinker**
+  (#198) — it compared a single pair of baseline frames, so a ~1Hz blinking text
+  cursor (seen live on a tty login prompt) could present the same phase twice and
+  look static, then produce changed blobs during the grid sweep. The later
+  defenses meant no bad calibration could ever be stored, but the run failed
+  blaming cursor visibility instead of the real cause. The gate now compares
+  several samples against the baseline and names the blinking element's location.
 - **A warm-cache preflight silently dropped CRITICAL findings** (#243) — four
   checks emitted `cacheable=False` results while being classified "stable", so
   `store_stable` discarded them and a cache hit skipped re-running them. The

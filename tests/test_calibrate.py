@@ -197,3 +197,56 @@ def test_maybe_apply_unknown_current_mode_applies_best_effort(tmp_path, monkeypa
     assert maybe_apply("h3", SeeingKVM(1600, 900), 0.5, 0.5)[2] is True
     # An observed mode change is real staleness — refuse.
     assert maybe_apply("h3", SeeingKVM(1024, 768), 0.5, 0.5) == (0.5, 0.5, False)
+
+
+def test_slow_blinker_that_survives_one_pair_is_still_refused():
+    """A ~1Hz blinker can present the same phase in two consecutive frames and
+    slip past a single-pair gate (#198, seen live on a tty login prompt). The
+    later defenses meant no bad calibration could be stored, but the run failed
+    blaming cursor visibility instead of naming the blinking element.
+    """
+    kvm = FakeScreenKVM()
+    blink_on = render(0.0, 0.0)
+    blink_off = [row[:] for row in blink_on]
+    for y in range(40, 46):                      # the blinking text cursor
+        for x in range(90, 94):
+            blink_off[y][x] = FG
+    # Phase sequence the old gate was blind to: the first pair matches, the
+    # blink only shows up on the third sample.
+    phases = iter([blink_on, blink_on, blink_off])
+    with pytest.raises(CalibrationError, match="blinking"):
+        run_calibration(kvm, host="testbox", decoder=lambda _d: next(phases),
+                        settle=0, sleep=lambda _s: None)
+
+
+def test_blinker_location_is_reported():
+    kvm = FakeScreenKVM()
+    still = render(0.0, 0.0)
+    blinking = [row[:] for row in still]
+    for y in range(52, 58):
+        for x in range(140, 146):
+            blinking[y][x] = FG
+    phases = iter([still, still, blinking])
+    with pytest.raises(CalibrationError) as ei:
+        run_calibration(kvm, host="testbox", decoder=lambda _d: next(phases),
+                        settle=0, sleep=lambda _s: None)
+    # centroid of x=140..145, y=52..57 over a 192x108 frame — the message points
+    # straight at the blinker, which is the diagnosis the operator needs.
+    assert "~(0.75, 0.51)" in str(ei.value)
+
+
+def test_static_screen_costs_a_bounded_number_of_frames():
+    from kvm_pilot.calibrate import STATIC_SAMPLES
+
+    kvm = FakeScreenKVM()
+    shots = {"n": 0}
+    real = kvm.snapshot
+
+    def counting_snapshot():
+        shots["n"] += 1
+        return real()
+
+    kvm.snapshot = counting_snapshot  # type: ignore[method-assign]
+    calibrate(kvm)
+    # baseline + (STATIC_SAMPLES-1) gate frames + one per grid point + verify
+    assert shots["n"] == STATIC_SAMPLES + len(GRID) + 1
