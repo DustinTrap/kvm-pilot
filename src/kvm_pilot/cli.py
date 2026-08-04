@@ -1766,8 +1766,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p = sub.add_parser("calibrate-mouse",
                        help="Measure & store this host's mouse coordinate correction (#128) — "
-                            "moves the live cursor ~10-30s on a static screen; needs Pillow "
-                            "(pip install 'kvm-pilot[calibrate]')")
+                            "moves the live cursor ~10-30s on a static screen")
     p.add_argument("--tolerance", type=float, default=0.02,
                    help="Max held-out verification miss, as a screen fraction (default 0.02)")
     _add_common(p)

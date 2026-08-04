@@ -111,7 +111,7 @@ this host's commanded→observed correction (5-point grid + held-out verify,
 ~10–30 s on a static screen), after which `mouse` percent coordinates apply
 it transparently and report `calibrated: true`. The calibration is stored per
 (host, capture resolution) — a resolution change makes it stale, and it is
-then never applied. Needs Pillow (`pip install 'kvm-pilot[calibrate]'`).
+then never applied.
 
 ## SOL serial console shows binary noise (iDRAC6)
 

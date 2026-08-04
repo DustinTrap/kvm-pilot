@@ -107,6 +107,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   and `amt_kvm_password`.
 
 ### Changed
+- **`Pillow` is now a base dependency** (#244) — `calibrate-mouse` is a
+  user-facing CLI/MCP surface, so `pip install kvm-pilot` must give you a working
+  one; it previously shipped a command that errored until you found the
+  `[calibrate]` extra. `calibrate` is retained as a no-op back-compat alias,
+  exactly as `ws` was when `websocket-client` made the same move for `snapshot`
+  (#142). Adds 4.6 MB to an 8.5 MB install, with prebuilt wheels on every
+  supported Python and platform (no build-from-source).
 - **The default driver is now `auto` — the CLI/MCP no longer silently assume
   `pikvm`** (#235). With no `--driver` / `KVM_PILOT_DRIVER` / profile `driver`
   key, kvm-pilot probes the host with cheap read-only requests (kvmd `/api/info`,

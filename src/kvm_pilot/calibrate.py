@@ -62,17 +62,20 @@ class CalibrationError(KVMPilotError):
 
 
 def default_decoder(data: bytes) -> list[list[int]]:
-    """JPEG -> downscaled luminance matrix via Pillow (lazy import).
+    """JPEG/PNG -> downscaled luminance matrix via Pillow (lazy import).
 
-    Pillow is the ``calibrate`` extra, imported here and nowhere else so the
-    library core keeps its stdlib-only-at-import guarantee.
+    Pillow is a **base** dependency (#244) — ``calibrate-mouse`` is a
+    user-facing surface, so its runtime dependency ships with the package. The
+    import stays lazy and lives here and nowhere else so the library core keeps
+    its stdlib-only-at-import guarantee.
     """
     try:
         from PIL import Image  # noqa: PLC0415 - lazy optional dependency
     except ImportError as exc:
         raise CalibrationError(
-            "mouse calibration needs Pillow to decode snapshots — install it with "
-            "pip install 'kvm-pilot[calibrate]' (or pass your own decoder=)"
+            "mouse calibration needs Pillow to decode snapshots, and it ships with "
+            "kvm-pilot — this import should not fail. Reinstall (pip install --pre "
+            "--force-reinstall kvm-pilot), or pass your own decoder=."
         ) from exc
     import io  # noqa: PLC0415
 

@@ -372,3 +372,35 @@ def test_firmware_registry_updated_covers_its_own_evidence():
         f"firmware_registry.json says updated={registry['updated']} but the run ledger "
         f"it derives from has evidence through {max(ledger_dates)}"
     )
+
+
+def test_user_facing_surfaces_do_not_depend_on_an_extra():
+    """Batteries-included (#109, #244): `pip install kvm-pilot` must give a
+    working CLI/MCP surface, not one that errors until you find the right extra.
+
+    Pillow is the case that caught this — `calibrate-mouse` is a CLI *and* MCP
+    surface, and its JPEG/PNG decode sat behind `[calibrate]`, so a plain install
+    shipped a command that could not run. `websocket-client` had already made the
+    same move for `snapshot` (#142). Any future surface-level dependency belongs
+    in `[project].dependencies` too.
+    """
+    import tomllib
+
+    pyproject = tomllib.loads((_ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    base = " ".join(pyproject["project"]["dependencies"]).lower()
+    for dep in ("pillow", "mcp", "websocket-client"):
+        assert dep in base, f"{dep} powers a user-facing surface and must be a base dependency"
+
+
+def test_docs_do_not_tell_users_to_install_a_surface_extra():
+    """No doc may present an extra as a prerequisite for a shipped surface."""
+    offenders = []
+    for doc in _current_doc_files():
+        text = doc.read_text(encoding="utf-8")
+        for extra in ("calibrate", "ws"):
+            needle = f"kvm-pilot[{extra}]"
+            if needle in text and "back-compat" not in text and "no-op" not in text:
+                offenders.append(f"{doc.relative_to(_ROOT)} -> {needle}")
+    assert not offenders, (
+        "these docs still require a now-base dependency via an extra: " + ", ".join(offenders)
+    )

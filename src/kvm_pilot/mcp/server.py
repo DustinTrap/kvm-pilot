@@ -1471,8 +1471,7 @@ async def calibrate_mouse(
     no clicks, no keystrokes — but it visibly moves the live cursor ~10-30s,
     so it is gated like HID input (``KVM_PILOT_MCP_ALLOW_HID``; one approval
     covers the whole run). Preconditions: live video signal, a **static**
-    screen, a visible cursor, Pillow on the server
-    (``pip install 'kvm-pilot[calibrate]'``). Afterwards ``mouse`` percent
+    screen, and a visible cursor. Afterwards ``mouse`` percent
     coords apply it transparently (``calibrated: true``); stored per (host,
     capture resolution) — a resolution change makes it stale, never applied.
     Mechanism details: the MCP server README.

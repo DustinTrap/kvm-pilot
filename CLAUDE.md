@@ -51,7 +51,9 @@ to it for current truth.
   that's deliberate; see [batteries-included rule above and issue #109].
   `websocket-client` became a **base** dependency once headless GL `snapshot` needed
   it to start GL's on-demand streamer (#142) — a core user-facing surface can't hide
-  behind an extra. `totp` remains an opt-in extra; `ws` is a no-op back-compat alias.
+  behind an extra. **Pillow** joined base the same way for `calibrate-mouse` (#244)
+  — a user-facing CLI/MCP surface cannot depend on an extra. `totp` remains an
+  opt-in extra; `ws` and `calibrate` are no-op back-compat aliases.
 - **No hard-coded model versions.** The Anthropic vision backend resolves the
   newest model at runtime (`src/kvm_pilot/vision/anthropic.py`); never bake a
   `claude-*` version string into the code.

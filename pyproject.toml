@@ -47,13 +47,14 @@ classifiers = [
 # all (FastMCP couldn't resolve our `Context` annotations), and 1.14-1.16 lack
 # `FastMCP.remove_tool`, which read-only mode needs (#196). The old `>=1.10` claim was
 # never true. The mcp-majors CI leg pins this exact floor so it can't silently rot.
-dependencies = ["mcp>=1.17,<3", "websocket-client>=1.9.0"]
+dependencies = ["mcp>=1.17,<3", "websocket-client>=1.9.0", "Pillow>=10.0"]
 
 [project.optional-dependencies]
 totp = ["pyotp>=2.10.0"]
-# Mouse auto-calibration (#128): Pillow decodes snapshots to locate the cursor.
-# The calibrate-mouse CLI/MCP surface ships in base and errors actionably
-# without it; the detection/fit math is stdlib and tested without Pillow.
+# `calibrate` retained for back-compat (`pip install kvm-pilot[calibrate]`);
+# Pillow is now a base dependency (see above), so this is a no-op alias.
+# calibrate-mouse is a user-facing CLI/MCP surface and JPEG decode is its
+# runtime dependency — batteries-included says that belongs in base (#244).
 calibrate = ["Pillow>=10.0"]
 # `ws` retained for back-compat (`pip install kvm-pilot[ws]`); websocket-client is
 # now a base dependency (see above), so this is a no-op alias.
