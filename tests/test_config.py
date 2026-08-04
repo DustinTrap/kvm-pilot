@@ -40,7 +40,7 @@ def test_timeout_precedence(monkeypatch, tmp_path):
 def test_driver_precedence(monkeypatch, tmp_path):
     monkeypatch.delenv("KVM_PILOT_DRIVER", raising=False)
     none = tmp_path / "none.toml"
-    assert resolve_host(host="h", config_path=none).driver == "pikvm"  # default
+    assert resolve_host(host="h", config_path=none).driver == "auto"  # default probes (#235)
     monkeypatch.setenv("KVM_PILOT_DRIVER", "glkvm")
     assert resolve_host(host="h", config_path=none).driver == "glkvm"  # env
     assert resolve_host(host="h", driver="blikvm", config_path=none).driver == "blikvm"  # arg wins

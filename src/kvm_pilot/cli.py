@@ -1268,12 +1268,15 @@ def cmd_events(args) -> int:
 # -- parser ----------------------------------------------------------------
 
 def _add_common(p: argparse.ArgumentParser) -> None:
-    p.add_argument("--driver", choices=["pikvm", "glkvm", "blikvm", "redfish", "ipmi", "amt", "fake"],
+    p.add_argument("--driver",
+                   choices=["auto", "pikvm", "glkvm", "blikvm", "redfish", "ipmi", "amt", "fake"],
                    help="Device driver (overrides KVM_PILOT_DRIVER / config profile; "
-                        "default pikvm; 'glkvm' = GL.iNet GLKVM fork, 'redfish' = a DMTF "
-                        "Redfish BMC (no HID/Video — capability-partial), 'ipmi' = a BMC "
-                        "over ipmitool, 'amt' = Intel AMT/vPro out-of-band (firmware "
-                        "BIOS/POST/GRUB screenshot + power + SOL), 'fake' = no hardware)")
+                        "default 'auto' = probe the device and pick, refusing to guess "
+                        "when nothing identifies (#235); 'glkvm' = GL.iNet GLKVM fork, "
+                        "'redfish' = a DMTF Redfish BMC (no HID/Video — capability-"
+                        "partial), 'ipmi' = a BMC over ipmitool, 'amt' = Intel AMT/vPro "
+                        "out-of-band (firmware BIOS/POST/GRUB screenshot + power + SOL), "
+                        "'fake' = no hardware)")
     p.add_argument("--host")
     p.add_argument("--user")
     p.add_argument("--passwd",

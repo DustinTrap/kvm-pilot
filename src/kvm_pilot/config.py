@@ -64,7 +64,9 @@ class HostConfig:
     ssl_ca_file: str | None = None
     timeout: float = 30.0
     totp_secret: str | None = None
-    driver: str = "pikvm"
+    # "auto" probes the host at driver-build time and resolves to a concrete
+    # kind (see detect.py); a wrong silent default here is #235's misdiagnosis.
+    driver: str = "auto"
     # Redfish-only: HTTP auth mode ("session" — the BMC default — or "basic", for
     # endpoints without a SessionService, e.g. emulators or BMCs with session
     # auth disabled). Ignored by the PiKVM family.
@@ -229,7 +231,9 @@ def resolve_host(
             return base[key]
         return default
 
-    resolved_driver = pick("driver", driver, "KVM_PILOT_DRIVER", "pikvm")
+    # No explicit driver anywhere -> "auto": probe the device instead of silently
+    # assuming pikvm (#235). Resolved to a concrete kind at driver-build time.
+    resolved_driver = pick("driver", driver, "KVM_PILOT_DRIVER", "auto")
     resolved_host = pick("host", host, "KVM_PILOT_HOST")
     if not resolved_host:
         if resolved_driver == "fake":

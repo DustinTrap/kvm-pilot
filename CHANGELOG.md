@@ -6,6 +6,22 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **The default driver is now `auto` — the CLI/MCP no longer silently assume
+  `pikvm`** (#235). With no `--driver` / `KVM_PILOT_DRIVER` / profile `driver`
+  key, kvm-pilot probes the host with cheap read-only requests (kvmd `/api/info`,
+  GL's proprietary `/api/upgrade/version`, Redfish `/redfish/v1/`, the Intel AMT
+  web server banner on 16992/16993, an RMCP/ASF presence ping on UDP 623) and
+  picks the driver that matches, logging the verdict and its evidence. When
+  nothing identifies, it refuses to guess and prints the full probe inventory —
+  including whether the host answers SSH, with a pointer to `ssh-check` /
+  `ssh-exec` — instead of the old misleading `CRITICAL api-reachable`
+  healthcheck against a host that was never a PiKVM. Pinning a driver anywhere
+  restores the exact old behavior; `--driver auto` is also accepted explicitly.
+- `healthcheck`'s `recovery-path` CRITICAL now names a configured in-band SSH
+  channel as the soft-recovery lever (severity unchanged — SSH dies with a hung
+  guest) instead of implying no remote lever exists at all (#235).
+
 ## [0.1.0b12] — 2026-07-31
 
 ### Added

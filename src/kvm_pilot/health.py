@@ -359,13 +359,21 @@ def check_recovery_path(driver: Any) -> CheckResult | None:
             title="Out-of-band recovery path",
             detail=f"{how} power/reset control is wired.",
         )
+    # An in-band SSH channel is a soft-recovery lever, not an OOB path — it dies
+    # with a hung guest, so it must not soften the severity, only the framing
+    # ("host reachable over SSH" is not "failed KVM", #235).
+    ssh_note = (
+        " An in-band SSH channel is configured (see ssh-reachable) — soft "
+        "reboots work while the OS is up, but a hung guest takes it down too."
+        if getattr(driver, "ssh_channel", None) is not None else ""
+    )
     return CheckResult(
         id="recovery-path",
         pillar=Pillar.READINESS,
         severity=Severity.CRITICAL,
         title="Out-of-band recovery path",
         detail="No out-of-band reset: ATX reports enabled=false and no GPIO power "
-        "channels are defined. A hung guest cannot be recovered remotely.",
+        "channels are defined. A hung guest cannot be recovered remotely." + ssh_note,
         remediation="Wire the ATX cable to the host front-panel power/reset header, "
         "or provision a GPIO/Redfish/IPMI reset path. Until one exists, if the "
         f"guest hangs the remote-first recovery order is: {RECOVERY_ORDER} "

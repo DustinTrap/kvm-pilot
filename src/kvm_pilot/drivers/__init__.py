@@ -147,6 +147,15 @@ def make_driver_from_config(
     call.
     """
     kind = cfg.driver
+    if kind == "auto":
+        # No driver was pinned anywhere (args/env/profile): probe the device and
+        # resolve to a concrete kind, or refuse loudly with the probe inventory
+        # (#235). Memoized per host+ports, so the MCP server's per-tool-call
+        # driver builds probe once per process.
+        from ..detect import resolve_auto
+
+        cfg = resolve_auto(cfg)
+        kind = cfg.driver
     if kind == "fake":
         from .fake import FakeDriver
 

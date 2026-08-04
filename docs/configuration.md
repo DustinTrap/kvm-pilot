@@ -38,7 +38,8 @@ port = 443
 scheme = "https"
 verify_ssl = false          # GL/PiKVM ship self-signed certs
 timeout = 30.0
-driver = "glkvm"            # pikvm (default) | glkvm | blikvm | redfish | ipmi | amt | fake
+driver = "glkvm"            # auto (default: probe the device, #235) | pikvm | glkvm |
+                            # blikvm | redfish | ipmi | amt | fake
 # totp_secret = "BASE32SECRET"   # only if 2FA is enabled (needs the 'totp' extra)
 # redfish_auth = "session"       # redfish driver only: "basic" for endpoints
 #                                # without a SessionService (e.g. emulators)
