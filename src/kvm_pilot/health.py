@@ -968,13 +968,26 @@ def check_amt_redirection(driver: Any) -> CheckResult | None:
                         "reboot does NOT clear it. This needs physical access — AMT power "
                         "control rides the same wedged plane (#217).",
             cacheable=False)
-    off = [name for name, on in (("SOL/IDE-R (16994)", h.get("sol_listener")),
-                                 ("KVM (5900)", h.get("kvm_5900"))) if on is False]
+    sol_on, kvm_5900 = h.get("sol_listener"), h.get("kvm_5900")
+    off = []
+    if sol_on is False:
+        off.append("SOL/IDE-R (16994)")
+    # KVM rides EITHER transport: the legacy plain-RFB listener on 5900, or a
+    # KVMR session inside the redirection port. Newer ME builds harden 5900 off
+    # permanently and serve KVM only over 16994 — measured on a 5411 @ 14.1.79,
+    # where snapshot captures 1920x1080 with Is5900PortEnabled false and
+    # un-settable. So 5900 alone being off is NOT a finding; reporting it as one
+    # told operators snapshot was broken while it was working (#245).
+    if kvm_5900 is False and sol_on is not True:
+        off.append("KVM (5900)")
     if not off:
+        detail = ("SOL and KVM redirection listeners are on." if kvm_5900 is not False else
+                  "Redirection listener (16994) is on — SOL, IDE-R and KVM all ride it. The "
+                  "legacy KVM port 5900 is off, which newer ME builds enforce and which costs "
+                  "nothing: KVM is served over the redirection session instead.")
         return CheckResult(
             id="amt-redirection", pillar=Pillar.READINESS, severity=Severity.OK,
-            title="AMT redirection listeners",
-            detail="SOL and KVM redirection listeners are on.", cacheable=False)
+            title="AMT redirection listeners", detail=detail, cacheable=False)
     return CheckResult(
         id="amt-redirection", pillar=Pillar.READINESS, severity=Severity.WARNING,
         title="AMT redirection listeners",

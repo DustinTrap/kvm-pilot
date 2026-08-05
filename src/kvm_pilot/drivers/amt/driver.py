@@ -593,14 +593,14 @@ class AmtDriver(PowerMixin, CapabilityMixin):
         # but firmware phrasing varies and either alone is a clear enough signal.
         if "unsupportedfeature" in detail or "not supported" in detail:
             return (
-                "The ME refuses to enable the STANDARD VNC PORT (5900) for KVM. Measured on "
-                "a Latitude 5411 at 14.1.79: the KVM SAP was present and enabled "
-                "(EnabledState=6, RequestedState=2) with its settings intact, only "
-                "Is5900PortEnabled was false and un-settable — newer ME builds harden off "
-                "the legacy plain-RFB port while keeping KVM on the authenticated "
-                "redirection port 16994 (a KVMR session there was accepted on the same "
-                "firmware). So KVM is probably NOT broken and MEBx is probably NOT the "
-                "problem; kvm-pilot just cannot drive the 16994 path yet (#245)."
+                "The ME refuses to enable the STANDARD VNC PORT (5900) for KVM, and on "
+                "newer firmware that is permanent and HARMLESS: those builds harden off "
+                "the legacy plain-RFB port and serve KVM only over the authenticated "
+                "redirection port 16994. kvm-pilot uses that path automatically, so there "
+                "is most likely nothing to fix here — try `snapshot` before believing this "
+                "is a fault. Verified on a Latitude 5411 at 14.1.79: Is5900PortEnabled "
+                "false and un-settable, and snapshot returns a 1920x1080 desktop anyway. "
+                "KVM is NOT broken and MEBx is NOT the problem (#245)."
             )
         return (
             "If a BIOS/ME firmware update ran recently, this is expected — the update "
@@ -715,6 +715,22 @@ class AmtDriver(PowerMixin, CapabilityMixin):
                           "legacy VGA text mode — it resets right after the framebuffer request.",
                   workaround="Capture at a graphical screen; a reset at that exact point means "
                              "'unsupported display mode', not a driver fault.",
+                  source="observed"),
+            Quirk(id="kvm-blank-when-display-asleep",
+                  summary="With the host's display DPMS-blanked, KVM serves a uniform BLACK "
+                          "800x600 framebuffer instead of the real desktop — and AMT pointer "
+                          "input does not wake it (observed on a Latitude 5411 @ 14.1.79 at a "
+                          "GDM greeter, eDP connected but disabled).",
+                  workaround="A black 800x600 capture means the panel is asleep, NOT that KVM "
+                             "is broken: the resolution drop is the tell. Wake the host at the "
+                             "OS (in-band SSH) or reset it and capture during POST.",
+                  source="observed"),
+            Quirk(id="kvm-5900-hardened-off",
+                  summary="Newer ME builds permanently refuse Is5900PortEnabled "
+                          "(e:UnsupportedFeature) and serve KVM only inside a redirection "
+                          "session on 16994. Seen at 14.1.79; 14.1.67 still had 5900.",
+                  workaround="Nothing to do — kvm-pilot picks the transport by attempt. Do NOT "
+                             "read a failed `enable-kvm` as KVM being broken; run `snapshot`.",
                   source="observed"),
             Quirk(id="boot-override-write-only",
                   summary="The pending single-use boot *source* override is write-only — "

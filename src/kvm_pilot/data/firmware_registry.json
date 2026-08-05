@@ -102,9 +102,11 @@
             "level": "alpha",
             "capabilities": {
               "healthcheck": "beta",
+              "hid": "alpha",
               "info": "beta",
+              "power": "beta",
               "power_state": "beta",
-              "snapshot": "alpha"
+              "snapshot": "beta"
             }
           }
         }

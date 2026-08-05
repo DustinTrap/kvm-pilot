@@ -1352,9 +1352,13 @@ def test_unsupported_feature_blames_the_5900_path_not_the_operator(amt_emu):
     Newer ME builds harden off the legacy plain-RFB port while keeping KVM on
     the authenticated one.
 
-    Two earlier versions of this message were wrong: the first blamed a
-    firmware-update wedge (#217), the second blamed MEBx. Both would have sent
-    an operator to the machine for a problem that is a gap in this tool (#245).
+    Three earlier versions of this message were wrong, each less wrong than the
+    last: the first blamed a firmware-update wedge needing a physical G3 drain
+    (#217); the second blamed MEBx; the third correctly said 5900 was gone but
+    still called it a kvm-pilot gap. It is none of those — 5900 being off is
+    permanent, expected, and costs nothing, because KVM is served over the
+    redirection port and `snapshot` works. The first two would have sent an
+    operator to the machine; all three overstated a fault (#245).
     """
     # The exact envelope the live device returned, subcode included.
     amt_emu.state.http_status = 400
@@ -1372,52 +1376,77 @@ def test_unsupported_feature_blames_the_5900_path_not_the_operator(amt_emu):
     msg = str(ei.value)
     assert "UnsupportedFeature" in msg          # #216's surfacing still shows the subcode
     assert "16994" in msg                       # names the path that DOES work
-    assert "MEBx is probably NOT the problem" in msg
-    assert "G3" not in msg                      # neither wrong cause may lead
+    assert "MEBx is NOT the problem" in msg
+    assert "G3" not in msg                      # no wrong cause may lead
+    # It must point at the cheap check that settles it, not at the hardware.
+    assert "snapshot" in msg
 
 
 # -- #245: KVM over the redirection port (16994) ---------------------------
 
 
-def test_redirection_kvm_stream_speaks_the_open_handshake():
-    """The ME says nothing until the client opens the session — a naive
-    connect-and-read just times out. Sequence measured on a Latitude 5411:
-    client sends 0x40 OPEN_SESSION, ME replies 0x41 OPEN_REPLY (byte[1]==0),
-    then the RFB greeting follows on the same stream.
-    """
-    import struct
+class _FakeRedirChan:
+    """Stands in for RedirectionChannel: records what we send, replays a script."""
 
+    def __init__(self, script: bytes):
+        self.sent = b""
+        self.pending = script
+
+    def open(self, tag):
+        self.tag = tag
+        return self
+
+    def send(self, data):
+        self.sent += data
+
+    def recv(self, n=65536):
+        out, self.pending = self.pending[:n], self.pending[n:]
+        return out
+
+    def close(self):
+        pass
+
+
+def _redir_stream(monkeypatch, script: bytes):
+    """A RedirKvmStream whose transport is a scripted fake."""
+    from kvm_pilot.drivers.amt import rfb as rfb_mod
     from kvm_pilot.drivers.amt.rfb import RedirKvmStream
 
-    class FakeChan:
-        def __init__(self):
-            self.sent = b""
-            # OPEN_REPLY and the greeting arrive in ONE segment — the packing
-            # that made an exact-8 read swallow the greeting (#245).
-            self.pending = bytes([0x41, 0, 0, 0, 0, 0, 0, 0]) + b"RFB 004.000\n"
+    chan = _FakeRedirChan(script)
+    monkeypatch.setattr(rfb_mod, "RedirectionChannel", lambda *a, **k: chan, raising=False)
+    monkeypatch.setattr("kvm_pilot.drivers.amt.redir.RedirectionChannel",
+                        lambda *a, **k: chan)
+    return RedirKvmStream("h", "admin", "pw"), chan
 
-        def open(self, tag):
-            return self
 
-        def send(self, data):
-            self.sent += data
+def test_kvm_open_session_is_exactly_eight_bytes(monkeypatch):
+    """THE #245 bug, and the reason it masqueraded as a version incompatibility.
 
-        def recv(self, n=65536):
-            out, self.pending = self.pending[:n], self.pending[n:]
-            return out
-
-        def close(self):
-            pass
-
-    chan = FakeChan()
-    st = RedirKvmStream("h", "admin", "pw")
-    st._chan = chan
-    st._chan.open(None)
-    st._chan.send(bytes([0x40, 0, 0, 0]) + struct.pack("<HHHI", 30000, 0, 20000, 1))
-    reply = st._recv_exact(8)
-    assert reply[0] == 0x41 and reply[1] == 0
-    # The greeting must survive the exact-read, not be consumed with the reply.
+    KVM's start command shares byte 0x40 with IDE-R's OPEN_SESSION but NOT its
+    body: IDE-R appends rx/tx/heartbeat timeouts and a version (14 bytes total),
+    KVM sends 0x40 and seven zeros. Send IDE-R's and the ME consumes the first 8,
+    replies 0x41 — then reads the six leftovers as the START of our RFB version
+    string, so "RFB 003.008" arrives shifted and the ME answers "Client requested
+    an invalid RFB protocol version" for EVERY version you try. The failure
+    points at the version; the cause is six stray bytes.
+    """
+    st, chan = _redir_stream(monkeypatch,
+                             bytes([0x41, 0, 0, 0, 0, 0, 0, 0]) + b"RFB 004.000\n")
+    st.connect()
+    assert chan.sent == bytes([0x40, 0, 0, 0, 0, 0, 0, 0]), (
+        f"KVM start must be 8 bytes, got {len(chan.sent)}: {chan.sent.hex(' ')}"
+    )
+    # The greeting must survive the exact-8 read of the reply, not be consumed
+    # with it — the ME packs both into one segment.
     assert st.recv(12) == b"RFB 004.000\n"
+
+
+def test_kvm_open_uses_the_kvmr_tag_not_ider(monkeypatch):
+    from kvm_pilot.drivers.amt.redir import START_IDER, START_KVM
+
+    st, chan = _redir_stream(monkeypatch, bytes([0x41, 0, 0, 0, 0, 0, 0, 0]))
+    st.connect()
+    assert chan.tag == START_KVM and chan.tag != START_IDER
 
 
 def test_redir_stream_recv_never_overreads():
@@ -1446,7 +1475,7 @@ def test_redir_stream_recv_never_overreads():
 def test_zero_security_types_names_a_declining_service(amt_rfb):
     """0 offered security types means the KVM service declined the session, not
     that a credential was wrong — the two need different responses from an
-    operator, and AMT sends no reason string (#245).
+    operator (#245).
     """
     from kvm_pilot.drivers.amt.rfb import Rfb
 
@@ -1454,4 +1483,73 @@ def test_zero_security_types_names_a_declining_service(amt_rfb):
     with pytest.raises(AuthError) as ei:
         Rfb("127.0.0.1", amt_rfb.port, "Chang3M!", timeout=5).connect()
     msg = str(ei.value)
-    assert "NO security types" in msg and "declined the session" in msg
+    assert "no security types" in msg and "declined the session" in msg
+
+
+def test_refusal_reason_is_quoted_verbatim_not_diagnosed(amt_rfb):
+    """When the ME DOES send a reason, it is the most reliable evidence we get
+    and must reach the operator unedited. This is the #245 lesson twice over:
+    the live device was saying "Client requested an invalid RFB protocol
+    version" the whole time, and both diagnoses I shipped over the top of it —
+    a firmware wedge needing a G3 drain, then MEBx — would have dispatched a
+    human to the machine for a six-byte client bug.
+    """
+    from kvm_pilot.drivers.amt.rfb import Rfb
+
+    amt_rfb.reason_drop = True
+    with pytest.raises(AuthError) as ei:
+        Rfb("127.0.0.1", amt_rfb.port, "Chang3M!", timeout=5).connect()
+    msg = str(ei.value)
+    assert "no redirection sessions available" in msg   # the ME's own words
+    assert "MEBx" not in msg and "G3" not in msg        # no invented cause
+
+
+def test_redirection_offers_security_none_and_we_take_it(amt_rfb):
+    """Over redirection the digest auth already happened at the transport layer,
+    so the ME offers None(1) — measured as [1, 128] on a 5411 @ 14.1.79. Taking
+    it is not skipping authentication; the RFB password governs only the 5900
+    listener, and there is nothing to re-check. The emulator asserts we pick 1.
+    """
+    from kvm_pilot.drivers.amt.rfb import Rfb
+
+    amt_rfb.security_none = True
+    with Rfb("127.0.0.1", amt_rfb.port, "Chang3M!", timeout=5) as r:
+        assert (r.width, r.height) == (amt_rfb.width, amt_rfb.height)
+
+
+def test_standard_port_still_uses_vnc_auth(amt_rfb):
+    """The 5900 listener DOES challenge, and that path must not regress — it is
+    the one validated live at 14.1.67."""
+    from kvm_pilot.drivers.amt.rfb import Rfb
+
+    with Rfb("127.0.0.1", amt_rfb.port, "Chang3M!", timeout=5) as r:
+        assert (r.width, r.height) == (amt_rfb.width, amt_rfb.height)
+
+
+def test_redirection_check_is_ok_when_only_5900_is_off(amt_emu):
+    """The health report must not call KVM unavailable while it works.
+
+    Newer ME builds serve KVM only over the redirection port; 5900 stays off by
+    design and cannot be turned on. Before #245 this produced a standing WARNING
+    ("console/snapshot won't work") on a device whose snapshot returned a
+    1920x1080 desktop — the kind of false finding that teaches operators to
+    ignore the report.
+    """
+    from kvm_pilot.health import Severity, check_amt_redirection
+
+    d = make(amt_emu)
+    d.amt_health = lambda: {"sol_listener": True, "kvm_5900": False}
+    res = check_amt_redirection(d)
+    assert res is not None and res.severity is Severity.OK
+    assert "5900" in res.detail and "redirection session" in res.detail
+
+
+def test_redirection_check_warns_when_both_transports_are_off(amt_emu):
+    """With the redirection listener off too, there is genuinely no KVM path."""
+    from kvm_pilot.health import Severity, check_amt_redirection
+
+    d = make(amt_emu)
+    d.amt_health = lambda: {"sol_listener": False, "kvm_5900": False}
+    res = check_amt_redirection(d)
+    assert res is not None and res.severity is Severity.WARNING
+    assert "16994" in res.detail and "5900" in res.detail

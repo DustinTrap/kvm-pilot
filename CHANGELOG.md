@@ -6,6 +6,24 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **AMT KVM works again on ME builds that closed port 5900** (#245). Newer ME
+  firmware permanently refuses `Is5900PortEnabled` and serves KVM only inside a
+  redirection session on 16994. kvm-pilot had the transport but sent the wrong
+  open command: KVM's start shares the byte `0x40` with IDE-R's `OPEN_SESSION`
+  but **not its body** — IDE-R appends rx/tx/heartbeat timeouts and a version
+  (14 bytes), KVM sends `0x40` and seven zeros. The ME consumed the first 8,
+  replied, then read the six leftovers as the start of our RFB version string,
+  so *every* version string came back `Client requested an invalid RFB protocol
+  version`. The error named the version; the cause was six stray bytes.
+
+  Also: over redirection the ME offers security type **None**, because the
+  digest auth already happened at the transport layer — we demanded VNC-auth and
+  refused what it offered.
+
+  **Verified live on a Latitude 5411 @ 14.1.79**: 1920×1080 captures of the Dell
+  BIOS/POST splash and, a minute later, the live GDM desktop in correct colour.
+
 ### Added
 - **`--driver ssh`: SSH-only machines are now first-class targets** (#248). A host
   with no KVM and no BMC could not be healthchecked or routed, because those paths
@@ -24,6 +42,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   firmware_version)`, and an OS version must never enter it.
 
 ### Changed
+- `healthcheck` no longer warns that KVM is unavailable when only port 5900 is
+  off (#245). On firmware that serves KVM over the redirection port, that was a
+  standing WARNING — "console/snapshot won't work" — on a device whose `snapshot`
+  returned a full desktop. False findings teach operators to ignore the report.
+  Two new published quirks: `kvm-5900-hardened-off`, and
+  `kvm-blank-when-display-asleep` (a DPMS-blanked host serves a uniform black
+  **800×600** frame; the resolution drop is the tell, and AMT pointer input does
+  not wake it).
 - An interface with **no power control at all** now reports `recovery-path` as
   CRITICAL rather than omitting the check. Previously it returned `None` and
   vanished from the report, which reads as "fine" to anyone scanning one.
