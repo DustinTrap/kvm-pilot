@@ -30,7 +30,7 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from ...errors import CapabilityError, ConnectionError, KVMPilotError
+from ...errors import AuthError, CapabilityError, ConnectionError, KVMPilotError, ProtocolError
 from ...safety import SafetyPolicy
 from ..base import CapabilityMixin, PowerMixin, VideoScope
 from .ider import IderSession
@@ -574,33 +574,65 @@ class AmtDriver(PowerMixin, CapabilityMixin):
                 f"AMT {action} was rejected by the ME: {exc}\n{self._redirection_hint(exc)}"
             ) from exc
 
-    @staticmethod
-    def _redirection_hint(exc: WsmanError) -> str:
-        """Name the LIKELIEST cause for a refused redirection write.
+    def _kvm_redirection_serves(self) -> bool | None:
+        """Does KVM actually serve over the redirection port right now?
 
-        Keyed on the fault subcode, because the two causes need opposite actions
-        and guessing wrong sends the operator to the wrong machine. Observed live
-        on a Latitude 5411 @ 14.1.79: SOL/IDE-R (16994) listening happily while
-        ``enable-kvm`` returned ``e:UnsupportedFeature`` — the ME had KVM
-        redirection switched off in MEBx, which no amount of power-cycling fixes.
-        An earlier version of this message led with the firmware-update story
-        regardless of subcode and would have sent that operator hunting a wedge
-        that was not there.
+        True/False from an ACTUAL handshake; None if we could not tell. This is
+        the whole lesson of #245: a refused ``Is5900PortEnabled`` is compatible
+        with both "5900 is hardened off and KVM is fine on 16994" and "KVM is
+        genuinely disabled", and those want opposite actions from an operator.
+        Rather than pick the likelier story — which I did three times, wrongly —
+        open the session and find out. It costs one connection.
+        """
+        from .rfb import RedirKvmStream
+
+        try:
+            RedirKvmStream(self.host, self._user, self._passwd,
+                           port=self._sol_port, timeout=min(self._timeout, 10.0)).connect().close()
+        except (ConnectionError, ProtocolError, AuthError):
+            return False
+        except KVMPilotError:
+            return None
+        return True
+
+    def _redirection_hint(self, exc: WsmanError) -> str:
+        """Name the cause for a refused redirection write — by measuring it.
+
+        Keyed on the fault subcode, because the causes need opposite actions and
+        guessing wrong sends the operator to the wrong machine. Observed live on a
+        Latitude 5411 @ 14.1.79: ``enable-kvm`` returns ``e:UnsupportedFeature``
+        while KVM serves perfectly over 16994. Three earlier versions of this
+        message each asserted a cause without checking one — a firmware wedge
+        needing a physical G3 drain, then MEBx, then a gap in this tool (#245).
         """
         detail = str(exc).lower()
         # Match the subcode OR the reason text: the live 5411 sent both
         # ("The specified feature is not supported. (subcode e:UnsupportedFeature)"),
         # but firmware phrasing varies and either alone is a clear enough signal.
         if "unsupportedfeature" in detail or "not supported" in detail:
-            return (
-                "The ME refuses to enable the STANDARD VNC PORT (5900) for KVM, and on "
-                "newer firmware that is permanent and HARMLESS: those builds harden off "
-                "the legacy plain-RFB port and serve KVM only over the authenticated "
-                "redirection port 16994. kvm-pilot uses that path automatically, so there "
-                "is most likely nothing to fix here — try `snapshot` before believing this "
-                "is a fault. Verified on a Latitude 5411 at 14.1.79: Is5900PortEnabled "
-                "false and un-settable, and snapshot returns a 1920x1080 desktop anyway. "
-                "KVM is NOT broken and MEBx is NOT the problem (#245)."
+            head = (
+                "The ME refuses to enable the STANDARD VNC PORT (5900) for KVM. Newer "
+                "builds harden that legacy plain-RFB port off permanently and serve KVM "
+                "only over the authenticated redirection port 16994, which kvm-pilot uses "
+                "automatically — so this refusal alone does not tell you KVM is broken. "
+            )
+            serves = self._kvm_redirection_serves()
+            if serves is True:
+                return head + (
+                    "CHECKED: KVM IS SERVING over 16994 on this device right now, so there "
+                    "is nothing to fix — `snapshot` and `console` work. Do not touch MEBx."
+                )
+            if serves is False:
+                return head + (
+                    "CHECKED: KVM did NOT answer over 16994 either, so this one is real. "
+                    "Confirm KVM redirection is enabled in MEBx (a firmware setting no "
+                    "remote call can change) and that the redirection listener is on "
+                    "(`kvm-pilot amt enable-sol`)."
+                )
+            return head + (
+                "The 16994 path could not be tested from here, so this is unresolved: run "
+                "`kvm-pilot snapshot` — if it returns an image, KVM is fine and only the "
+                "5900 listener is gone."
             )
         return (
             "If a BIOS/ME firmware update ran recently, this is expected — the update "
@@ -674,6 +706,11 @@ class AmtDriver(PowerMixin, CapabilityMixin):
             redir = _read(lambda: self._wsman.get(amt("AMT_RedirectionService"), self._REDIR_SVC_SEL))
             kvm = _read(lambda: self._wsman.get(self._KVM_SD, self._KVM_SD_SEL))
             optin = _read(lambda: self._wsman.get(self._OPTIN))
+            # The KVM service's OWN state. The SOL/IDE-R listener being up does not
+            # imply KVM is enabled — they share port 16994 but are separate services,
+            # and treating one as evidence for the other just swaps a false alarm for
+            # a false all-clear (#245).
+            sap = _read(lambda: self._wsman.get(cim("CIM_KVMRedirectionSAP"), self._KVM_SAP_SEL))
 
             def _b(el: Any, tag: str) -> bool | None:
                 if el is None:
@@ -693,6 +730,13 @@ class AmtDriver(PowerMixin, CapabilityMixin):
                 "control_mode": self._control_mode(),
                 "sol_listener": _b(redir, "ListenerEnabled"),
                 "kvm_5900": _b(kvm, "Is5900PortEnabled"),
+                # CIM EnabledState: 2 = Enabled, 6 = "Enabled but Offline" (enabled,
+                # no session in progress — the normal idle reading on a live device).
+                # None means we could not read it, which must NOT be read as "fine".
+                "kvm_sap_enabled": (
+                    None if sap is None
+                    else (findtext(sap, "EnabledState") or "").strip() in ("2", "6")
+                ),
                 "kvm_consent_required": consent,
                 "rfb_password_ok": self._rfb_password_ok(),
             }

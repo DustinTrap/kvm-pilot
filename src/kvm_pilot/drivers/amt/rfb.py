@@ -322,6 +322,12 @@ class RedirKvmStream:
     RFB state machine is identical on both transports.
     """
 
+    #: This transport authenticated at the redirection layer (HTTP-Digest over the
+    #: AMT admin credentials) before any RFB byte was exchanged, so RFB security
+    #: type None is the ME's way of saying "already authenticated". :class:`Rfb`
+    #: reads this rather than inferring it from the port number.
+    redirection_authenticated = True
+
     def __init__(self, host: str, user: str, passwd: str, *,
                  port: int = 16994, timeout: float = 15.0):
         self.host, self.port = host, port
@@ -340,27 +346,34 @@ class RedirKvmStream:
         self._chan = RedirectionChannel(
             self.host, self._user, self._passwd, port=self.port, timeout=self._timeout
         )
-        self._chan.open(START_KVM)
-        # EXACTLY eight bytes: 0x40 then seven zeros. This shares a command byte
-        # with IDE-R's OPEN_SESSION but NOT its body — IDE-R appends rx/tx/heartbeat
-        # timeouts and a version (14 bytes total), and sending those here is what
-        # broke #245 for a day. The ME takes the first 8 as the KVM start, replies
-        # 0x41, and then reads the six leftover bytes as the beginning of our RFB
-        # version string — so the greeting is answered with `<junk>RFB 003.` and the
-        # ME rejects it with "Client requested an invalid RFB protocol version",
-        # whatever version you actually meant. It looks exactly like a version
-        # incompatibility and is nothing of the kind.
-        self._chan.send(bytes([_REDIR_OPEN, 0, 0, 0, 0, 0, 0, 0]))
-        reply = self._recv_exact(8)
-        if reply[0] != _REDIR_OPEN_REPLY:
-            raise ProtocolError(
-                f"AMT KVM redirection: expected OPEN_REPLY (0x41) from {self.host}, "
-                f"got 0x{reply[0]:02x}"
-            )
-        if reply[1] != 0:
-            raise ProtocolError(
-                f"AMT KVM redirection session refused by {self.host} (status {reply[1]})"
-            )
+        # Anything that throws from here on leaves a live socket (and, on the ME
+        # side, a redirection session that counts against the one-session limit
+        # and lingers until SessionTimeout). Close on the way out.
+        try:
+            self._chan.open(START_KVM)
+            # EXACTLY eight bytes: 0x40 then seven zeros. This shares a command byte
+            # with IDE-R's OPEN_SESSION but NOT its body — IDE-R appends rx/tx/heartbeat
+            # timeouts and a version (14 bytes total), and sending those here is what
+            # broke #245 for a day. The ME takes the first 8 as the KVM start, replies
+            # 0x41, and then reads the six leftover bytes as the beginning of our RFB
+            # version string — so the greeting is answered with `<junk>RFB 003.` and the
+            # ME rejects it with "Client requested an invalid RFB protocol version",
+            # whatever version you actually meant. It looks exactly like a version
+            # incompatibility and is nothing of the kind.
+            self._chan.send(bytes([_REDIR_OPEN, 0, 0, 0, 0, 0, 0, 0]))
+            reply = self._recv_exact(8)
+            if reply[0] != _REDIR_OPEN_REPLY:
+                raise ProtocolError(
+                    f"AMT KVM redirection: expected OPEN_REPLY (0x41) from {self.host}, "
+                    f"got 0x{reply[0]:02x}"
+                )
+            if reply[1] != 0:
+                raise ProtocolError(
+                    f"AMT KVM redirection session refused by {self.host} (status {reply[1]})"
+                )
+        except BaseException:
+            self.close()
+            raise
         return self
 
     def _fill(self) -> None:
@@ -458,10 +471,10 @@ class Rfb:
             raise ConnectionError(
                 f"AMT RFB connect to {self.host}:{self.port} failed: {e}. Newer ME builds "
                 "harden off this legacy 5900 listener and serve KVM only through a "
-                "redirection session on 16994; kvm-pilot tries that automatically, so if "
-                "you are seeing this the redirection port did not answer either. Check that "
-                "the listener is on (`kvm-pilot amt enable-sol`) and that 16994 is reachable "
-                "before concluding KVM is disabled or touching MEBx (#245)."
+                "redirection session on 16994, which the AMT driver tries as a fallback — "
+                "so on its own this is not evidence that KVM is unavailable. Check that the "
+                "redirection listener is on (`kvm-pilot amt enable-sol`) and that 16994 is "
+                "reachable before concluding KVM is disabled or touching MEBx (#245)."
             ) from e
         self._handshake()
 
@@ -487,18 +500,33 @@ class Rfb:
                 "every version then looks invalid (#245)."
             )
         sectypes = set(self._recv(n))
-        # 1 = None, 2 = VNC Authentication. Over a redirection session the digest
-        # auth already happened at the transport layer, and the ME offers None
-        # (measured: types [1, 128] on a 5411 at 14.1.79) — re-authenticating is
-        # neither expected nor possible there, since the RFB password governs only
-        # the 5900 listener. On plain 5900 the ME offers VNC auth instead. Prefer
-        # None when offered: it means "already authenticated", not "unauthenticated".
-        if 1 in sectypes:
-            self._send(bytes([1]))
-        elif 2 in sectypes:
+        # 1 = None, 2 = VNC Authentication.
+        #
+        # Over a redirection session the ME offers None (measured: [1, 128] on a
+        # 5411 at 14.1.79) because HTTP-Digest already ran at the transport layer.
+        # There it means "already authenticated", and there is nothing left to
+        # check — the RFB password governs only the 5900 listener.
+        #
+        # On a RAW listener it means the opposite: no authentication at all. So
+        # None is accepted only from a transport that vouches for having
+        # authenticated, and VNC-auth is preferred wherever it is offered.
+        # Otherwise a server offering both would silently downgrade us past a
+        # password the operator deliberately configured.
+        vouched = getattr(self._sock, "redirection_authenticated", False)
+        if 2 in sectypes:
             self._send(bytes([2]))
             challenge = self._recv(16)
             self._send(vnc_auth_response(self._passwd, challenge))
+        elif 1 in sectypes and vouched:
+            self._send(bytes([1]))
+        elif 1 in sectypes:
+            raise AuthError(
+                f"AMT RFB at {self.host}:{self.port} offers only unauthenticated access "
+                f"(security types {sorted(sectypes)}). kvm-pilot accepts 'None' only inside "
+                "an AMT redirection session, where the digest handshake has already "
+                "authenticated the connection — not on a raw listener, where it would mean "
+                "the KVM endpoint is wide open. Check what is actually listening on this port."
+            )
         else:
             raise AuthError(
                 f"AMT RFB: server offers no security type we speak (offered {sorted(sectypes)}; "

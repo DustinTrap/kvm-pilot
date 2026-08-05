@@ -1371,15 +1371,67 @@ def test_unsupported_feature_blames_the_5900_path_not_the_operator(amt_emu):
         "<s:Reason><s:Text>The specified feature is not supported.</s:Text></s:Reason>"
         "</s:Fault></s:Body></s:Envelope>"
     )
+    d = make(amt_emu, kvm_password="Chang3M!")
+    # The refusal is compatible with BOTH causes, so the hint measures instead of
+    # picking one. Here the redirection path answers.
+    d._kvm_redirection_serves = lambda: True
     with pytest.raises(CapabilityError) as ei:
-        make(amt_emu, kvm_password="Chang3M!").enable_kvm()
+        d.enable_kvm()
     msg = str(ei.value)
     assert "UnsupportedFeature" in msg          # #216's surfacing still shows the subcode
     assert "16994" in msg                       # names the path that DOES work
-    assert "MEBx is NOT the problem" in msg
+    assert "KVM IS SERVING" in msg
+    assert "Do not touch MEBx" in msg
     assert "G3" not in msg                      # no wrong cause may lead
-    # It must point at the cheap check that settles it, not at the hardware.
-    assert "snapshot" in msg
+
+
+def test_unsupported_feature_points_at_mebx_when_redirection_is_dead_too(amt_emu):
+    """The mirror case, and the reason the hint must MEASURE rather than assert.
+
+    The same `e:UnsupportedFeature` is returned by a device where KVM really is
+    switched off in MEBx. Having been wrong three times in the alarming
+    direction, the fix is not to become reassuring by default — that just moves
+    the error. One connection settles it.
+    """
+    amt_emu.state.http_status = 400
+    amt_emu.state.error_body = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" '
+        'xmlns:e="http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd"><s:Body>'
+        "<s:Fault><s:Code><s:Value>s:Sender</s:Value>"
+        "<s:Subcode><s:Value>e:UnsupportedFeature</s:Value></s:Subcode></s:Code>"
+        "<s:Reason><s:Text>The specified feature is not supported.</s:Text></s:Reason>"
+        "</s:Fault></s:Body></s:Envelope>"
+    )
+    d = make(amt_emu, kvm_password="Chang3M!")
+    d._kvm_redirection_serves = lambda: False
+    with pytest.raises(CapabilityError) as ei:
+        d.enable_kvm()
+    msg = str(ei.value)
+    assert "did NOT answer over 16994" in msg
+    assert "MEBx" in msg                        # here it IS the likely cause
+
+
+def test_untestable_redirection_says_so_rather_than_guessing(amt_emu):
+    """When the probe itself cannot run, say the question is open and name the
+    one command that answers it. An unresolved state reported as resolved is how
+    this issue lasted a day."""
+    amt_emu.state.http_status = 400
+    amt_emu.state.error_body = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" '
+        'xmlns:e="http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd"><s:Body>'
+        "<s:Fault><s:Code><s:Value>s:Sender</s:Value>"
+        "<s:Subcode><s:Value>e:UnsupportedFeature</s:Value></s:Subcode></s:Code>"
+        "<s:Reason><s:Text>The specified feature is not supported.</s:Text></s:Reason>"
+        "</s:Fault></s:Body></s:Envelope>"
+    )
+    d = make(amt_emu, kvm_password="Chang3M!")
+    d._kvm_redirection_serves = lambda: None
+    with pytest.raises(CapabilityError) as ei:
+        d.enable_kvm()
+    msg = str(ei.value)
+    assert "could not be tested" in msg and "kvm-pilot snapshot" in msg
 
 
 # -- #245: KVM over the redirection port (16994) ---------------------------
@@ -1509,12 +1561,59 @@ def test_redirection_offers_security_none_and_we_take_it(amt_rfb):
     so the ME offers None(1) — measured as [1, 128] on a 5411 @ 14.1.79. Taking
     it is not skipping authentication; the RFB password governs only the 5900
     listener, and there is nothing to re-check. The emulator asserts we pick 1.
+
+    This MUST run through a transport that vouches for having authenticated —
+    testing it on a bare socket would assert the exact behaviour we refuse.
+    """
+    import socket as _socket
+
+    from kvm_pilot.drivers.amt.rfb import Rfb
+
+    class VouchedStream:
+        """A real socket to the emulator, flagged the way RedirKvmStream is."""
+        redirection_authenticated = True
+
+        def __init__(self, port):
+            self._s = _socket.create_connection(("127.0.0.1", port), timeout=5)
+
+        def recv(self, n):
+            return self._s.recv(n)
+
+        def sendall(self, b):
+            self._s.sendall(b)
+
+        def close(self):
+            self._s.close()
+
+    amt_rfb.security_none = True
+    with Rfb("127.0.0.1", amt_rfb.port, "Chang3M!", timeout=5,
+             stream_factory=lambda: VouchedStream(amt_rfb.port)) as r:
+        assert (r.width, r.height) == (amt_rfb.width, amt_rfb.height)
+
+
+def test_security_none_is_refused_on_an_unvouched_transport(amt_rfb):
+    """None means opposite things on the two transports: "already authenticated"
+    inside a redirection session, and "no authentication at all" on a raw
+    listener. Accepting it anywhere would silently downgrade a connection past a
+    password the operator configured — so acceptance is keyed on the transport
+    vouching for its own digest handshake, never on the port number.
     """
     from kvm_pilot.drivers.amt.rfb import Rfb
 
     amt_rfb.security_none = True
+    with pytest.raises(AuthError) as ei:
+        Rfb("127.0.0.1", amt_rfb.port, "Chang3M!", timeout=5).connect()
+    assert "unauthenticated" in str(ei.value)
+
+
+def test_vnc_auth_wins_when_a_server_offers_both(amt_rfb):
+    """A server offering None AND VNC-auth must not talk us out of the password."""
+    from kvm_pilot.drivers.amt.rfb import Rfb
+
+    amt_rfb.offer_both = True
     with Rfb("127.0.0.1", amt_rfb.port, "Chang3M!", timeout=5) as r:
         assert (r.width, r.height) == (amt_rfb.width, amt_rfb.height)
+    assert amt_rfb.chosen_sectype == 2
 
 
 def test_standard_port_still_uses_vnc_auth(amt_rfb):
@@ -1538,10 +1637,34 @@ def test_redirection_check_is_ok_when_only_5900_is_off(amt_emu):
     from kvm_pilot.health import Severity, check_amt_redirection
 
     d = make(amt_emu)
-    d.amt_health = lambda: {"sol_listener": True, "kvm_5900": False}
+    d.amt_health = lambda: {"sol_listener": True, "kvm_5900": False, "kvm_sap_enabled": True}
     res = check_amt_redirection(d)
     assert res is not None and res.severity is Severity.OK
     assert "5900" in res.detail and "redirection session" in res.detail
+
+
+def test_sol_listener_alone_is_not_evidence_that_kvm_works(amt_emu):
+    """SOL and KVM are separate services that merely share port 16994. Reading
+    one as evidence for the other would trade the old false alarm for a false
+    all-clear, which is the worse of the two — an operator can act on a warning.
+    """
+    from kvm_pilot.health import Severity, check_amt_redirection
+
+    d = make(amt_emu)
+    d.amt_health = lambda: {"sol_listener": True, "kvm_5900": False, "kvm_sap_enabled": False}
+    res = check_amt_redirection(d)
+    assert res is not None and res.severity is Severity.WARNING
+    assert "service disabled" in res.detail
+
+
+def test_unreadable_kvm_service_state_is_not_a_pass(amt_emu):
+    """A field we could not read is not a field that said yes."""
+    from kvm_pilot.health import Severity, check_amt_redirection
+
+    d = make(amt_emu)
+    d.amt_health = lambda: {"sol_listener": True, "kvm_5900": False, "kvm_sap_enabled": None}
+    res = check_amt_redirection(d)
+    assert res is not None and res.severity is Severity.WARNING
 
 
 def test_redirection_check_warns_when_both_transports_are_off(amt_emu):

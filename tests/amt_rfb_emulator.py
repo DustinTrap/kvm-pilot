@@ -65,6 +65,8 @@ class AmtRfbEmulator:
         # there is no RFB password to check. Measured on a 5411 @ 14.1.79, which
         # offered [1, 128] (#245).
         self.security_none = False
+        self.offer_both = False         # offer None(1) AND VNC-auth(2) together
+        self.chosen_sectype: int | None = None
         self.bad_bpp = False            # ServerInit reports a non-16-bpp framebuffer
         # transport drops
         self.drop_first = 0             # close this many connections immediately after accept
@@ -153,12 +155,19 @@ class AmtRfbEmulator:
             conn.sendall(bytes([2, 16, 128]))
             self._recv(conn, 1)
             return
-        if self.security_none:
+        if self.offer_both:
+            conn.sendall(bytes([2, 1, 2]))    # None AND VNC-auth: the client must pick 2
+            self.chosen_sectype = self._recv(conn, 1)[0]
+            if self.chosen_sectype == 2:
+                conn.sendall(b"\x00" * 16)
+                self._recv(conn, 16)
+        elif self.security_none:
             conn.sendall(bytes([2, 1, 128]))  # exactly what the live ME offered
-            assert self._recv(conn, 1) == bytes([1]), "client must pick None over redirection"
+            self.chosen_sectype = self._recv(conn, 1)[0]
+            assert self.chosen_sectype == 1, "client must pick None over redirection"
         else:
             conn.sendall(bytes([1, 2]))       # 1 security type: VNC-auth (2)
-            self._recv(conn, 1)               # client's chosen type
+            self.chosen_sectype = self._recv(conn, 1)[0]
             conn.sendall(b"\x00" * 16)        # 16-byte challenge
             self._recv(conn, 16)              # DES response (correctness proven elsewhere)
         if self.reject_auth:
