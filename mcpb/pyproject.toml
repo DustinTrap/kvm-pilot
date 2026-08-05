@@ -10,7 +10,7 @@
 # it drifts from src/kvm_pilot/__about__.py.
 [project]
 name = "kvm-pilot-mcpb"
-version = "0.1.0rc1"
+version = "0.1.0rc2"
 description = "Runtime dependencies for the kvm-pilot MCP Bundle"
 requires-python = ">=3.11"
-dependencies = ["kvm-pilot==0.1.0rc1"]
+dependencies = ["kvm-pilot==0.1.0rc2"]

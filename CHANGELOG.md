@@ -6,6 +6,8 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.0rc2] — 2026-08-04
+
 ### Fixed
 - **AMT KVM works again on ME builds that closed port 5900** (#245). Newer ME
   firmware permanently refuses `Is5900PortEnabled` and serves KVM only inside a
@@ -1716,7 +1718,8 @@ user feedback. **Not validated on real hardware** — see Notes.
   feedback are the explicit goals of this alpha. Reports welcome in the issue
   tracker.
 
-[Unreleased]: https://github.com/DustinTrap/kvm-pilot/compare/v0.1.0rc1...HEAD
+[Unreleased]: https://github.com/DustinTrap/kvm-pilot/compare/v0.1.0rc2...HEAD
+[0.1.0rc2]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0rc2
 [0.1.0rc1]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0rc1
 [0.1.0b12]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0b12
 [0.1.0b11]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0b11

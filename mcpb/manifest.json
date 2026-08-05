@@ -2,7 +2,7 @@
   "manifest_version": "0.3",
   "name": "kvm-pilot",
   "display_name": "kvm-pilot",
-  "version": "0.1.0rc1",
+  "version": "0.1.0rc2",
   "description": "Smart hands for your AI agents: gated, verified, audited control of IP-KVMs and BMCs.",
   "long_description": "Drive bare-metal machines from Claude Desktop — read the screen, press keys, mount install media, and control power across IP-KVMs (PiKVM, GL.iNet Comet, BliKVM) and BMCs (Redfish, IPMI, Intel AMT).\n\n**Every destructive capability ships OFF.** Reading the screen, health checks and inventory work immediately; anything that can change a machine's state stays disabled until you deliberately enable it below, and each such call still asks for your approval at the moment it happens. Dry-run is on by default, so even an enabled capability rehearses rather than acts until you turn it off.",
   "author": {
