@@ -163,9 +163,15 @@ Check = Callable[[Any], "CheckResult | None"]
 _KNOWN_DEFAULT_CREDS = {("admin", "admin"), ("admin", "password"), ("root", "root")}
 
 
+# Every kind `_driver_kind` can return. Kept as a constant so anything keyed on
+# driver kind (e.g. _PRIMARY_PATH) can be checked for completeness against the
+# real set rather than against the mutable driver registry, which tests extend.
+_DRIVER_KINDS = ("glkvm", "blikvm", "redfish", "ipmi", "amt", "ssh", "fake", "pikvm")
+
+
 def _driver_kind(driver: Any) -> str:
     name = type(driver).__name__.lower()
-    for kind in ("glkvm", "blikvm", "redfish", "ipmi", "amt", "ssh", "fake"):
+    for kind in _DRIVER_KINDS[:-1]:     # "pikvm" is the fallback, not a match
         if kind in name:
             return kind
     return "pikvm"
@@ -446,6 +452,28 @@ def check_recovery_path(driver: Any) -> CheckResult | None:
     )
 
 
+# The primary management plane, per driver family. This report exists to tell an
+# operator WHICH THING to reason about when they are locked out, so naming a
+# component the device does not run is worse than saying nothing: an AMT box has
+# no kvmd, and "the kvmd REST API" sends someone looking for a daemon (#249).
+# Keyed by `_driver_kind`; the PiKVM family is the fallback because that kind is
+# itself the fallback there.
+_PRIMARY_PATH: dict[str, tuple[str, str]] = {
+    "pikvm": ("kvmd-rest", "The kvmd REST API — degrades exactly when the box gets sick."),
+    "glkvm": ("kvmd-rest", "The kvmd REST API — degrades exactly when the box gets sick."),
+    "blikvm": ("kvmd-rest", "The kvmd REST API — degrades exactly when the box gets sick."),
+    "redfish": ("redfish-api", "The Redfish REST API on the BMC — independent of the host OS, "
+                               "but dies with the BMC or its network."),
+    "ipmi": ("ipmi-rmcp", "IPMI over RMCP (UDP 623) via ipmitool — independent of the host OS, "
+                          "but dies with the BMC or its network."),
+    "amt": ("amt-wsman", "AMT WS-Man on the Management Engine (16992/16993) — runs beneath the "
+                         "host OS, so it survives a hung guest; dies with the ME or its network."),
+    "ssh": ("os-plane-ssh", "SSH to the managed OS itself. There is no device beneath it, so this "
+                            "plane dies with the OS — see the out-of-band row."),
+    "fake": ("in-process", "The in-process fake driver — no network, no hardware."),
+}
+
+
 def access_paths(driver: Any) -> dict:
     """The lockout-exposure view: which INDEPENDENT recovery paths are live for a
     device (rock-solid access, #162). Each path is labeled by its failure
@@ -463,10 +491,11 @@ def access_paths(driver: Any) -> dict:
             rest_live = True
         except KVMPilotError:
             rest_live = False
+    name, detail = _PRIMARY_PATH.get(_driver_kind(driver), _PRIMARY_PATH["pikvm"])
     paths.append({
-        "path": "kvmd-rest", "domain": "appliance", "kind": "primary",
+        "path": name, "domain": "appliance", "kind": "primary",
         "configured": get_info is not None, "live": rest_live,
-        "detail": "The kvmd REST API — degrades exactly when the box gets sick.",
+        "detail": detail,
     })
 
     chan = getattr(driver, "appliance_channel", None)

@@ -845,7 +845,19 @@ def cmd_firmware_check(args) -> int:
         print(json.dumps(out, indent=2, default=str))
         return 0
 
-    print(f"{vendor} {product}: installed {fw.get('version')} (kvmd {fw.get('kvmd_version')})")
+    # Only PiKVM-family devices run kvmd; on a BMC this printed "(kvmd None)",
+    # naming a daemon that does not exist there (#249).
+    kvmd = fw.get("kvmd_version")
+    # Show the ledger/registry key alongside the raw string when they differ.
+    # Both matter and they are not interchangeable: the registry joins on the
+    # normalized key, and #243 was a day lost to "Dell Inc." silently failing to
+    # join "dell". Printing the raw form next to a version invites that again.
+    from .test_report import _normalize_vendor
+
+    key = _normalize_vendor(vendor)
+    shown = vendor if key == vendor.lower() else f"{vendor} [{key}]"
+    print(f"{shown} {product}: installed {fw.get('version')}"
+          + (f" (kvmd {kvmd})" if kvmd else ""))
     if upd:
         verdict = "UPDATE AVAILABLE" if upd["update_available"] else "up to date"
         print(f"  vendor's latest: {upd['latest']} — {verdict}"

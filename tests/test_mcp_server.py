@@ -982,7 +982,7 @@ def test_access_paths_reports_the_lockout_view(config_file):
     assert is_error(result) is False
     parsed = result_json(result)
     assert "paths" in parsed and "summary" in parsed
-    assert any(p["path"] == "kvmd-rest" for p in parsed["paths"])
+    assert any(p["kind"] == "primary" for p in parsed["paths"])
     assert "out_of_band_live" in parsed["summary"]
 
 

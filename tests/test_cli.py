@@ -1426,7 +1426,8 @@ def test_paths_names_each_recovery_path_and_its_state(capsys):
     assert rc == 0
     out = capsys.readouterr().out
     assert "Access paths for" in out
-    assert "kvmd-rest" in out
+    # The primary plane is named for the driver, not hard-coded to kvmd (#249).
+    assert "in-process" in out
     # Each row carries a state and a failure-domain kind, not just a name.
     assert "(primary)" in out
     assert "not configured" in out  # appliance-ssh is off on the fake driver

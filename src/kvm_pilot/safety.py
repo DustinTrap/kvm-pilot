@@ -24,6 +24,7 @@ it is auditable rather than guessed.
 from __future__ import annotations
 
 import logging
+import sys
 from collections.abc import Callable
 from enum import StrEnum
 
@@ -273,7 +274,22 @@ def deny_all(_op: str, _desc: str) -> bool:
 
 
 def interactive_confirm(op: str, desc: str) -> bool:
-    """Prompt the operator on stdin. Returns True only on an explicit 'y'."""
+    """Prompt the operator on stdin. Returns True only on an explicit 'y'.
+
+    With no terminal attached there is nobody to answer, so decline immediately
+    and SAY WHY. Previously this called ``input()`` regardless: under a pipe or
+    a consumed heredoc — a CI step, a script, an agent shelling out — stdin
+    stays open and never delivers a line, so the command hung indefinitely with
+    its prompt buried in captured output. That is indistinguishable from a wedged
+    device, and during a live sweep it cost me a near-miss bug report against
+    working hardware (#249). EOF alone did not cover it: an open-but-silent stdin
+    never raises.
+    """
+    if not sys.stdin.isatty():
+        print(f"[kvm-pilot] {desc}\n  Refusing: this is a destructive operation and there is no "
+              "terminal to confirm on. Re-run with --yes (or set a confirm callback in the "
+              "library) to authorize it non-interactively.", file=sys.stderr)
+        return False
     try:
         answer = input(f"[kvm-pilot] {desc}\n  Proceed? [y/N] ").strip().lower()
     except EOFError:

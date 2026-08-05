@@ -6,6 +6,31 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **Reports no longer name components the device doesn't have** (#249). Found
+  during a live fleet sweep. `paths` labelled *every* driver's primary plane
+  `kvmd-rest` — on an Intel AMT machine, which runs no kvmd; its primary plane is
+  WS-Man. Redfish and IPMI targets got the same wrong label, and the description
+  told operators to reason about a daemon that wasn't running. The label now
+  follows the driver (`amt-wsman`, `redfish-api`, `ipmi-rmcp`, `os-plane-ssh`,
+  `in-process`), and the PiKVM family still says `kvmd-rest` because those
+  devices really do run it. `firmware-check` likewise stops printing
+  `(kvmd None)` on a BMC.
+- **`firmware-check` shows the registry key when it differs from the raw vendor**
+  — `Dell Inc. [dell]`. The registry joins on the normalized key, and #243 was a
+  day lost to exactly that mismatch failing silently.
+
+### Changed
+- **A gated command with no terminal now fails in 0.1s instead of hanging**
+  (#249). `interactive_confirm` called `input()` regardless of whether anything
+  could answer; under a pipe or a consumed heredoc — CI, a script, an agent
+  shelling out — stdin stays open and never delivers a line, so the command hung
+  indefinitely with its prompt buried in captured output. That is
+  indistinguishable from a wedged device; during the sweep it nearly produced a
+  bug report against working hardware. It now declines immediately and names the
+  fix (`--yes`). EOF handling did not cover this: an open-but-silent stdin never
+  raises.
+
 ## [0.1.0rc2] — 2026-08-04
 
 ### Fixed

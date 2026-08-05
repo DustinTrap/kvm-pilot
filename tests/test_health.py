@@ -523,8 +523,11 @@ def test_access_paths_labels_domains_and_flags_no_oob():
 
     result = access_paths(FakeDriver())
     by_path = {p["path"]: p for p in result["paths"]}
-    assert set(by_path) == {"kvmd-rest", "appliance-ssh", "target-ssh", "oob-power", "console-hid"}
-    assert by_path["kvmd-rest"]["live"] is True
+    # "in-process" is the FAKE driver's primary plane; a PiKVM says kvmd-rest,
+    # an AMT box amt-wsman. The label follows the driver (#249).
+    assert set(by_path) == {"in-process", "appliance-ssh", "target-ssh", "oob-power",
+                            "console-hid"}
+    assert by_path["in-process"]["live"] is True
     assert by_path["appliance-ssh"]["configured"] is False  # not set up -> not counted
     assert by_path["console-hid"]["live"] is True
     # independent_domains dedups by failure domain, not path count.
@@ -914,7 +917,7 @@ def test_access_paths_marks_rest_down_when_the_probe_raises():
             raise KVMPilotError("connection refused")
 
     result = access_paths(Unreachable())
-    rest = next(p for p in result["paths"] if p["path"] == "kvmd-rest")
+    rest = next(p for p in result["paths"] if p["kind"] == "primary")
     assert rest["configured"] is True
     assert rest["live"] is False
     assert result["summary"]["live_count"] == 0
