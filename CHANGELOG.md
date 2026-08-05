@@ -6,6 +6,8 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.0rc3] — 2026-08-05
+
 ### Fixed
 - **Reports no longer name components the device doesn't have** (#249). Found
   during a live fleet sweep. `paths` labelled *every* driver's primary plane
@@ -1743,7 +1745,8 @@ user feedback. **Not validated on real hardware** — see Notes.
   feedback are the explicit goals of this alpha. Reports welcome in the issue
   tracker.
 
-[Unreleased]: https://github.com/DustinTrap/kvm-pilot/compare/v0.1.0rc2...HEAD
+[Unreleased]: https://github.com/DustinTrap/kvm-pilot/compare/v0.1.0rc3...HEAD
+[0.1.0rc3]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0rc3
 [0.1.0rc2]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0rc2
 [0.1.0rc1]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0rc1
 [0.1.0b12]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0b12
