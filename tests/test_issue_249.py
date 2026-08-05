@@ -36,7 +36,7 @@ def test_amt_primary_path_is_wsman_not_kvmd():
 @pytest.mark.parametrize(
     "kind,expected",
     [("redfish", "redfish-api"), ("ipmi", "ipmi-rmcp"), ("amt", "amt-wsman"),
-     ("ssh", "os-plane-ssh"), ("fake", "in-process")],
+     ("fake", "in-process")],
 )
 def test_no_non_kvmd_driver_claims_kvmd(kind, expected):
     from kvm_pilot.drivers import make_driver
@@ -64,9 +64,10 @@ def test_every_driver_kind_has_a_primary_path():
     global mutable state that other tests extend via `register_driver`, so
     asserting on it made this test pass alone and fail in a full run.
     """
-    from kvm_pilot.health import _DRIVER_KINDS
+    from kvm_pilot.health import _DRIVER_KINDS, _NO_SEPARATE_PRIMARY
 
-    assert set(_PRIMARY_PATH) == set(_DRIVER_KINDS)
+    assert set(_PRIMARY_PATH) | _NO_SEPARATE_PRIMARY == set(_DRIVER_KINDS)
+    assert not (set(_PRIMARY_PATH) & _NO_SEPARATE_PRIMARY), "a kind is both, pick one"
 
 
 # -- 2 & 3. firmware-check's kvmd parenthetical and vendor key -------------
@@ -154,3 +155,41 @@ def test_a_real_terminal_still_prompts(monkeypatch):
     monkeypatch.setattr(sys, "stdin", _Tty(""))
     monkeypatch.setattr("builtins.input", lambda *_a: "y")
     assert interactive_confirm("hid.press_key", "Press 'shift'") is True
+
+
+def test_the_os_plane_has_no_phantom_primary_row():
+    """On an SSH-only target the primary plane IS target-ssh. A separate row for
+    it printed a permanently "not configured" path named after a plane that can
+    never be configured, inviting the operator to go set up something that does
+    not exist — the same defect as kvmd-rest on an AMT box, one layer down.
+    """
+    from kvm_pilot.config import HostConfig
+    from kvm_pilot.drivers import make_driver_from_config
+
+    d = make_driver_from_config(HostConfig(host="10.0.0.9", driver="ssh", ssh_host="10.0.0.9"))
+    d.ssh_channel.ssh_reachable = lambda: True     # no sockets in tests
+    paths = access_paths(d)["paths"]
+    primaries = [p for p in paths if p["kind"] == "primary"]
+    assert len(primaries) == 1, [p["path"] for p in primaries]
+    assert primaries[0]["path"] == "target-ssh"
+    # ...and it is on the target's own network, never labelled as an appliance.
+    assert primaries[0]["domain"] == "target-network"
+    assert not any(p["path"] == "os-plane-ssh" for p in paths)
+
+
+def test_a_device_driver_still_separates_primary_from_target_ssh():
+    """The OS-plane collapse must not leak into drivers that have both planes."""
+    from kvm_pilot.drivers import make_driver
+
+    paths = access_paths(make_driver("amt", host="h"))["paths"]
+    assert [p["path"] for p in paths if p["kind"] == "primary"] == ["amt-wsman"]
+    tssh = next(p for p in paths if p["path"] == "target-ssh")
+    assert tssh["kind"] == "in-band"
+
+
+def test_absent_stdin_is_not_a_terminal(monkeypatch, capsys):
+    """sys.stdin is None under pythonw / a closed handle. That is even less of a
+    terminal, and a safety guard must not raise AttributeError deciding so."""
+    monkeypatch.setattr(sys, "stdin", None)
+    assert interactive_confirm("hid.press_key", "Press 'shift'") is False
+    assert "--yes" in capsys.readouterr().err

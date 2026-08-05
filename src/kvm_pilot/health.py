@@ -468,10 +468,14 @@ _PRIMARY_PATH: dict[str, tuple[str, str]] = {
                           "but dies with the BMC or its network."),
     "amt": ("amt-wsman", "AMT WS-Man on the Management Engine (16992/16993) — runs beneath the "
                          "host OS, so it survives a hung guest; dies with the ME or its network."),
-    "ssh": ("os-plane-ssh", "SSH to the managed OS itself. There is no device beneath it, so this "
-                            "plane dies with the OS — see the out-of-band row."),
     "fake": ("in-process", "The in-process fake driver — no network, no hardware."),
 }
+
+# Driver kinds whose primary plane is one of the rows BELOW, so they get no
+# separate entry: the OS plane's primary access IS `target-ssh`. Emitting a
+# second row for it printed a permanently "not configured" path and invited
+# operators to go configure something that does not exist (#249).
+_NO_SEPARATE_PRIMARY = frozenset({"ssh"})
 
 
 def access_paths(driver: Any) -> dict:
@@ -491,12 +495,14 @@ def access_paths(driver: Any) -> dict:
             rest_live = True
         except KVMPilotError:
             rest_live = False
-    name, detail = _PRIMARY_PATH.get(_driver_kind(driver), _PRIMARY_PATH["pikvm"])
-    paths.append({
-        "path": name, "domain": "appliance", "kind": "primary",
-        "configured": get_info is not None, "live": rest_live,
-        "detail": detail,
-    })
+    kind = _driver_kind(driver)
+    if kind not in _NO_SEPARATE_PRIMARY:
+        name, detail = _PRIMARY_PATH.get(kind, _PRIMARY_PATH["pikvm"])
+        paths.append({
+            "path": name, "domain": "appliance", "kind": "primary",
+            "configured": get_info is not None, "live": rest_live,
+            "detail": detail,
+        })
 
     chan = getattr(driver, "appliance_channel", None)
     paths.append({
@@ -510,7 +516,10 @@ def access_paths(driver: Any) -> dict:
 
     tchan = getattr(driver, "ssh_channel", None)
     paths.append({
-        "path": "target-ssh", "domain": "target-network", "kind": "in-band",
+        "path": "target-ssh", "domain": "target-network",
+        # On the OS plane this IS the primary management path, not a fallback
+        # beside a device plane — there is no device plane (#248, #249).
+        "kind": "primary" if kind in _NO_SEPARATE_PRIMARY else "in-band",
         "configured": tchan is not None,
         "live": tchan.ssh_reachable() if tchan is not None else None,
         "detail": ("SSH to the managed OS itself; recover from inside when KVM "

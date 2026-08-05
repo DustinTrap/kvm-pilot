@@ -285,7 +285,11 @@ def interactive_confirm(op: str, desc: str) -> bool:
     working hardware (#249). EOF alone did not cover it: an open-but-silent stdin
     never raises.
     """
-    if not sys.stdin.isatty():
+    # stdin can be None outside a console (pythonw, some service managers, a
+    # closed handle) — that is even less of a terminal, so treat it the same
+    # rather than raising AttributeError from inside a safety guard.
+    stdin = sys.stdin
+    if stdin is None or not stdin.isatty():
         print(f"[kvm-pilot] {desc}\n  Refusing: this is a destructive operation and there is no "
               "terminal to confirm on. Re-run with --yes (or set a confirm callback in the "
               "library) to authorize it non-interactively.", file=sys.stderr)
