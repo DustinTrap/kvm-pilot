@@ -1676,3 +1676,40 @@ def test_redirection_check_warns_when_both_transports_are_off(amt_emu):
     res = check_amt_redirection(d)
     assert res is not None and res.severity is Severity.WARNING
     assert "16994" in res.detail and "5900" in res.detail
+
+
+def test_a_broken_probe_never_replaces_the_real_error(amt_emu):
+    """`_kvm_redirection_serves` runs INSIDE the handler that is building the
+    CapabilityError. If the probe raised, its exception would surface instead of
+    the diagnosis it exists to explain — the operator would lose the ME's actual
+    fault and get an unrelated stack. Anything unexpected means "could not test".
+    """
+    amt_emu.state.http_status = 400
+    amt_emu.state.error_body = (
+        '<?xml version="1.0" encoding="UTF-8"?>'
+        '<s:Envelope xmlns:s="http://www.w3.org/2003/05/soap-envelope" '
+        'xmlns:e="http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd"><s:Body>'
+        "<s:Fault><s:Code><s:Value>s:Sender</s:Value>"
+        "<s:Subcode><s:Value>e:UnsupportedFeature</s:Value></s:Subcode></s:Code>"
+        "<s:Reason><s:Text>The specified feature is not supported.</s:Text></s:Reason>"
+        "</s:Fault></s:Body></s:Envelope>"
+    )
+    d = make(amt_emu, kvm_password="Chang3M!")
+
+    def _boom():
+        raise RuntimeError("probe exploded")
+
+    monkey = d._kvm_redirection_serves
+    assert monkey is not None
+    from kvm_pilot.drivers.amt.rfb import RedirKvmStream
+    orig = RedirKvmStream.connect
+    try:
+        RedirKvmStream.connect = lambda self: _boom()  # type: ignore[method-assign]
+        with pytest.raises(CapabilityError) as ei:
+            d.enable_kvm()
+    finally:
+        RedirKvmStream.connect = orig  # type: ignore[method-assign]
+    msg = str(ei.value)
+    assert "UnsupportedFeature" in msg           # the REAL fault survived
+    assert "could not be tested" in msg          # and the probe reported honestly
+    assert "probe exploded" not in msg

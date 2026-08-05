@@ -590,8 +590,13 @@ class AmtDriver(PowerMixin, CapabilityMixin):
             RedirKvmStream(self.host, self._user, self._passwd,
                            port=self._sol_port, timeout=min(self._timeout, 10.0)).connect().close()
         except (ConnectionError, ProtocolError, AuthError):
-            return False
-        except KVMPilotError:
+            return False        # asked and answered: the path does not serve
+        except Exception:       # noqa: BLE001 - see below
+            # ANY other failure means the probe did not run, not that KVM is
+            # down. This runs inside the handler that is building a
+            # CapabilityError, so an exception escaping here would REPLACE the
+            # real diagnosis with an unrelated one — a probe must never destroy
+            # the error it exists to explain.
             return None
         return True
 
