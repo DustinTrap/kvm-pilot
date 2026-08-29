@@ -436,7 +436,7 @@ def test_serve_media_blocks_until_detached(holding_ider, tmp_path):
                     confirm=lambda *_: True, timeout=10)
     drv.mount_iso(_iso(tmp_path))
     assert drv.media_streams_from_client is True
-    t = threading.Thread(target=drv.serve_media, kwargs={"poll": 0.05}, daemon=True)
+    t = threading.Thread(target=drv.serve_media, daemon=True)
     t.start()
     t.join(0.3)
     assert t.is_alive(), "serve_media must block while the disc is attached"

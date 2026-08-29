@@ -8,6 +8,8 @@ autouse network guard in conftest).
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from kvm_pilot.drivers.amt import AmtDriver
@@ -1821,3 +1823,30 @@ def test_blank_display_quirk_does_not_imply_a_closed_lid(amt_emu):
     q = {q.id: q for q in make(amt_emu).known_quirks()}["kvm-blank-when-display-asleep"]
     assert "lid" in q.summary.lower() and "open" in q.summary.lower()
     assert "NOT that the lid is closed" in q.workaround
+
+
+def test_soft_power_ops_skip_the_liveness_probe(amt_emu, monkeypatch):
+    """Only the hard ops have wedged an ME (#251); a graceful on/off must not
+    pay for the probe — and must not fail when it would have."""
+    drv = make(amt_emu)
+    calls: list[float] = []
+    monkeypatch.setattr(drv, "_me_alive", lambda timeout=2.0: calls.append(timeout) or False)
+    drv.power_on()
+    drv.power_off()
+    assert calls == []
+
+
+def test_liveness_probe_stays_inside_its_budget(amt_emu, monkeypatch):
+    from kvm_pilot.drivers.amt import driver as amt_driver
+
+    drv = make(amt_emu)
+    seen: list[float] = []
+    monkeypatch.setattr(amt_driver, "_ME_LIVENESS_S", 1.0)
+    monkeypatch.setattr(drv, "_me_alive", lambda timeout=2.0: seen.append(timeout) or False)
+    started = time.monotonic()
+    with pytest.raises(WsmanError):
+        drv.reset_hard()
+    elapsed = time.monotonic() - started
+    assert seen, "the ME must be probed at least once"
+    assert all(t <= 2.0 for t in seen)     # never longer than one attempt's cap
+    assert elapsed < 3.0                   # and the whole wait honors the budget

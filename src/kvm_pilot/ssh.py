@@ -43,8 +43,12 @@ _REACHABLE_TIMEOUT = 5.0  # a liveness probe should be quick, regardless of cfg.
 MAX_SWEEP_HOSTS = 1024  # refuse an over-broad scan (~/22); ask for a smaller range
 
 
-def _port_open(host: str, port: int, timeout: float) -> bool:
-    """True if a TCP connection to ``host:port`` succeeds. Never raises."""
+def port_open(host: str, port: int, timeout: float) -> bool:
+    """True if a TCP connection to ``host:port`` succeeds. Never raises.
+
+    Shared bounded-connect liveness probe: SSH reachability, the discovery
+    sweep, and the AMT driver's post-reset ME check all need exactly this.
+    """
     try:
         with socket.create_connection((host, port), timeout=timeout):
             return True
@@ -75,7 +79,7 @@ def discover_ssh_hosts(
             f"{cidr} covers {len(hosts)} addresses (> {max_hosts}); narrow the range."
         )
     with ThreadPoolExecutor(max_workers=min(64, len(hosts))) as pool:
-        checked = pool.map(lambda ip: (str(ip), _port_open(str(ip), port, timeout)), hosts)
+        checked = pool.map(lambda ip: (str(ip), port_open(str(ip), port, timeout)), hosts)
     return [{"host": h, "port": port} for h, is_open in checked if is_open]
 
 
@@ -165,7 +169,7 @@ class SSHChannel:
 
     def ssh_reachable(self) -> bool:
         """True if the target's SSH port accepts a TCP connection. Never raises."""
-        return _port_open(self.host, self.port, min(self.timeout, _REACHABLE_TIMEOUT))
+        return port_open(self.host, self.port, min(self.timeout, _REACHABLE_TIMEOUT))
 
     def ssh_exec(self, command: str, *, timeout: float | None = None) -> dict:
         """Run ``command`` on the target over SSH. Gated as ``ssh.exec``.

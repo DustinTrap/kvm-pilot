@@ -68,6 +68,7 @@ from kvm_pilot.calibrate import (
 )
 from kvm_pilot.config import HostConfig
 from kvm_pilot.drivers import Capability, KVMDriver, make_driver_from_config
+from kvm_pilot.drivers.base import nothing_to_eject
 from kvm_pilot.errors import (
     CapabilityError,
     KVMPilotError,
@@ -1561,18 +1562,15 @@ async def mount_iso(
     planned against the pre-mount screen is invalidated.
     """
     def _run(_cfg: HostConfig, kvm: KVMDriver) -> dict:
-        image = cast("VirtualMedia", kvm).mount_iso(source, image_name=name, cdrom=not usb)
+        vm = cast("VirtualMedia", kvm)
+        image = vm.mount_iso(source, image_name=name, cdrom=not usb)
         out: dict = {"image": image}
-        if getattr(kvm, "media_streams_from_client", False):
-            # AMT IDE-R streams the disc from THIS server process (#252): it stays
-            # attached across tool calls and the host's reset until `eject` — or
-            # until the server exits. Say so, or the next reset looks like a
-            # failed boot override (#251).
-            out["note"] = (
-                "the image is streamed from the MCP server process and stays attached "
-                "until `eject` or the server exits; set_boot_device('cd') then boots it "
-                "(use_ider=true) and the reset must NOT be preceded by an eject"
-            )
+        state = getattr(kvm, "get_msd_state", None)
+        if getattr(kvm, "media_streams_from_client", False) and state is not None:
+            # The disc is streamed from THIS process and outlives the tool call
+            # (#252). The mechanics are the driver's to describe — an agent that
+            # ejects before the reset undoes the mount (#251).
+            out["note"] = state().get("note")
         return out
 
     return await _act(
@@ -1591,18 +1589,10 @@ async def eject(ctx: Context, confirm: bool = False, profile: str | None = None)
     Needs ``KVM_PILOT_MCP_ALLOW_MEDIA`` + per-invocation approval.
     """
     def _run(_cfg: HostConfig, kvm: KVMDriver) -> dict:
-        vm = cast("VirtualMedia", kvm)
-        msd_state = getattr(kvm, "get_msd_state", None)
-        if (
-            getattr(kvm, "media_streams_from_client", False)
-            and msd_state is not None
-            and not msd_state().get("connected")
-        ):
-            # Client-streamed media lives in the process that mounted it; nothing
-            # to detach here must not read as "ejected" (#252).
+        if nothing_to_eject(kvm):
             return {"detached": False,
                     "note": "no media session in this server process — nothing was attached"}
-        vm.msd_disconnect()
+        cast("VirtualMedia", kvm).msd_disconnect()
         return {"detached": True}
 
     return await _act(

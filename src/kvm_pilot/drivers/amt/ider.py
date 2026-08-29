@@ -187,6 +187,10 @@ class IderSession:
             finally:
                 self._iso = None
 
+    def wait(self, timeout: float | None = None) -> None:
+        """Block until the session ends (ejected, or the ME closed it)."""
+        self._stop.wait(timeout)
+
     @property
     def alive(self) -> bool:
         return self._thread is not None and self._thread.is_alive() and not self._stop.is_set()

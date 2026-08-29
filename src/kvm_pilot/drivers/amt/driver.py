@@ -24,7 +24,6 @@ from __future__ import annotations
 import os
 import select
 import shutil
-import socket
 import subprocess  # nosec B404 - fixed argv (no shell), AMT password via env not argv
 import time
 from contextlib import contextmanager
@@ -33,6 +32,7 @@ from typing import TYPE_CHECKING, Any
 
 from ...errors import AuthError, CapabilityError, ConnectionError, KVMPilotError, ProtocolError
 from ...safety import SafetyPolicy
+from ...ssh import port_open
 from ..base import CapabilityMixin, PowerMixin, VideoScope
 from .ider import IderSession, live_session
 from .wsman import ME_NOT_READY_HINT, Wsman, WsmanError, amt, cim, escape, findtext
@@ -169,11 +169,8 @@ class AmtDriver(PowerMixin, CapabilityMixin):
     def close(self) -> None:
         """Tear down the SOL + RFB sessions if open (WS-Man is stateless).
 
-        An attached IDE-R disc is deliberately **left attached** (#252): the host
-        boots from it only if the session outlives this driver — the MCP server
-        closes a driver after every tool call, and the reset that boots the ISO
-        is a later call. ``msd_disconnect`` (``eject``) is the detach, exactly as
-        a physical disc stays in the drive when you walk away from the console.
+        An attached IDE-R disc is deliberately **left attached** — see "Session
+        lifetime" in :mod:`.ider` (#252). ``msd_disconnect``/``eject`` detaches.
         """
         self.serial_close()
         self._ider = None  # forget, don't stop — see docstring
@@ -288,11 +285,7 @@ class AmtDriver(PowerMixin, CapabilityMixin):
 
     def _me_alive(self, timeout: float = 2.0) -> bool:
         """Does the ME still accept a TCP connection on its WS-Man port?"""
-        try:
-            with socket.create_connection((self.host, self._port), timeout=timeout):
-                return True
-        except OSError:
-            return False
+        return port_open(self.host, self._port, timeout)
 
     def _expect_me_alive(self, op: str) -> None:
         """After an accepted power request, insist the management plane is still
@@ -300,7 +293,13 @@ class AmtDriver(PowerMixin, CapabilityMixin):
         recovery, so it must surface as an error naming that the request WAS
         accepted — not vanish behind "requested" (#251)."""
         deadline = time.monotonic() + _ME_LIVENESS_S
-        while not self._me_alive():
+        while True:
+            # Clamp each attempt to what is left, so the stated budget is real;
+            # keep a short pause between tries — a wedged ME often refuses
+            # instantly (RST), which would otherwise spin.
+            remaining = deadline - time.monotonic()
+            if self._me_alive(timeout=min(2.0, max(0.25, remaining))):
+                return
             if time.monotonic() >= deadline:
                 err = WsmanError(
                     f"{op}: the ME accepted the power request (ReturnValue 0) but then "
@@ -310,19 +309,22 @@ class AmtDriver(PowerMixin, CapabilityMixin):
                 )
                 err.me_not_ready = True
                 raise err
-            time.sleep(1.0)
+            time.sleep(min(1.0, max(0.0, deadline - time.monotonic())))
 
-    def _note_hard_reset(self) -> None:
+    def _recent_hard_resets(self) -> list[float]:
+        """The host's hard-reset log, pruned to the churn window (stored back)."""
         now = time.monotonic()
         log = [t for t in _HARD_RESETS.get(self.host, []) if now - t < _CHURN_WINDOW_S]
-        log.append(now)
         _HARD_RESETS[self.host] = log
+        return log
+
+    def _note_hard_reset(self) -> None:
+        self._recent_hard_resets().append(time.monotonic())
 
     def hard_resets_recent(self) -> int:
         """Hard resets / hard-offs sent to this host from this process in the
         churn window (10 min). Feeds the ``amt-reset-churn`` healthcheck."""
-        now = time.monotonic()
-        return sum(1 for t in _HARD_RESETS.get(self.host, []) if now - t < _CHURN_WINDOW_S)
+        return len(self._recent_hard_resets())
 
     def _request_power(self, state: int, op: str, desc: str, *, wait: bool = True) -> None:
         if not self.safety.guard(op, desc):
@@ -352,8 +354,10 @@ class AmtDriver(PowerMixin, CapabilityMixin):
             )
         if state in (_POWER["reset"], _POWER["off_hard"]):
             self._note_hard_reset()
-        if wait:
-            self._expect_me_alive(op)
+            # Only the hard ops have been seen to wedge the ME (#251); a soft
+            # on/off must not pay for the probe.
+            if wait:
+                self._expect_me_alive(op)
 
     def power_on(self, wait: bool = True) -> None:
         self._request_power(_POWER["on"], "amt.power_on", f"Power ON {self.host} (AMT)", wait=wait)
@@ -1033,24 +1037,22 @@ class AmtDriver(PowerMixin, CapabilityMixin):
     # mount_iso(), set_boot_device('cd'), then power_reset. EXPERIMENTAL:
     # emulator-tested only; live boot-from-ISO is unverified (#213/#217).
 
-    # The disc is streamed from THIS process, not staged on the device: the CLI
-    # must keep serving in the foreground after `mount`, and the MCP result says
-    # the disc lives as long as the server process (#252).
+    # The disc is streamed from THIS process, not staged on the device — so the
+    # CLI keeps serving after `mount` and the MCP result says where it lives.
     media_streams_from_client = True
 
-    def serve_media(self, poll: float = 0.5) -> None:
-        """Block while the attached IDE-R disc is being served (until it is ejected,
-        the ME closes the session, or the caller interrupts)."""
-        while self._ider is not None and self._ider.alive:
-            time.sleep(poll)
+    def serve_media(self) -> None:
+        """Block while the attached IDE-R disc is served — until it is ejected,
+        the ME closes the session, or the caller interrupts."""
+        if self._ider is not None:
+            self._ider.wait()
 
     def mount_iso(self, source: str, image_name: str | None = None, cdrom: bool = True) -> str:
         """Attach ``source`` (an ISO) as a virtual CD-ROM via AMT IDE-R. Gated.
 
-        The session streams the image live from this process and stays open —
-        across ``close()`` and across the host's reset (#252) — until
-        ``msd_disconnect``/``eject``. Pair with ``set_boot_device('cd')`` (which
-        then sets ``UseIDER``) + a reset to boot from it."""
+        The session streams the image live from this process and outlives both
+        ``close()`` and the host's reset (see :mod:`.ider`). Pair with
+        ``set_boot_device('cd')`` (which then sets ``UseIDER``) + a reset."""
         if not cdrom:
             raise CapabilityError(
                 "AMT IDE-R redirects a bootable CD/DVD image only; USB mass-storage "
@@ -1095,7 +1097,9 @@ class AmtDriver(PowerMixin, CapabilityMixin):
             "image": self._ider.iso_path if self._ider is not None else None,
             "note": "IDE-R streams the image live from this process; nothing is stored on the "
                     "ME. The disc stays attached across driver close() and the host's reset "
-                    "until eject — or until this process exits (#252).",
+                    "until eject — or until this process exits. Boot it with "
+                    "set_boot_device('cd') (reports use_ider=true), then reset ONCE; do NOT "
+                    "eject in between, and do not loop (#251/#252).",
         }
 
     # -- Video + HID (KVM redirection / RFB) ----------------------------

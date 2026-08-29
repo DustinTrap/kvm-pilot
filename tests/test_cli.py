@@ -1571,3 +1571,20 @@ def test_eject_detaches_a_session_in_this_process(monkeypatch, capsys):
     assert cli.cmd_eject(_media_args()) == 0
     assert kvm.ejected is True
     assert "ejected: virtual media detached" in capsys.readouterr().out
+
+
+def test_nothing_to_eject_is_one_predicate_shared_by_both_front_ends():
+    """The CLI and the MCP eject path must agree on when there is nothing to
+    detach — two copies of this condition is how the "false ejected" bug
+    reappears in one of them (#252)."""
+    from kvm_pilot.drivers.base import nothing_to_eject
+
+    assert nothing_to_eject(_StreamingMedia(connected=False)) is True
+    assert nothing_to_eject(_StreamingMedia(connected=True)) is False
+    assert nothing_to_eject(object()) is False          # a device-staged driver
+
+    class _Staged:
+        def get_msd_state(self):
+            return {"connected": False}
+
+    assert nothing_to_eject(_Staged()) is False         # not client-streamed
