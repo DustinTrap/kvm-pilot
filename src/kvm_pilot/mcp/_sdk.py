@@ -26,10 +26,15 @@ try:  # mcp 2.x
 
     SDK_MAJOR = 2
 except ModuleNotFoundError:  # mcp 1.x — FastMCP under its original name/path
-    # no-redef: mypy sees both branches define these; only one ever executes, and
-    # which one type-checks cleanly depends on the mcp installed in the checking env.
-    from mcp.server.fastmcp import Context, Image  # type: ignore[no-redef]
-    from mcp.server.fastmcp import FastMCP as MCPServer  # type: ignore[no-redef]
+    # mypy checks BOTH branches against whichever mcp is installed, so the dead
+    # one must be silenced two ways: no-redef (both branches bind these names) and
+    # attr-defined. The latter is for mcp >= 2.1, which re-added
+    # `mcp.server.fastmcp` as a stub that raises a migration message at import:
+    # importable to mypy, empty of these names, so it is NOT evidence of 1.x —
+    # `SDK_MAJOR` is (#256). Both codes are inert on the major that resolves
+    # cleanly (`warn_unused_ignores = false`).
+    from mcp.server.fastmcp import Context, Image  # type: ignore[no-redef,attr-defined]
+    from mcp.server.fastmcp import FastMCP as MCPServer  # type: ignore[no-redef,attr-defined]
     from mcp.server.fastmcp.exceptions import ToolError  # type: ignore[no-redef]
 
     SDK_MAJOR = 1
