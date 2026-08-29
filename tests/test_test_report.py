@@ -290,6 +290,17 @@ def test_a_long_outcome_is_marked_truncated_not_cut_mid_word():
     short = _row("snapshot", True, "fine")
     assert short["outcome"] == "fine"           # untouched under the cap
 
+    # An unbroken token has no word boundary to fall back to: hard cut, still marked.
     long_row = _row("snapshot", False, "x" * 500)
     assert len(long_row["outcome"]) == 300
     assert long_row["outcome"].endswith("\u2026"), "truncation must be visible"
+
+    # Real outcomes are sentences: the cut must land between words, not inside one.
+    sentence = ("no video signal (online=True, hdmi_signal=False): hdmi.signal is false, "
+                "so the guest appears powered off and the encoder has nothing to encode. ") * 4
+    row = _row("snapshot", False, sentence)
+    body = row["outcome"].removesuffix("\u2026")
+    assert len(row["outcome"]) <= 300
+    assert not body.endswith(" ")
+    assert sentence.startswith(body), "the retained prefix must be verbatim"
+    assert sentence[len(body)] == " ", f"cut inside a word: ...{body[-25:]!r}"

@@ -172,11 +172,15 @@ def _redact_addrs(text: str) -> str:
 
 def _row(capability: str, passed: bool, outcome: str,
          conditions: dict[str, Any] | None = None) -> dict[str, Any]:
-    # A cut mid-word reads as corrupted evidence in the shipped ledger, so a
-    # truncated outcome says so (CodeRabbit on #252).
+    # Outcomes are prose evidence that ships in the wheel, so a cut mid-word reads
+    # as corruption (two rows landed as "...the guest appears powe"). Truncate at
+    # the last word boundary and mark it (CodeRabbit on #252).
     text = _redact_addrs(outcome)
-    out: dict[str, Any] = {"capability": capability, "passed": passed,
-                           "outcome": text if len(text) <= 300 else text[:299] + "…"}
+    if len(text) > 300:
+        head = text[:299]
+        cut = head.rsplit(" ", 1)[0] if " " in head else head  # unbroken token: hard cut
+        text = cut.rstrip() + "…"
+    out: dict[str, Any] = {"capability": capability, "passed": passed, "outcome": text}
     if conditions:
         out["conditions"] = conditions
     return out

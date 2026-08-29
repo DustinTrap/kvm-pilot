@@ -186,6 +186,14 @@ drive (#252). Keep it running until the installer/OS is up. Legacy
 `amtider` does **not** work on AMT ≥ 11; kvm-pilot speaks the modern redirection
 protocol.
 
+> **Hardware verification pending.** The ISO *streaming* was exercised once on a
+> Latitude 5411 @ 14.1.79 ([#213](https://github.com/DustinTrap/kvm-pilot/issues/213)),
+> but the session-lifetime and `UseIDER` boot behaviour above is **emulator-only
+> so far** ([#252](https://github.com/DustinTrap/kvm-pilot/issues/252)). The
+> [Hardware-Compatibility list](https://github.com/DustinTrap/kvm-pilot/wiki/Hardware-Compatibility)
+> is the source of truth for what has actually been exercised — check it before
+> relying on this path, and please add your result to it.
+
 ---
 
 ## ⚠️ The ME-firmware-update hazard (read before updating)
