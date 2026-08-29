@@ -24,8 +24,8 @@ from __future__ import annotations
 import os
 import select
 import shutil
-import subprocess
-import threading  # nosec B404 - fixed argv (no shell), AMT password via env not argv
+import subprocess  # nosec B404 - fixed argv (no shell), AMT password via env not argv
+import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
