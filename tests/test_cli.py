@@ -1480,3 +1480,94 @@ def test_recover_hid_reports_success_and_failure_distinctly(monkeypatch, capsys)
     assert main(["recover-hid", "--driver", "fake", "--host", "h", "--yes"]) == 1
     # The failure names the physical cause this cannot fix.
     assert "data-capable" in capsys.readouterr().out
+
+
+# -- mount/eject when the disc is streamed from this process (#252) ------------
+
+
+class _StreamingMedia:
+    """A stand-in for a driver that serves media from the client (AMT IDE-R)."""
+
+    media_streams_from_client = True
+
+    def __init__(self, connected: bool = True, interrupt: bool = True):
+        self.connected = connected
+        self.interrupt = interrupt
+        self.ejected = False
+        self.served = False
+
+    def mount_iso(self, source, image_name=None, cdrom=True):
+        return source
+
+    def serve_media(self):
+        self.served = True
+        if self.interrupt:
+            raise KeyboardInterrupt
+
+    def msd_disconnect(self):
+        self.ejected = True
+        self.connected = False
+
+    def get_msd_state(self):
+        return {"connected": self.connected}
+
+
+def _media_args(**kw):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(**{"source": "/x.iso", "name": None, "usb": False, "dry_run": False, **kw})
+
+
+def test_mount_serves_in_the_foreground_until_interrupted(monkeypatch, capsys):
+    """A CLI `mount` that returned would take the disc with it — the host boots
+    from a session that must outlive the command. Serve until Ctrl-C, then eject."""
+    from kvm_pilot import cli
+
+    kvm = _StreamingMedia()
+    monkeypatch.setattr(cli, "_client", lambda args, cap: kvm)
+    assert cli.cmd_mount(_media_args()) == 0
+    out = capsys.readouterr().out
+    assert "mounted: /x.iso" in out
+    assert "streamed from this process" in out and "Ctrl-C" in out
+    assert kvm.served and kvm.ejected
+    assert "detached: virtual media ejected" in out
+
+
+def test_mount_returns_when_the_device_ends_the_session(monkeypatch, capsys):
+    from kvm_pilot import cli
+
+    kvm = _StreamingMedia(interrupt=False)
+    monkeypatch.setattr(cli, "_client", lambda args, cap: kvm)
+    assert cli.cmd_mount(_media_args()) == 0
+    assert "detached: the device closed the media session" in capsys.readouterr().out
+    assert kvm.ejected is False
+
+
+def test_mount_dry_run_does_not_serve(monkeypatch, capsys):
+    from kvm_pilot import cli
+
+    kvm = _StreamingMedia()
+    monkeypatch.setattr(cli, "_client", lambda args, cap: kvm)
+    assert cli.cmd_mount(_media_args(dry_run=True)) == 0
+    assert kvm.served is False
+
+
+def test_eject_is_honest_when_no_session_lives_in_this_process(monkeypatch, capsys):
+    from kvm_pilot import cli
+
+    kvm = _StreamingMedia(connected=False)
+    monkeypatch.setattr(cli, "_client", lambda args, cap: kvm)
+    assert cli.cmd_eject(_media_args()) == 0
+    out = capsys.readouterr().out
+    assert "nothing to eject" in out
+    assert kvm.ejected is False
+
+
+def test_eject_detaches_a_session_in_this_process(monkeypatch, capsys):
+    from kvm_pilot import cli
+
+    kvm = _StreamingMedia(connected=True)
+    monkeypatch.setattr(cli, "_client", lambda args, cap: kvm)
+    assert cli.cmd_eject(_media_args()) == 0
+    assert kvm.ejected is True
+    assert "ejected: virtual media detached" in capsys.readouterr().out

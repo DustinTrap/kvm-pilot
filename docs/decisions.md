@@ -612,6 +612,44 @@ a `mc info`/chassis-status parser overfit to Dell would surface here. It didn't 
   establishes on the default cipher, so the driver's commands succeed. Tests parse
   the real output lines and ignore that warning.
 
+## AMT IDE-R session lifetime, boot order & the ME-wedge guard (#251 / #252)
+
+- **`AmtDriver.close()` does NOT stop an attached IDE-R disc.** It looks like a
+  leak; it is the feature. The ME presents the redirected CD to the BIOS only
+  while the session is open, and the reset that boots from it is a *later* call
+  — on the MCP server, a later call on a *different* driver instance (one per
+  tool call, closed in `finally`). Before #252 every MCP `mount_iso` tore the
+  disc down on return, which is what #251's operator saw as "boot override
+  ineffective" three times. The session is therefore process-wide
+  (`ider.live_session(host)`), adopted by the next driver for the host, and
+  released only by `msd_disconnect`/`eject` — or process exit (daemon thread).
+  Mental model: a physical disc stays in the drive when you walk away from the
+  console.
+- **The CLI `mount` blocks.** A command that returned would take the disc with
+  it. `amtider` and `meshcmd` serve in the foreground for the same reason.
+- **`set_boot_device` follows Intel's order — clear, Put, role, source — not
+  ours.** The previous order (Put → source → role) worked live for pxe/cd/hdd,
+  but AMT rejects `UseIDER=true` with `InvalidValues` while a forced source is
+  still active, so the clear must come first. Reference: Device Management
+  Toolkit MPS `bootOptions.ts` (`changeBootOrder(null)` → `setBootConfiguration`
+  → `forceBootMode(1)` → `changeBootOrder(source)`).
+- **`UseIDER`/`IDERBootDevice=1` are set only while a disc is being served.**
+  The CD/DVD boot source alone means the platform's physical optical drive;
+  #213's single live iPXE boot without the flag is not something to rely on.
+  Unverified on hardware since the change — flagged for the next live session.
+- **`reset_hard` is NOT preceded by an IDE-R teardown**, though #251 asked for
+  one: that would guarantee the host boots its disk. The prevention is the
+  churn warning + the post-reset liveness probe + not needing to loop.
+- **A power request the ME accepted and then went silent after raises**, it
+  does not return "requested". The ME lives on the PCH and answers on 16992
+  through a host reset; if it stops (bounded 15 s probe), the reset wedged the
+  management plane — the one AMT failure with no remote recovery — and
+  reporting success there is the false-all-clear class of bug. `wait=False`
+  skips the probe.
+- **The churn log is per process, not persisted.** Three hard resets in ten
+  minutes from *this* process is what #251 measured; a cross-process ledger
+  would be speculative generality.
+
 ## Process
 
 Most structural choices came from adversarial review passes (find → verify →

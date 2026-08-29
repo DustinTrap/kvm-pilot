@@ -98,18 +98,43 @@ on a background thread while the host boots.
 
 ```bash
 kvm-pilot amt enable-sol --profile dell-amt         # open the 16994 listener once
-kvm-pilot mount fedora.iso --profile dell-amt       # attach the ISO as a virtual CD
-kvm-pilot boot-device cd --profile dell-amt         # next boot -> CD
-kvm-pilot power reset --profile dell-amt            # reboot into the ISO
+kvm-pilot mount fedora.iso --profile dell-amt       # attach + SERVE the ISO (stays in the foreground)
+# ... from a second terminal, while `mount` keeps serving:
+kvm-pilot media-list --profile dell-amt             # connected: true?  (only in the serving process)
+kvm-pilot boot-device cd --profile dell-amt         # next boot -> the redirected CD (use_ider: true)
+kvm-pilot power reset --profile dell-amt            # reboot into the ISO — once
 ```
+
+**The disc lives in the process that serves it** (#252). The ME presents the
+redirected CD to the BIOS only while the IDE-R session is open, and the session
+has to survive the reset that boots from it. So:
+
+- The CLI `mount` **serves in the foreground** (like `amtider`/`meshcmd`) until
+  Ctrl-C detaches it; a `mount` that returned would take the disc with it.
+- The MCP server holds the session **across tool calls**: `mount_iso` →
+  `set_boot_device('cd')` → `power reset` compose on one server process, and
+  `eject` (or the server exiting) is the detach. A driver's `close()` leaves an
+  attached disc attached — a physical disc stays in the drive when you walk away
+  from the console.
+- `boot-device cd` sets `AMT_BootSettingData.UseIDER=true` + `IDERBootDevice=1`
+  when a disc is being served (Intel's reference sequence: clear boot order →
+  Put settings → `SetBootConfigRole` → force the CD/DVD source) and reports
+  `use_ider: true`. Without a served disc the CD/DVD source means the *physical*
+  optical drive.
+- **Do not loop `mount → cd → reset`.** Verify `media-list` shows
+  `connected: true` and `boot-device` reported `use_ider: true`, reset once, and
+  stop after two failed attempts (PXE or in-band `boot-device --via ssh` next).
+  Rapid session churn plus hard resets wedged an ME so that every AMT port went
+  dark and only a G3 power cycle recovered it (#251); `healthcheck` warns
+  `amt-reset-churn` at three hard resets in ten minutes, and a reset the ME
+  accepts but goes silent after is reported as that wedge, not as success.
 
 Notes and limits:
 - **CD-ROM images only** (bootable ISOs). The floppy/USB-R slots are reported
   empty — USB-R is not implemented (#213).
 - The protocol follows the maintained reference (MeshCommander); the legacy
   `amtider` tool speaks an older revision AMT 14 rejects, which is why it fails.
-- The session streams the image **live** from the client host and stays open
-  until `eject` / the driver closes — nothing is staged on the ME.
+- The image is streamed **live** from the client — nothing is staged on the ME.
 - An ME firmware update resets the redirection listeners and can leave the ME
   needing a full **power cycle** before `enable-sol` / IDE-R work again (#217).
 

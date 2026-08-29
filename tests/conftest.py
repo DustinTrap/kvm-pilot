@@ -116,9 +116,17 @@ def emu():
 def amt_emu():
     """A running pure-stdlib fake Intel AMT WS-Man service (see amt_emulator.py)."""
     from amt_emulator import AmtEmulator
+    from kvm_pilot.drivers.amt import driver as amt_driver
+    from kvm_pilot.drivers.amt import ider as amt_ider
 
+    # Per-process AMT state (#251/#252) must not leak between tests: the
+    # hard-reset churn log and the live IDE-R session registry.
+    amt_driver._HARD_RESETS.clear()
+    amt_ider._LIVE.clear()
     with AmtEmulator() as e:
         yield e
+    amt_driver._HARD_RESETS.clear()
+    amt_ider._LIVE.clear()
 
 
 @pytest.fixture

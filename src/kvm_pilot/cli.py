@@ -605,12 +605,38 @@ def cmd_mount(args) -> int:
     kvm = cast("VirtualMedia", _client(args, Capability.VIRTUAL_MEDIA))
     name = kvm.mount_iso(args.source, image_name=args.name, cdrom=not args.usb)
     print(f"mounted: {name}")
+    serve = getattr(kvm, "serve_media", None)
+    if serve is None or getattr(args, "dry_run", False):
+        return 0
+    # The disc is streamed from THIS process (AMT IDE-R, #252): exiting here would
+    # detach it before the host ever boots — the failure that looked like "boot
+    # override ineffective" in #251. Serve in the foreground, like amtider does.
+    print("serving: the image is streamed from this process — leave it running while "
+          "the host boots (set the boot device + reset from another terminal); "
+          "Ctrl-C detaches it")
+    try:
+        serve()
+        print("detached: the device closed the media session")
+    except KeyboardInterrupt:
+        kvm.msd_disconnect()
+        print("detached: virtual media ejected")
     return 0
 
 
 def cmd_eject(args) -> int:
     # The inverse of mount: without it, detaching an ISO required writing Python.
     kvm = cast("VirtualMedia", _client(args, Capability.VIRTUAL_MEDIA))
+    msd_state = getattr(kvm, "get_msd_state", None)
+    if (
+        getattr(kvm, "media_streams_from_client", False)
+        and msd_state is not None
+        and not msd_state().get("connected")
+    ):
+        # Client-streamed media lives in the process that mounted it; a separate
+        # `eject` has nothing to detach and must not claim it did (#252).
+        print("nothing to eject: no media session in this process — the disc is served by the "
+              "process that ran `mount` (Ctrl-C it), if any")
+        return 0
     kvm.msd_disconnect()
     print("ejected: virtual media detached")
     return 0

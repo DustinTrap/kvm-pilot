@@ -30,6 +30,8 @@ class AmtState:
         self.boot_order = ""            # substring compared against the source id
         self.boot_order_readable = True  # real AMT omits BootOrder (write-only) — flip to test honesty
         self.bios_setup = "false"
+        self.use_ider = "false"          # AMT_BootSettingData.UseIDER (boot the redirected disc)
+        self.ider_boot_device = "0"      # 0 = floppy, 1 = CD/DVD
         # redirection / KVM enablement knobs
         self.redir_listener = "false"   # AMT_RedirectionService.ListenerEnabled
         self.redir_state = "32771"      # EnabledState 32771 = IDER+SOL both
@@ -181,7 +183,7 @@ class _Handler(BaseHTTPRequestHandler):
         if cls == "AMT_BootSettingData":
             return _inst("AMT_BootSettingData", {
                 "BIOSSetup": st.bios_setup, "BIOSPause": "false", "BootMediaIndex": "0",
-                "UseSOL": "false"})
+                "UseSOL": "false", "UseIDER": st.use_ider, "IDERBootDevice": st.ider_boot_device})
         if cls == "CIM_BootConfigSetting":
             fields = {"InstanceID": "Intel(r) AMT: Boot Configuration 0"}
             if st.boot_order_readable:  # real AMT omits BootOrder — the write-only reality
@@ -220,6 +222,8 @@ class _Handler(BaseHTTPRequestHandler):
         cls = resource.rsplit("/", 1)[-1]
         if cls == "AMT_BootSettingData":
             st.bios_setup = _text(req, "BIOSSetup") or st.bios_setup
+            st.use_ider = _text(req, "UseIDER") or st.use_ider
+            st.ider_boot_device = _text(req, "IDERBootDevice") or st.ider_boot_device
         elif cls == "AMT_RedirectionService":
             st.redir_listener = _text(req, "ListenerEnabled") or st.redir_listener
             st.redir_state = _text(req, "EnabledState") or st.redir_state
