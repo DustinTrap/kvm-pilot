@@ -170,13 +170,19 @@ kvm-pilot mount fedora.iso --profile mybox         # attach an ISO as a virtual 
 
 ```bash
 kvm-pilot amt enable-sol --profile mybox   # 16994 listener must be up
-kvm-pilot mount fedora.iso --profile mybox # serve the ISO as a virtual CD
-kvm-pilot boot-device cd   --profile mybox # next boot -> CD
-kvm-pilot power reset      --profile mybox # boot into the ISO
+kvm-pilot mount fedora.iso --profile mybox # serves the ISO — KEEPS RUNNING
+
+# ... then, from a SECOND terminal, while `mount` is still serving:
+kvm-pilot media-list       --profile mybox # connected: true?
+kvm-pilot boot-device cd   --profile mybox # next boot -> CD (use_ider: true)
+kvm-pilot power reset      --profile mybox # boot into the ISO -- ONCE
 ```
 
-The image streams live from your machine and the session stays open while the
-host boots — keep the process running until the installer/OS is up. Legacy
+**`mount` does not return** — the ISO streams from *that* process, so it holds
+the terminal until Ctrl-C (which detaches the disc). Run the follow-up commands
+from a second terminal while it serves; a `boot-device cd` issued after `mount`
+exited reports `use_ider: false` and points the BIOS at the *physical* optical
+drive (#252). Keep it running until the installer/OS is up. Legacy
 `amtider` does **not** work on AMT ≥ 11; kvm-pilot speaks the modern redirection
 protocol.
 

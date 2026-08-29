@@ -467,3 +467,21 @@ def test_set_boot_cd_dry_run_reports_use_ider_without_writing(holding_ider, amt_
     out = drv.set_boot_device("cd")
     assert out["use_ider"] is True
     assert amt_emu.state.use_ider == "false"   # nothing written
+
+
+def test_a_session_the_me_closes_releases_its_registry_entry_and_files(holding_ider, tmp_path):
+    """A remote close used to only set the stop flag: the ISO handle, the socket
+    and the registry entry stayed held until an explicit eject or process exit
+    (CodeRabbit on #252)."""
+    from kvm_pilot.drivers.amt.ider import live_session
+
+    drv = AmtDriver("127.0.0.1", _USER, _PASS, sol_port=holding_ider.port,
+                    confirm=lambda *_: True, timeout=10)
+    drv.mount_iso(_iso(tmp_path))
+    session = live_session("127.0.0.1")
+    assert session is not None
+
+    holding_ider.close()                     # the ME goes away
+    session.wait(10)                         # the serving loop notices and tears down
+    assert session._iso is None, "the ISO file handle must be released"
+    assert live_session("127.0.0.1") is None, "the registry entry must be released"

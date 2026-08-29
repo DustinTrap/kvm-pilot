@@ -1490,11 +1490,22 @@ class _StreamingMedia:
 
     media_streams_from_client = True
 
-    def __init__(self, connected: bool = True, interrupt: bool = True):
+    def __init__(self, connected: bool = True, interrupt: bool = True,
+                 confirm_answer: bool = True):
+        from kvm_pilot.safety import SafetyPolicy
+
         self.connected = connected
         self.interrupt = interrupt
+        self.confirm_answer = confirm_answer
         self.ejected = False
         self.served = False
+        self.prompts: list[str] = []
+        # A driver built without --yes carries an interactive confirm; record
+        # every question it would ask so a test can prove none is asked.
+        def _confirm(op: str, desc: str) -> bool:
+            self.prompts.append(op)
+            return self.confirm_answer
+        self.safety = SafetyPolicy(confirm=_confirm)
 
     def mount_iso(self, source, image_name=None, cdrom=True):
         return source
@@ -1505,6 +1516,9 @@ class _StreamingMedia:
             raise KeyboardInterrupt
 
     def msd_disconnect(self):
+        # Gated on a real driver — go through the policy so the test sees a prompt.
+        if not self.safety.guard("amt.eject", "Detach IDE-R virtual media"):
+            return
         self.ejected = True
         self.connected = False
 
@@ -1588,3 +1602,19 @@ def test_nothing_to_eject_is_one_predicate_shared_by_both_front_ends():
             return {"connected": False}
 
     assert nothing_to_eject(_Staged()) is False         # not client-streamed
+
+
+def test_ctrl_c_detaches_without_asking_a_second_time(monkeypatch, capsys):
+    """Ctrl-C is the detach instruction, and the mount it undoes was already
+    approved. A second prompt reaches someone trying to quit — and a refusal
+    would leave the disc attached with the process gone, which is the stuck
+    state the foreground lifetime exists to prevent (CodeRabbit on #252)."""
+    from kvm_pilot import cli
+
+    # A confirm that answers "no" — the user is quitting, not approving again.
+    kvm = _StreamingMedia(confirm_answer=False)
+    monkeypatch.setattr(cli, "_client", lambda args, cap: kvm)
+    assert cli.cmd_mount(_media_args()) == 0
+    assert kvm.ejected is True, "the disc must be detached on Ctrl-C"
+    assert kvm.prompts == [], f"cleanup asked again: {kvm.prompts}"
+    assert "detached: virtual media ejected" in capsys.readouterr().out

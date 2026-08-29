@@ -618,6 +618,15 @@ def cmd_mount(args) -> int:
         serve()
         print("detached: the device closed the media session")
     except KeyboardInterrupt:
+        # Ctrl-C IS the detach instruction, and the mount it undoes was already
+        # approved — so the cleanup must not stop to ask again. A second prompt
+        # here reaches a user who is trying to quit (or an unattended run with
+        # no answerer), and a SafetyError would leave the disc attached with the
+        # process gone: the exact "media stuck mounted" state this command's
+        # foreground lifetime exists to prevent.
+        safety = getattr(kvm, "safety", None)
+        if safety is not None:
+            safety.confirm = allow_all
         kvm.msd_disconnect()
         print("detached: virtual media ejected")
     return 0

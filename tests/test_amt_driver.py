@@ -1850,3 +1850,34 @@ def test_liveness_probe_stays_inside_its_budget(amt_emu, monkeypatch):
     assert seen, "the ME must be probed at least once"
     assert all(t <= 2.0 for t in seen)     # never longer than one attempt's cap
     assert elapsed < 3.0                   # and the whole wait honors the budget
+
+
+def test_churn_count_is_not_frozen_by_the_health_memo(amt_emu):
+    """`amt_health()` memoizes its WS-Man reads (AMT flood-protects bursts), but
+    the reset counter changes with every reset this process sends — caching it
+    would under-report churn to the very check that watches for it."""
+    drv = make(amt_emu)
+    assert drv.amt_health()["hard_resets_10m"] == 0     # populates the memo
+    drv.reset_hard()
+    drv.reset_hard()
+    assert drv.amt_health()["hard_resets_10m"] == 2
+
+
+def test_hard_reset_accounting_survives_concurrent_calls(amt_emu):
+    """Power calls land on different threads (the MCP server runs each tool body
+    in a worker); a lost update would keep the count under the threshold."""
+    import threading
+
+    drv = make(amt_emu)
+    barrier = threading.Barrier(8)
+
+    def hit() -> None:
+        barrier.wait()
+        drv._note_hard_reset()
+
+    threads = [threading.Thread(target=hit) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert drv.hard_resets_recent() == 8

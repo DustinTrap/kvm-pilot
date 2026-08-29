@@ -280,3 +280,16 @@ def test_ledger_outcomes_do_not_leak_the_reporters_network():
     assert "Connection refused" in row["outcome"] and "5900" in row["outcome"]
     v6 = _row("info", False, "connect to fe80:0000:0000:0000:0202:b3ff:fe1e:8329 failed")
     assert "fe80" not in v6["outcome"]
+
+
+def test_a_long_outcome_is_marked_truncated_not_cut_mid_word():
+    """A cut mid-word reads as corrupted evidence in the shipped ledger — two
+    rows landed there ending "the guest appears powe" (CodeRabbit on #252)."""
+    from kvm_pilot.test_report import _row
+
+    short = _row("snapshot", True, "fine")
+    assert short["outcome"] == "fine"           # untouched under the cap
+
+    long_row = _row("snapshot", False, "x" * 500)
+    assert len(long_row["outcome"]) == 300
+    assert long_row["outcome"].endswith("\u2026"), "truncation must be visible"

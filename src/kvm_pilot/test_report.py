@@ -172,8 +172,11 @@ def _redact_addrs(text: str) -> str:
 
 def _row(capability: str, passed: bool, outcome: str,
          conditions: dict[str, Any] | None = None) -> dict[str, Any]:
+    # A cut mid-word reads as corrupted evidence in the shipped ledger, so a
+    # truncated outcome says so (CodeRabbit on #252).
+    text = _redact_addrs(outcome)
     out: dict[str, Any] = {"capability": capability, "passed": passed,
-                           "outcome": _redact_addrs(outcome)[:300]}
+                           "outcome": text if len(text) <= 300 else text[:299] + "…"}
     if conditions:
         out["conditions"] = conditions
     return out

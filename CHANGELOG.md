@@ -22,10 +22,11 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   didn't do. Docs no longer say IDE-R "is not implemented". Not yet re-verified
   on hardware.
 - **A reset the ME accepts and then goes silent after is reported as the wedge,
-  not as "requested"** (#251). After any accepted AMT power request the driver
+  not as "requested"** (#251). After an accepted **hard** power request
+  (`reset_hard`, `power_off_hard` — the two that have wedged an ME) the driver
   probes the WS-Man port (bounded 15 s); if the ME stopped answering, the error
-  says the request *was* accepted and names the G3 recovery. `wait=False` skips
-  the probe.
+  says the request *was* accepted and names the G3 recovery. `power_on` and a
+  graceful `power_off` are not probed, and `wait=False` skips it entirely.
 - **`kvm-blank-when-display-asleep` no longer reads as "lid closed"** (#250).
   The quirk text says the panel is in power-save and that this says nothing
   about the lid — an agent had told a user the lid was shut when it was open.

@@ -1590,7 +1590,10 @@ async def eject(ctx: Context, confirm: bool = False, profile: str | None = None)
     """
     def _run(_cfg: HostConfig, kvm: KVMDriver) -> dict:
         if nothing_to_eject(kvm):
+            # `detail` is set before the run; override it so the summary line
+            # cannot say "ejected" over a no-op result (#252).
             return {"detached": False,
+                    "detail": "nothing to eject: no media session in this server process",
                     "note": "no media session in this server process — nothing was attached"}
         cast("VirtualMedia", kvm).msd_disconnect()
         return {"detached": True}

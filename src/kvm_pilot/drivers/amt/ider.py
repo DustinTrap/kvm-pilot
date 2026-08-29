@@ -188,8 +188,17 @@ class IderSession:
                 self._iso = None
 
     def wait(self, timeout: float | None = None) -> None:
-        """Block until the session ends (ejected, or the ME closed it)."""
+        """Block until the session has ended AND released its resources.
+
+        ``_stop`` is set at the *start* of teardown (it is what breaks the serving
+        loop), so waiting on it alone would return while the socket and the ISO
+        handle are still open. The serving thread finishes its own teardown in
+        ``_loop``'s ``finally``, so joining it is the "fully finished" signal.
+        """
         self._stop.wait(timeout)
+        thread = self._thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout)
 
     @property
     def alive(self) -> bool:
@@ -217,7 +226,11 @@ class IderSession:
                 self._error = e
                 logger.debug("IDE-R loop error for %s: %s", self.host, e)
         finally:
-            self._stop.set()
+            # The ME can end the session on its own (CLOSE, or the host powering
+            # down). Setting _stop alone would leave the registry entry, the ISO
+            # handle and the socket held until an explicit eject or process exit,
+            # so tear down here too. stop() never self-joins (see its comment).
+            self.stop()
 
     def _dispatch(self) -> int:
         """Parse one IDE-R message from the head of ``_acc``; 0 = need more bytes."""

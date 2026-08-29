@@ -24,7 +24,8 @@ from __future__ import annotations
 import os
 import select
 import shutil
-import subprocess  # nosec B404 - fixed argv (no shell), AMT password via env not argv
+import subprocess
+import threading  # nosec B404 - fixed argv (no shell), AMT password via env not argv
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -42,6 +43,10 @@ from .wsman import ME_NOT_READY_HINT, Wsman, WsmanError, amt, cim, escape, findt
 # badly only a G3 power cycle recovered it (Latitude 5411 @ 14.1.79, #251); the
 # healthcheck warns from this log before the next reset compounds it.
 _HARD_RESETS: dict[str, list[float]] = {}
+# Power calls can land on different threads (the MCP server runs each tool body
+# in a worker), and a lost update here would keep the churn count under its
+# warning threshold — the one thing this log exists to raise.
+_HARD_RESETS_LOCK = threading.Lock()
 _CHURN_WINDOW_S = 600.0
 # After an accepted power request the ME itself must still answer — it lives
 # on the PCH and stays up through a host reset. If it goes quiet, the reset
@@ -311,20 +316,24 @@ class AmtDriver(PowerMixin, CapabilityMixin):
                 raise err
             time.sleep(min(1.0, max(0.0, deadline - time.monotonic())))
 
-    def _recent_hard_resets(self) -> list[float]:
-        """The host's hard-reset log, pruned to the churn window (stored back)."""
+    def _prune_hard_resets(self, *, record: bool) -> int:
+        """Prune the host's reset log to the churn window and return its size,
+        optionally recording one. Prune + append + count under one lock."""
         now = time.monotonic()
-        log = [t for t in _HARD_RESETS.get(self.host, []) if now - t < _CHURN_WINDOW_S]
-        _HARD_RESETS[self.host] = log
-        return log
+        with _HARD_RESETS_LOCK:
+            log = [t for t in _HARD_RESETS.get(self.host, []) if now - t < _CHURN_WINDOW_S]
+            if record:
+                log.append(now)
+            _HARD_RESETS[self.host] = log
+            return len(log)
 
     def _note_hard_reset(self) -> None:
-        self._recent_hard_resets().append(time.monotonic())
+        self._prune_hard_resets(record=True)
 
     def hard_resets_recent(self) -> int:
         """Hard resets / hard-offs sent to this host from this process in the
         churn window (10 min). Feeds the ``amt-reset-churn`` healthcheck."""
-        return len(self._recent_hard_resets())
+        return self._prune_hard_resets(record=False)
 
     def _request_power(self, state: int, op: str, desc: str, *, wait: bool = True) -> None:
         if not self.safety.guard(op, desc):
@@ -831,10 +840,11 @@ class AmtDriver(PowerMixin, CapabilityMixin):
                 ),
                 "kvm_consent_required": consent,
                 "rfb_password_ok": self._rfb_password_ok(),
-                # Hard resets sent from this process in the last 10 min (#251).
-                "hard_resets_10m": self.hard_resets_recent(),
             }
-        return self._amt_health_cache
+        # NOT memoized with the rest: the WS-Man reads are cached because AMT
+        # flood-protects bursts, but this counter changes with every reset this
+        # process sends — a stale count would under-report churn (#251).
+        return {**self._amt_health_cache, "hard_resets_10m": self.hard_resets_recent()}
 
     def known_quirks(self, firmware: str | None = None) -> list:
         """AMT device/firmware quirks for the healthcheck (reuses the shared Quirk
