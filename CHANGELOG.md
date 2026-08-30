@@ -6,6 +6,23 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.1.0rc4] — 2026-08-30
+
+**Fourth release candidate.** Everything here came out of reviewing the
+project's own telemetry — the run ledger, the registry, and a CI that had gone
+red on its own — rather than from new feature work. The headline is that a
+documented workflow had never actually worked outside the Python library, and
+the retry loop that fact forced is what had been wedging real hardware.
+
+**We want your hardware and your criticism.** GA is gated on *validation
+breadth*, not code: three of the six drivers (`redfish`, `pikvm`, `blikvm`) have
+still never run against a physical device. A
+[hardware report](https://github.com/DustinTrap/kvm-pilot/issues/new?template=hardware-report.yml)
+takes two minutes, failures are as welcome as successes, and nothing in this
+package phones home — the compatibility matrix only grows when someone chooses
+to send a run. Stars, issues, driver requests, and pushback on the safety
+defaults are all wanted; see "Help shape it" in the README.
+
 ### Fixed
 - **AMT boot-from-ISO actually reaches the BIOS from the CLI and MCP** (#252).
   Two defects made `mount → boot-device cd → power reset` a no-op outside the
