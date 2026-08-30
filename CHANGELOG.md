@@ -7,6 +7,29 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
+- **AMT boot-from-ISO actually reaches the BIOS from the CLI and MCP** (#252).
+  Two defects made `mount → boot-device cd → power reset` a no-op outside the
+  Python library. The IDE-R disc is streamed from the client process, and the ME
+  shows it to the BIOS only while that session is open — but the MCP server
+  builds one driver per tool call and closed it (session included) as
+  `mount_iso` returned, and the CLI `mount` exited. The session is now
+  process-wide: adopted by the next driver for the host, kept across `close()`,
+  released by `eject`; the CLI `mount` **serves in the foreground** until Ctrl-C.
+  And `boot-device cd` never asked the ME to boot the *redirected* CD — it now
+  sets `UseIDER`/`IDERBootDevice=1` while a disc is served (Intel's reference
+  sequence: clear boot order → Put settings → role → source) and reports
+  `use_ider`. `eject` says "nothing to eject" instead of claiming a detach it
+  didn't do. Docs no longer say IDE-R "is not implemented". Not yet re-verified
+  on hardware.
+- **A reset the ME accepts and then goes silent after is reported as the wedge,
+  not as "requested"** (#251). After an accepted **hard** power request
+  (`reset_hard`, `power_off_hard` — the two that have wedged an ME) the driver
+  probes the WS-Man port (bounded 15 s); if the ME stopped answering, the error
+  says the request *was* accepted and names the G3 recovery. `power_on` and a
+  graceful `power_off` are not probed, and `wait=False` skips it entirely.
+- **`kvm-blank-when-display-asleep` no longer reads as "lid closed"** (#250).
+  The quirk text says the panel is in power-save and that this says nothing
+  about the lid — an agent had told a user the lid was shut when it was open.
 - **CI: the MCP SDK shim type-checks against mcp 2.1.x again** (#256). mcp 2.1.0
   re-added `mcp.server.fastmcp` as a *stub that raises* a migration message at
   import. mypy does not execute modules, so it saw an importable module missing
@@ -16,6 +39,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   **Runtime was never affected**: on 2.x the `mcp.server.mcpserver` branch
   succeeds, and the MCP suite passes against 2.1.1. The lesson worth keeping:
   `mcp.server.fastmcp` existing is no longer evidence of 1.x — `SDK_MAJOR` is.
+
+### Added
+- **`amt-reset-churn` healthcheck + `me-wedge-on-redirection-churn` quirk**
+  (#251). Three hard resets from one process in ten minutes now WARN, with the
+  prevention spelled out (check `media-list` / `use_ider: true` before the
+  reset; stop after two tries; PXE or in-band `boot-device --via ssh` next).
+  Rapid IDE-R/KVM session churn plus hard resets took every AMT port on a
+  Latitude 5411 @ 14.1.79 dark; only a G3 power cycle brought it back. The
+  `power` tool's preflight runs the check before each power act.
 
 ## [0.1.0rc3] — 2026-08-05
 

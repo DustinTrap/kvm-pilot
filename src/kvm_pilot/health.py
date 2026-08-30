@@ -1086,6 +1086,37 @@ def check_amt_rfb_password(driver: Any) -> CheckResult | None:
 # --------------------------------------------------------------------------- #
 
 
+def check_amt_reset_churn(driver: Any) -> CheckResult | None:
+    """Hard resets from this process in the last 10 min (AMT only, #251).
+
+    Redirection-session churn interleaved with hard resets wedged an ME so that
+    every AMT port went dark and only a G3 power cycle brought it back. The
+    ``power`` tool's preflight runs this before each power act, so the warning
+    lands before the reset that would compound it.
+    """
+    health = getattr(driver, "amt_health", None)
+    if health is None:
+        return None
+    n = int(health().get("hard_resets_10m") or 0)
+    if n < 3:
+        return CheckResult(
+            id="amt-reset-churn", pillar=Pillar.READINESS, severity=Severity.OK,
+            title="AMT hard-reset churn",
+            detail=f"{n} hard reset(s)/hard-off(s) sent from this process in the last 10 min.",
+            cacheable=False)
+    return CheckResult(
+        id="amt-reset-churn", pillar=Pillar.READINESS, severity=Severity.WARNING,
+        title="AMT hard-reset churn",
+        detail=f"{n} hard resets/hard-offs from this process in 10 min. Session churn plus "
+               "hard resets wedged an ME on a Latitude 5411 @ 14.1.79 — every AMT port went "
+               "dark and only a physical G3 power cycle recovered it (#251).",
+        remediation="Stop looping. If you are retrying boot-from-ISO: `media-list` must show "
+                    "the IDE-R session connected and `boot-device cd` must report use_ider=true "
+                    "BEFORE the reset; after two failed tries switch to PXE or in-band "
+                    "`boot-device` over SSH rather than resetting again.",
+        cacheable=False)
+
+
 def check_firmware_report(driver: Any) -> CheckResult | None:
     fn = getattr(driver, "get_firmware_info", None)
     if fn is None:
@@ -1418,6 +1449,7 @@ CHECKS: list[Check] = [
     check_amt_redirection,
     check_amt_kvm_consent,
     check_amt_rfb_password,
+    check_amt_reset_churn,
     check_firmware_report,
     check_firmware_quirks,
     check_firmware_currency,
@@ -1797,4 +1829,5 @@ def _is_volatile(check: Check) -> bool:
         "check_amt_provisioning",
         "check_amt_redirection",
         "check_amt_rfb_password",
+        "check_amt_reset_churn",
     }

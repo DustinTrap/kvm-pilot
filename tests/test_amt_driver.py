@@ -8,6 +8,8 @@ autouse network guard in conftest).
 
 from __future__ import annotations
 
+import time
+
 import pytest
 
 from kvm_pilot.drivers.amt import AmtDriver
@@ -1713,3 +1715,169 @@ def test_a_broken_probe_never_replaces_the_real_error(amt_emu):
     assert "UnsupportedFeature" in msg           # the REAL fault survived
     assert "could not be tested" in msg          # and the probe reported honestly
     assert "probe exploded" not in msg
+
+
+# -- boot order + IDE-R flags (#252) ------------------------------------------
+
+
+def test_set_boot_cd_without_a_served_disc_targets_the_physical_drive(amt_emu):
+    out = make(amt_emu).set_boot_device("cd")
+    assert out["use_ider"] is False
+    assert amt_emu.state.use_ider == "false"
+    assert amt_emu.state.ider_boot_device == "0"
+    assert "Force CD/DVD Boot" in amt_emu.state.boot_order
+
+
+def test_set_boot_follows_intels_order_clear_put_role_source(amt_emu):
+    """AMT rejects UseIDER=true with InvalidValues while a forced source is still
+    active, so the reference clears the order FIRST, then writes the settings,
+    claims the single-use role, and only then forces the source."""
+    make(amt_emu).set_boot_device("pxe")
+    methods = [m for m, _cls in amt_emu.state.calls if m in ("ChangeBootOrder", "Put", "SetBootConfigRole")]
+    assert methods == ["ChangeBootOrder", "Put", "SetBootConfigRole", "ChangeBootOrder"]
+    assert "Force PXE Boot" in amt_emu.state.boot_order  # the final one forced the source
+
+
+# -- power: the ME must survive its own reset (#251) --------------------------
+
+
+def test_me_alive_probe_reads_the_wsman_port(amt_emu):
+    import socket
+
+    assert make(amt_emu)._me_alive() is True
+    # A port nothing listens on: bind, learn the number, release it.
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    dead = s.getsockname()[1]
+    s.close()
+    assert AmtDriver("127.0.0.1", "admin", "secret", port=dead)._me_alive() is False
+
+
+def test_accepted_reset_that_silences_the_me_is_reported_as_the_wedge(amt_emu, monkeypatch):
+    """#251: after the third reset every AMT port went dark while the host booted
+    fine. "requested" would have been a false all-clear — the error must say the
+    request WAS accepted and that recovery is physical (G3)."""
+    from kvm_pilot.drivers.amt import driver as amt_driver
+
+    drv = make(amt_emu)
+    monkeypatch.setattr(amt_driver, "_ME_LIVENESS_S", 0.0)
+    monkeypatch.setattr(drv, "_me_alive", lambda timeout=2.0: False)
+    with pytest.raises(WsmanError) as ei:
+        drv.reset_hard()
+    assert ei.value.me_not_ready is True
+    msg = str(ei.value)
+    assert "accepted" in msg and "G3" in msg
+    assert amt_emu.state.last_power_request == "10"  # the reset really went out
+
+
+def test_reset_without_wait_skips_the_liveness_probe(amt_emu, monkeypatch):
+    drv = make(amt_emu)
+    monkeypatch.setattr(drv, "_me_alive", lambda timeout=2.0: False)
+    drv.reset_hard(wait=False)  # must not raise
+    assert amt_emu.state.last_power_request == "10"
+
+
+def test_hard_reset_churn_is_counted_and_warned(amt_emu):
+    from kvm_pilot.health import Severity, check_amt_reset_churn
+
+    drv = make(amt_emu)
+    drv.reset_hard()
+    drv.power_off_hard()
+    assert drv.hard_resets_recent() == 2
+    ok = check_amt_reset_churn(drv)
+    assert ok is not None and ok.severity is Severity.OK
+
+    drv.reset_hard()
+    fresh = make(amt_emu)  # a new driver (as the MCP server builds per call) sees the same log
+    assert fresh.hard_resets_recent() == 3
+    res = check_amt_reset_churn(fresh)
+    assert res is not None
+    assert res.severity is Severity.WARNING
+    assert "#251" in res.detail and "G3" in res.detail
+    assert "use_ider=true" in res.remediation and "PXE" in res.remediation
+
+
+def test_soft_power_ops_do_not_count_as_churn(amt_emu):
+    drv = make(amt_emu)
+    drv.power_on()
+    drv.power_off()
+    assert drv.hard_resets_recent() == 0
+
+
+def test_reset_churn_check_skips_non_amt_drivers():
+    from kvm_pilot.health import check_amt_reset_churn
+
+    assert check_amt_reset_churn(object()) is None
+
+
+def test_churn_quirk_is_published_and_names_the_prevention(amt_emu):
+    quirks = {q.id: q for q in make(amt_emu).known_quirks()}
+    q = quirks["me-wedge-on-redirection-churn"]
+    assert "#251" in q.summary
+    assert "media-list" in q.workaround and "use_ider=true" in q.workaround
+
+
+def test_blank_display_quirk_does_not_imply_a_closed_lid(amt_emu):
+    """#250: an agent read "display asleep" as "lid closed" and told the user so.
+    The panel sleeps with the lid open; the text must say that outright."""
+    q = {q.id: q for q in make(amt_emu).known_quirks()}["kvm-blank-when-display-asleep"]
+    assert "lid" in q.summary.lower() and "open" in q.summary.lower()
+    assert "NOT that the lid is closed" in q.workaround
+
+
+def test_soft_power_ops_skip_the_liveness_probe(amt_emu, monkeypatch):
+    """Only the hard ops have wedged an ME (#251); a graceful on/off must not
+    pay for the probe — and must not fail when it would have."""
+    drv = make(amt_emu)
+    calls: list[float] = []
+    monkeypatch.setattr(drv, "_me_alive", lambda timeout=2.0: calls.append(timeout) or False)
+    drv.power_on()
+    drv.power_off()
+    assert calls == []
+
+
+def test_liveness_probe_stays_inside_its_budget(amt_emu, monkeypatch):
+    from kvm_pilot.drivers.amt import driver as amt_driver
+
+    drv = make(amt_emu)
+    seen: list[float] = []
+    monkeypatch.setattr(amt_driver, "_ME_LIVENESS_S", 1.0)
+    monkeypatch.setattr(drv, "_me_alive", lambda timeout=2.0: seen.append(timeout) or False)
+    started = time.monotonic()
+    with pytest.raises(WsmanError):
+        drv.reset_hard()
+    elapsed = time.monotonic() - started
+    assert seen, "the ME must be probed at least once"
+    assert all(t <= 2.0 for t in seen)     # never longer than one attempt's cap
+    assert elapsed < 3.0                   # and the whole wait honors the budget
+
+
+def test_churn_count_is_not_frozen_by_the_health_memo(amt_emu):
+    """`amt_health()` memoizes its WS-Man reads (AMT flood-protects bursts), but
+    the reset counter changes with every reset this process sends — caching it
+    would under-report churn to the very check that watches for it."""
+    drv = make(amt_emu)
+    assert drv.amt_health()["hard_resets_10m"] == 0     # populates the memo
+    drv.reset_hard()
+    drv.reset_hard()
+    assert drv.amt_health()["hard_resets_10m"] == 2
+
+
+def test_hard_reset_accounting_survives_concurrent_calls(amt_emu):
+    """Power calls land on different threads (the MCP server runs each tool body
+    in a worker); a lost update would keep the count under the threshold."""
+    import threading
+
+    drv = make(amt_emu)
+    barrier = threading.Barrier(8)
+
+    def hit() -> None:
+        barrier.wait()
+        drv._note_hard_reset()
+
+    threads = [threading.Thread(target=hit) for _ in range(8)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert drv.hard_resets_recent() == 8

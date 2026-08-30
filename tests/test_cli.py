@@ -1480,3 +1480,141 @@ def test_recover_hid_reports_success_and_failure_distinctly(monkeypatch, capsys)
     assert main(["recover-hid", "--driver", "fake", "--host", "h", "--yes"]) == 1
     # The failure names the physical cause this cannot fix.
     assert "data-capable" in capsys.readouterr().out
+
+
+# -- mount/eject when the disc is streamed from this process (#252) ------------
+
+
+class _StreamingMedia:
+    """A stand-in for a driver that serves media from the client (AMT IDE-R)."""
+
+    media_streams_from_client = True
+
+    def __init__(self, connected: bool = True, interrupt: bool = True,
+                 confirm_answer: bool = True):
+        from kvm_pilot.safety import SafetyPolicy
+
+        self.connected = connected
+        self.interrupt = interrupt
+        self.confirm_answer = confirm_answer
+        self.ejected = False
+        self.served = False
+        self.prompts: list[str] = []
+        # A driver built without --yes carries an interactive confirm; record
+        # every question it would ask so a test can prove none is asked.
+        def _confirm(op: str, desc: str) -> bool:
+            self.prompts.append(op)
+            return self.confirm_answer
+        self.safety = SafetyPolicy(confirm=_confirm)
+
+    def mount_iso(self, source, image_name=None, cdrom=True):
+        return source
+
+    def serve_media(self):
+        self.served = True
+        if self.interrupt:
+            raise KeyboardInterrupt
+
+    def msd_disconnect(self):
+        # Gated on a real driver — go through the policy so the test sees a prompt.
+        if not self.safety.guard("amt.eject", "Detach IDE-R virtual media"):
+            return
+        self.ejected = True
+        self.connected = False
+
+    def get_msd_state(self):
+        return {"connected": self.connected}
+
+
+def _media_args(**kw):
+    from types import SimpleNamespace
+
+    return SimpleNamespace(**{"source": "/x.iso", "name": None, "usb": False, "dry_run": False, **kw})
+
+
+def test_mount_serves_in_the_foreground_until_interrupted(monkeypatch, capsys):
+    """A CLI `mount` that returned would take the disc with it — the host boots
+    from a session that must outlive the command. Serve until Ctrl-C, then eject."""
+    from kvm_pilot import cli
+
+    kvm = _StreamingMedia()
+    monkeypatch.setattr(cli, "_client", lambda args, cap: kvm)
+    assert cli.cmd_mount(_media_args()) == 0
+    out = capsys.readouterr().out
+    assert "mounted: /x.iso" in out
+    assert "streamed from this process" in out and "Ctrl-C" in out
+    assert kvm.served and kvm.ejected
+    assert "detached: virtual media ejected" in out
+
+
+def test_mount_returns_when_the_device_ends_the_session(monkeypatch, capsys):
+    from kvm_pilot import cli
+
+    kvm = _StreamingMedia(interrupt=False)
+    monkeypatch.setattr(cli, "_client", lambda args, cap: kvm)
+    assert cli.cmd_mount(_media_args()) == 0
+    assert "detached: the device closed the media session" in capsys.readouterr().out
+    assert kvm.ejected is False
+
+
+def test_mount_dry_run_does_not_serve(monkeypatch, capsys):
+    from kvm_pilot import cli
+
+    kvm = _StreamingMedia()
+    monkeypatch.setattr(cli, "_client", lambda args, cap: kvm)
+    assert cli.cmd_mount(_media_args(dry_run=True)) == 0
+    assert kvm.served is False
+
+
+def test_eject_is_honest_when_no_session_lives_in_this_process(monkeypatch, capsys):
+    from kvm_pilot import cli
+
+    kvm = _StreamingMedia(connected=False)
+    monkeypatch.setattr(cli, "_client", lambda args, cap: kvm)
+    assert cli.cmd_eject(_media_args()) == 0
+    out = capsys.readouterr().out
+    assert "nothing to eject" in out
+    assert kvm.ejected is False
+
+
+def test_eject_detaches_a_session_in_this_process(monkeypatch, capsys):
+    from kvm_pilot import cli
+
+    kvm = _StreamingMedia(connected=True)
+    monkeypatch.setattr(cli, "_client", lambda args, cap: kvm)
+    assert cli.cmd_eject(_media_args()) == 0
+    assert kvm.ejected is True
+    assert "ejected: virtual media detached" in capsys.readouterr().out
+
+
+def test_nothing_to_eject_is_one_predicate_shared_by_both_front_ends():
+    """The CLI and the MCP eject path must agree on when there is nothing to
+    detach — two copies of this condition is how the "false ejected" bug
+    reappears in one of them (#252)."""
+    from kvm_pilot.drivers.base import nothing_to_eject
+
+    assert nothing_to_eject(_StreamingMedia(connected=False)) is True
+    assert nothing_to_eject(_StreamingMedia(connected=True)) is False
+    assert nothing_to_eject(object()) is False          # a device-staged driver
+
+    class _Staged:
+        def get_msd_state(self):
+            return {"connected": False}
+
+    assert nothing_to_eject(_Staged()) is False         # not client-streamed
+
+
+def test_ctrl_c_detaches_without_asking_a_second_time(monkeypatch, capsys):
+    """Ctrl-C is the detach instruction, and the mount it undoes was already
+    approved. A second prompt reaches someone trying to quit — and a refusal
+    would leave the disc attached with the process gone, which is the stuck
+    state the foreground lifetime exists to prevent (CodeRabbit on #252)."""
+    from kvm_pilot import cli
+
+    # A confirm that answers "no" — the user is quitting, not approving again.
+    kvm = _StreamingMedia(confirm_answer=False)
+    monkeypatch.setattr(cli, "_client", lambda args, cap: kvm)
+    assert cli.cmd_mount(_media_args()) == 0
+    assert kvm.ejected is True, "the disc must be detached on Ctrl-C"
+    assert kvm.prompts == [], f"cleanup asked again: {kvm.prompts}"
+    assert "detached: virtual media ejected" in capsys.readouterr().out

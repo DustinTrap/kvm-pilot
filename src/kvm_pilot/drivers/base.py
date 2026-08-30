@@ -125,6 +125,21 @@ class VirtualMedia(Protocol):
     def msd_disconnect(self) -> bool | None: ...
 
 
+def nothing_to_eject(driver: object) -> bool:
+    """True when a client-streamed disc cannot be detached from *here*.
+
+    Some drivers (AMT IDE-R) stream the image from the client process rather
+    than staging it on the device, so the session lives in whichever process
+    mounted it. An ``eject`` elsewhere has nothing to detach and must say so
+    instead of reporting a detach it did not perform (#252). Duck-typed like
+    the other ``get_msd_state`` probes: only one driver streams today.
+    """
+    if not getattr(driver, "media_streams_from_client", False):
+        return False
+    state = getattr(driver, "get_msd_state", None)
+    return state is not None and not state().get("connected")
+
+
 @runtime_checkable
 class BootConfig(Protocol):
     """Choose what the host boots on its next (or every) reset.

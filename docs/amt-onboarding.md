@@ -170,15 +170,29 @@ kvm-pilot mount fedora.iso --profile mybox         # attach an ISO as a virtual 
 
 ```bash
 kvm-pilot amt enable-sol --profile mybox   # 16994 listener must be up
-kvm-pilot mount fedora.iso --profile mybox # serve the ISO as a virtual CD
-kvm-pilot boot-device cd   --profile mybox # next boot -> CD
-kvm-pilot power reset      --profile mybox # boot into the ISO
+kvm-pilot mount fedora.iso --profile mybox # serves the ISO — KEEPS RUNNING
+
+# ... then, from a SECOND terminal, while `mount` is still serving:
+kvm-pilot media-list       --profile mybox # connected: true?
+kvm-pilot boot-device cd   --profile mybox # next boot -> CD (use_ider: true)
+kvm-pilot power reset      --profile mybox # boot into the ISO -- ONCE
 ```
 
-The image streams live from your machine and the session stays open while the
-host boots — keep the process running until the installer/OS is up. Legacy
+**`mount` does not return** — the ISO streams from *that* process, so it holds
+the terminal until Ctrl-C (which detaches the disc). Run the follow-up commands
+from a second terminal while it serves; a `boot-device cd` issued after `mount`
+exited reports `use_ider: false` and points the BIOS at the *physical* optical
+drive (#252). Keep it running until the installer/OS is up. Legacy
 `amtider` does **not** work on AMT ≥ 11; kvm-pilot speaks the modern redirection
 protocol.
+
+> **Hardware verification pending.** The ISO *streaming* was exercised once on a
+> Latitude 5411 @ 14.1.79 ([#213](https://github.com/DustinTrap/kvm-pilot/issues/213)),
+> but the session-lifetime and `UseIDER` boot behaviour above is **emulator-only
+> so far** ([#252](https://github.com/DustinTrap/kvm-pilot/issues/252)). The
+> [Hardware-Compatibility list](https://github.com/DustinTrap/kvm-pilot/wiki/Hardware-Compatibility)
+> is the source of truth for what has actually been exercised — check it before
+> relying on this path, and please add your result to it.
 
 ---
 
@@ -221,6 +235,8 @@ virtual media over AMT ≥ 11 was never a firmware limitation, it's client tooli
 | Box unreachable — no ping, no AMT, no SSH | Host idle-suspended (GNOME-on-AC will do this) | Send **Wake-on-LAN** first; then disable idle-suspend on always-on hosts (`systemctl mask sleep.target …`) |
 | `boot-device bios` rejected | Boot-to-BIOS-setup is firmware-dependent (#215) | Boot a source instead (`pxe`/`cd`/`hdd`) |
 | Virtual media: `amtider` fails (CONNECT→ERROR) on AMT 14 | Legacy IDE-R protocol revision | Use kvm-pilot's built-in `mount` (IDE-R, #213) |
+| `mount` → `boot-device cd` → `power reset`, and the host boots its own disk anyway | The IDE-R session was gone before the reset (a CLI `mount` that exited, or an old build's MCP `mount_iso`), or `boot-device cd` was sent with no disc served so it targeted a *physical* drive (#252) | Keep the CLI `mount` running in the foreground (it serves the disc; reset from another terminal) or mount via MCP (the server process holds it); check `media-list` shows `connected: true` and `boot-device cd` reports `use_ider: true` **before** the reset. **Do not loop** — see the next row |
+| After a few mount/reset cycles **every** AMT port (16992/16994/5900) stops answering while the OS boots fine | ME wedged by redirection-session churn + hard resets (#251); needs the same **G3 power cycle** as a firmware-update wedge | kvm-pilot reports a reset the ME accepted but went silent after as the wedge (not "requested"), and `healthcheck` warns `amt-reset-churn` at 3 hard resets in 10 min. Stop after two failed boot attempts; use PXE or in-band `boot-device --via ssh` instead |
 | SOL connects but shows nothing | Platform doesn't redirect its console to serial (most laptops) | Expected; use `snapshot` for firmware screens instead |
 
 ---

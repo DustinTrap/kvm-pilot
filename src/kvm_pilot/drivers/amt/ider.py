@@ -17,8 +17,17 @@ MeshCommander's ``amt-ider.js`` (the maintained reference for AMT 11–16; the
 legacy ``amtider`` tool speaks an older revision AMT 14 rejects — #213).
 stdlib-only: ``socket`` + ``struct`` + ``threading``.
 
-NOTE (maturity): emulator-tested only. Live boot-from-ISO on real AMT hardware
-is unverified pending #217 recovery — treat as experimental.
+NOTE (maturity): exercised live once on a Latitude 5411 @ AMT 14.1.79 (#213:
+in-OS read + one iPXE boot, with the session held open in-process). Not yet in
+the run ledger — treat as experimental.
+
+Session lifetime (#252): the ME presents the redirected CD to the BIOS only
+while the session is open, and the session must survive the *reset* that boots
+from it. So a live session is registered per process and keyed by host:
+a later :class:`~.driver.AmtDriver` for the same host adopts it, and closing a
+driver leaves an attached disc attached — ``eject``/``msd_disconnect`` is the
+detach. Without this, an MCP ``mount_iso`` (one driver per tool call) tore the
+disc down before ``set_boot_device`` ran, and the CLI's did the same at exit.
 """
 
 from __future__ import annotations
@@ -33,6 +42,32 @@ from ...errors import CapabilityError, KVMPilotError
 from .redir import START_IDER, RedirectionChannel
 
 logger = logging.getLogger("kvm_pilot.drivers.amt")
+
+# Live sessions by host — one per host (the ME allows one IDE-R session).
+# Threads are daemons, so process exit still ends every session.
+_LIVE: dict[str, IderSession] = {}
+_LIVE_LOCK = threading.Lock()
+
+
+def live_session(host: str) -> IderSession | None:
+    """The process-wide live IDE-R session for ``host``, if one is still serving."""
+    with _LIVE_LOCK:
+        s = _LIVE.get(host)
+        if s is not None and not s.alive:
+            del _LIVE[host]
+            s = None
+        return s
+
+
+def _register(host: str, session: IderSession) -> None:
+    with _LIVE_LOCK:
+        _LIVE[host] = session
+
+
+def _release(host: str, session: IderSession) -> None:
+    with _LIVE_LOCK:
+        if _LIVE.get(host) is session:
+            del _LIVE[host]
 
 # IDE-R command bytes (both directions) over the redirection channel.
 _OPEN = 0x40
@@ -133,8 +168,10 @@ class IderSession:
         if self._error:
             self.stop()
             raise self._error
+        _register(self.host, self)
 
     def stop(self) -> None:
+        _release(self.host, self)
         self._stop.set()
         self._chan.close()
         # The serving thread may be mid-_handle_scsi on self._iso; closing the
@@ -149,6 +186,19 @@ class IderSession:
                 self._iso.close()
             finally:
                 self._iso = None
+
+    def wait(self, timeout: float | None = None) -> None:
+        """Block until the session has ended AND released its resources.
+
+        ``_stop`` is set at the *start* of teardown (it is what breaks the serving
+        loop), so waiting on it alone would return while the socket and the ISO
+        handle are still open. The serving thread finishes its own teardown in
+        ``_loop``'s ``finally``, so joining it is the "fully finished" signal.
+        """
+        self._stop.wait(timeout)
+        thread = self._thread
+        if thread is not None and thread is not threading.current_thread():
+            thread.join(timeout)
 
     @property
     def alive(self) -> bool:
@@ -176,7 +226,11 @@ class IderSession:
                 self._error = e
                 logger.debug("IDE-R loop error for %s: %s", self.host, e)
         finally:
-            self._stop.set()
+            # The ME can end the session on its own (CLOSE, or the host powering
+            # down). Setting _stop alone would leave the registry entry, the ISO
+            # handle and the socket held until an explicit eject or process exit,
+            # so tear down here too. stop() never self-joins (see its comment).
+            self.stop()
 
     def _dispatch(self) -> int:
         """Parse one IDE-R message from the head of ``_acc``; 0 = need more bytes."""

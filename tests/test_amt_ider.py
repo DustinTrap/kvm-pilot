@@ -349,3 +349,139 @@ def test_dispatch_control_messages(tmp_path):
         assert s._stop.is_set()
     finally:
         s._iso.close()
+
+
+# -- session lifetime (#252) ------------------------------------------------
+#
+# The ME shows the redirected CD to the BIOS only while the session is open,
+# and the reset that boots from it is a LATER call on a DIFFERENT driver
+# instance (the MCP server builds one per tool call). So a live session is
+# process-wide: adopted by the next driver for the host, kept across close(),
+# released only by msd_disconnect().
+
+
+class _HoldingIder(_FakeAmtIder):
+    """A fake ME that enables the CD and then simply holds the session open."""
+
+    def __init__(self) -> None:
+        self.hold = threading.Event()
+        super().__init__()
+
+    def _drive_scsi(self, conn) -> None:
+        self.hold.wait(30)
+
+    def close(self) -> None:
+        self.hold.set()
+        super().close()
+
+
+@pytest.fixture
+def holding_ider():
+    from kvm_pilot.drivers.amt import ider as amt_ider
+
+    amt_ider._LIVE.clear()
+    srv = _HoldingIder()
+    yield srv
+    srv.close()
+    amt_ider._LIVE.clear()
+
+
+def _iso(tmp_path):
+    p = tmp_path / "boot.iso"
+    p.write_bytes(b"\x5a" * (2048 * 4))
+    return str(p)
+
+
+def test_live_session_outlives_close_and_is_adopted_by_the_next_driver(holding_ider, tmp_path):
+    from kvm_pilot.drivers.amt.ider import live_session
+
+    first = AmtDriver("127.0.0.1", _USER, _PASS, sol_port=holding_ider.port,
+                      confirm=lambda *_: True, timeout=10)
+    first.mount_iso(_iso(tmp_path))
+    assert first.get_msd_state()["connected"] is True
+
+    first.close()  # what the MCP server does after every tool call
+    assert live_session("127.0.0.1") is not None, "close() must leave the disc attached"
+
+    second = AmtDriver("127.0.0.1", _USER, _PASS, sol_port=holding_ider.port,
+                       confirm=lambda *_: True, timeout=10)
+    state = second.get_msd_state()
+    assert state["connected"] is True          # adopted, not a new session
+    assert state["image"] == _iso(tmp_path)
+
+    second.msd_disconnect()                    # eject is the detach
+    assert live_session("127.0.0.1") is None
+    assert second.get_msd_state()["connected"] is False
+
+
+def test_mount_replaces_a_previous_live_session(holding_ider, tmp_path):
+    from kvm_pilot.drivers.amt.ider import live_session
+
+    drv = AmtDriver("127.0.0.1", _USER, _PASS, sol_port=holding_ider.port,
+                    confirm=lambda *_: True, timeout=10)
+    drv.mount_iso(_iso(tmp_path))
+    old = live_session("127.0.0.1")
+    assert old is not None
+    # One IDE-R session per host: a second mount must stop the first, and the
+    # fake ME accepts one connection, so the replacement cannot connect here —
+    # the point is that the old session is gone either way.
+    with pytest.raises(Exception):  # noqa: B017 - connection refused / handshake failure
+        drv.mount_iso(_iso(tmp_path))
+    assert old.alive is False
+    assert live_session("127.0.0.1") is None
+
+
+def test_serve_media_blocks_until_detached(holding_ider, tmp_path):
+    drv = AmtDriver("127.0.0.1", _USER, _PASS, sol_port=holding_ider.port,
+                    confirm=lambda *_: True, timeout=10)
+    drv.mount_iso(_iso(tmp_path))
+    assert drv.media_streams_from_client is True
+    t = threading.Thread(target=drv.serve_media, daemon=True)
+    t.start()
+    t.join(0.3)
+    assert t.is_alive(), "serve_media must block while the disc is attached"
+    drv.msd_disconnect()
+    t.join(5)
+    assert not t.is_alive()
+
+
+def test_set_boot_cd_boots_the_redirected_disc_when_serving(holding_ider, amt_emu, tmp_path):
+    """Intel's reference (Device Management Toolkit MPS) sets UseIDER +
+    IDERBootDevice=1 for "reset to IDER CD-ROM"; the CD/DVD boot source alone
+    means a *physical* drive. With a disc being served, we set both (#252)."""
+    drv = AmtDriver("127.0.0.1", "admin", "secret", port=amt_emu.port,
+                    sol_port=holding_ider.port, confirm=lambda *_: True, timeout=10)
+    drv.mount_iso(_iso(tmp_path))
+    out = drv.set_boot_device("cd")
+    assert out["use_ider"] is True
+    assert amt_emu.state.use_ider == "true"
+    assert amt_emu.state.ider_boot_device == "1"
+    assert "Force CD/DVD Boot" in amt_emu.state.boot_order
+
+
+def test_set_boot_cd_dry_run_reports_use_ider_without_writing(holding_ider, amt_emu, tmp_path):
+    drv = AmtDriver("127.0.0.1", "admin", "secret", port=amt_emu.port,
+                    sol_port=holding_ider.port, confirm=lambda *_: True, timeout=10)
+    drv.mount_iso(_iso(tmp_path))
+    drv.safety.dry_run = True
+    out = drv.set_boot_device("cd")
+    assert out["use_ider"] is True
+    assert amt_emu.state.use_ider == "false"   # nothing written
+
+
+def test_a_session_the_me_closes_releases_its_registry_entry_and_files(holding_ider, tmp_path):
+    """A remote close used to only set the stop flag: the ISO handle, the socket
+    and the registry entry stayed held until an explicit eject or process exit
+    (CodeRabbit on #252)."""
+    from kvm_pilot.drivers.amt.ider import live_session
+
+    drv = AmtDriver("127.0.0.1", _USER, _PASS, sol_port=holding_ider.port,
+                    confirm=lambda *_: True, timeout=10)
+    drv.mount_iso(_iso(tmp_path))
+    session = live_session("127.0.0.1")
+    assert session is not None
+
+    holding_ider.close()                     # the ME goes away
+    session.wait(10)                         # the serving loop notices and tears down
+    assert session._iso is None, "the ISO file handle must be released"
+    assert live_session("127.0.0.1") is None, "the registry entry must be released"

@@ -46,8 +46,8 @@ support (`kvm-pilot capabilities` lists them, offline).
 | `amt` | ⚡ | — (driver amt) | Intel AMT/vPro redirection enablement over WS-Man (needs `--driver amt`), no MEBx trip: `enable-sol` opens the SOL listener (16994); `enable-kvm` opens KVM redirection (5900) + sets the 8-char RFB password (`--no-consent` disables the on-screen user-consent prompt — Admin Control Mode only, CLI-only); `reset-kvm` clears a wedged single KVM session. |
 | `paths` | | — | Show which independent recovery paths are live (kvmd-REST / appliance-SSH / target-SSH / OOB power / console-HID), labeled by failure domain — the lockout-exposure view (#162). `--json`. |
 | `media-list` | | virtual_media | List images already on the KVM's MSD storage — check before downloading/uploading an ISO (#127). |
-| `mount` | ⚡ | virtual_media | Mount an ISO (local path or URL); verifies the media actually reports online (#77). `--name`, `--usb`. |
-| `eject` | ⚡ | virtual_media | Detach virtual media (inverse of `mount`). |
+| `mount` | ⚡ | virtual_media | Mount an ISO (local path or URL); verifies the media actually reports online (#77). `--name`, `--usb`. On a driver that streams the disc from the client (AMT IDE-R) it **keeps serving in the foreground** until Ctrl-C — run `boot-device`/`power` from another terminal (#252). |
+| `eject` | ⚡ | virtual_media | Detach virtual media (inverse of `mount`). For client-streamed media it can only detach a session in its own process; it says so rather than claiming an eject it didn't do. |
 | `classify` | | video | Classify the current screen into a boot/run phase once (vision backend flags: `--backend`, `--vision-url`, `--vision-model`, `--hint`). |
 | `watch` | | video | Wait until the screen reaches a phase; `--timeout` is the vision deadline (distinct from the global `--timeout`). |
 | `events` | | events | Stream device events (WebSocket; `websocket-client` is bundled as a base dep); `--duration`, `--count`, `--no-stream`. |

@@ -42,11 +42,11 @@
           "maturity": {
             "level": "beta",
             "capabilities": {
-              "healthcheck": "beta",
-              "info": "beta",
-              "logs": "beta",
-              "power_state": "beta",
-              "snapshot": "beta",
+              "healthcheck": "ga",
+              "info": "ga",
+              "logs": "ga",
+              "power_state": "ga",
+              "snapshot": "rc",
               "virtual_media": "beta"
             }
           }

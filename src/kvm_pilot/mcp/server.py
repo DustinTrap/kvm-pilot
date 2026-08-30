@@ -68,6 +68,7 @@ from kvm_pilot.calibrate import (
 )
 from kvm_pilot.config import HostConfig
 from kvm_pilot.drivers import Capability, KVMDriver, make_driver_from_config
+from kvm_pilot.drivers.base import nothing_to_eject
 from kvm_pilot.errors import (
     CapabilityError,
     KVMPilotError,
@@ -1560,10 +1561,22 @@ async def mount_iso(
     per-invocation approval. Mounting bumps the frame generation, so a mouse click
     planned against the pre-mount screen is invalidated.
     """
+    def _run(_cfg: HostConfig, kvm: KVMDriver) -> dict:
+        vm = cast("VirtualMedia", kvm)
+        image = vm.mount_iso(source, image_name=name, cdrom=not usb)
+        out: dict = {"image": image}
+        state = getattr(kvm, "get_msd_state", None)
+        if getattr(kvm, "media_streams_from_client", False) and state is not None:
+            # The disc is streamed from THIS process and outlives the tool call
+            # (#252). The mechanics are the driver's to describe — an agent that
+            # ejects before the reset undoes the mount (#251).
+            out["note"] = state().get("note")
+        return out
+
     return await _act(
         ctx, profile, tool="mount_iso", effect=EffectClass.MEDIA, op="msd.connect",
         transport="msd", args={"source": source, "name": name, "usb": usb}, confirm=confirm,
-        run=lambda _cfg, kvm: cast("VirtualMedia", kvm).mount_iso(source, image_name=name, cdrom=not usb),
+        run=_run,
         detail=f"mounted {source!r}",
         capability=Capability.VIRTUAL_MEDIA,
     )
@@ -1575,10 +1588,20 @@ async def eject(ctx: Context, confirm: bool = False, profile: str | None = None)
 
     Needs ``KVM_PILOT_MCP_ALLOW_MEDIA`` + per-invocation approval.
     """
+    def _run(_cfg: HostConfig, kvm: KVMDriver) -> dict:
+        if nothing_to_eject(kvm):
+            # `detail` is set before the run; override it so the summary line
+            # cannot say "ejected" over a no-op result (#252).
+            return {"detached": False,
+                    "detail": "nothing to eject: no media session in this server process",
+                    "note": "no media session in this server process — nothing was attached"}
+        cast("VirtualMedia", kvm).msd_disconnect()
+        return {"detached": True}
+
     return await _act(
         ctx, profile, tool="eject", effect=EffectClass.MEDIA, op="msd.disconnect",
         transport="msd", args={}, confirm=confirm,
-        run=lambda _cfg, kvm: cast("VirtualMedia", kvm).msd_disconnect(),
+        run=_run,
         detail="ejected virtual media",
         capability=Capability.VIRTUAL_MEDIA,
     )

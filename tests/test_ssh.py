@@ -205,7 +205,7 @@ def test_resolve_host_appliance_ssh_defaults_off(tmp_path):
 
 def test_discover_returns_only_open_hosts():
     open_hosts = {"10.0.0.3"}
-    with mock.patch("kvm_pilot.ssh._port_open", side_effect=lambda h, p, t: h in open_hosts):
+    with mock.patch("kvm_pilot.ssh.port_open", side_effect=lambda h, p, t: h in open_hosts):
         found = discover_ssh_hosts("10.0.0.0/29", port=22)
     assert found == [{"host": "10.0.0.3", "port": 22}]
 

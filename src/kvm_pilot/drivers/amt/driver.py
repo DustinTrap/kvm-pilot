@@ -25,6 +25,7 @@ import os
 import select
 import shutil
 import subprocess  # nosec B404 - fixed argv (no shell), AMT password via env not argv
+import threading
 import time
 from contextlib import contextmanager
 from pathlib import Path
@@ -32,9 +33,25 @@ from typing import TYPE_CHECKING, Any
 
 from ...errors import AuthError, CapabilityError, ConnectionError, KVMPilotError, ProtocolError
 from ...safety import SafetyPolicy
+from ...ssh import port_open
 from ..base import CapabilityMixin, PowerMixin, VideoScope
-from .ider import IderSession
-from .wsman import Wsman, WsmanError, amt, cim, escape, findtext
+from .ider import IderSession, live_session
+from .wsman import ME_NOT_READY_HINT, Wsman, WsmanError, amt, cim, escape, findtext
+
+# Hard resets / hard-offs issued from this process, per host (monotonic seconds).
+# Rapid redirection-session churn interleaved with hard resets wedged an ME so
+# badly only a G3 power cycle recovered it (Latitude 5411 @ 14.1.79, #251); the
+# healthcheck warns from this log before the next reset compounds it.
+_HARD_RESETS: dict[str, list[float]] = {}
+# Power calls can land on different threads (the MCP server runs each tool body
+# in a worker), and a lost update here would keep the churn count under its
+# warning threshold — the one thing this log exists to raise.
+_HARD_RESETS_LOCK = threading.Lock()
+_CHURN_WINDOW_S = 600.0
+# After an accepted power request the ME itself must still answer — it lives
+# on the PCH and stays up through a host reset. If it goes quiet, the reset
+# wedged the management plane and "requested" would be a false all-clear.
+_ME_LIVENESS_S = 15.0
 
 if TYPE_CHECKING:
     from ...config import HostConfig
@@ -102,6 +119,7 @@ class AmtDriver(PowerMixin, CapabilityMixin):
         self.host = host
         self._user = user
         self._passwd = passwd
+        self._port = port
         self._tls = tls
         self._verify_ssl = verify_ssl
         self._ssl_ca_file = ssl_ca_file
@@ -110,7 +128,10 @@ class AmtDriver(PowerMixin, CapabilityMixin):
         # Which KVM transport answered last: 'standard' (5900) or
         # 'redirection' (16994). None until the first successful connect (#245).
         self._kvm_transport: str | None = None
-        self._ider: IderSession | None = None
+        # Adopt a virtual CD this process is already serving to the host (#252):
+        # the MCP server builds one driver per tool call, and the disc must stay
+        # attached from mount_iso through set_boot_device and the reset.
+        self._ider: IderSession | None = live_session(host)
         # The KVM/RFB password is a separate MEBx credential; fall back to the
         # WS-Man admin password when it isn't configured separately.
         self._kvm_password = kvm_password if kvm_password is not None else passwd
@@ -151,13 +172,13 @@ class AmtDriver(PowerMixin, CapabilityMixin):
         )
 
     def close(self) -> None:
-        """Tear down the SOL + RFB + IDE-R sessions if open (WS-Man is stateless)."""
+        """Tear down the SOL + RFB sessions if open (WS-Man is stateless).
+
+        An attached IDE-R disc is deliberately **left attached** — see "Session
+        lifetime" in :mod:`.ider` (#252). ``msd_disconnect``/``eject`` detaches.
+        """
         self.serial_close()
-        if self._ider is not None:
-            try:
-                self._ider.stop()
-            finally:
-                self._ider = None
+        self._ider = None  # forget, don't stop — see docstring
         hid = self._hid
         self._hid = None
         if hid is not None:
@@ -267,7 +288,54 @@ class AmtDriver(PowerMixin, CapabilityMixin):
                 return ps.strip() == str(_POWER["on"])
         raise WsmanError(f"AMT on {self.host} did not report a PowerState")
 
-    def _request_power(self, state: int, op: str, desc: str) -> None:
+    def _me_alive(self, timeout: float = 2.0) -> bool:
+        """Does the ME still accept a TCP connection on its WS-Man port?"""
+        return port_open(self.host, self._port, timeout)
+
+    def _expect_me_alive(self, op: str) -> None:
+        """After an accepted power request, insist the management plane is still
+        there (bounded). A wedged ME is the one AMT failure with no remote
+        recovery, so it must surface as an error naming that the request WAS
+        accepted — not vanish behind "requested" (#251)."""
+        deadline = time.monotonic() + _ME_LIVENESS_S
+        while True:
+            # Clamp each attempt to what is left, so the stated budget is real;
+            # keep a short pause between tries — a wedged ME often refuses
+            # instantly (RST), which would otherwise spin.
+            remaining = deadline - time.monotonic()
+            if self._me_alive(timeout=min(2.0, max(0.25, remaining))):
+                return
+            if time.monotonic() >= deadline:
+                err = WsmanError(
+                    f"{op}: the ME accepted the power request (ReturnValue 0) but then "
+                    f"stopped answering on {self.host}:{self._port} for {_ME_LIVENESS_S:.0f}s. "
+                    "The host itself may have rebooted fine (check SSH) — the AMT plane is "
+                    f"wedged; {ME_NOT_READY_HINT}"
+                )
+                err.me_not_ready = True
+                raise err
+            time.sleep(min(1.0, max(0.0, deadline - time.monotonic())))
+
+    def _prune_hard_resets(self, *, record: bool) -> int:
+        """Prune the host's reset log to the churn window and return its size,
+        optionally recording one. Prune + append + count under one lock."""
+        now = time.monotonic()
+        with _HARD_RESETS_LOCK:
+            log = [t for t in _HARD_RESETS.get(self.host, []) if now - t < _CHURN_WINDOW_S]
+            if record:
+                log.append(now)
+            _HARD_RESETS[self.host] = log
+            return len(log)
+
+    def _note_hard_reset(self) -> None:
+        self._prune_hard_resets(record=True)
+
+    def hard_resets_recent(self) -> int:
+        """Hard resets / hard-offs sent to this host from this process in the
+        churn window (10 min). Feeds the ``amt-reset-churn`` healthcheck."""
+        return self._prune_hard_resets(record=False)
+
+    def _request_power(self, state: int, op: str, desc: str, *, wait: bool = True) -> None:
         if not self.safety.guard(op, desc):
             return  # dry-run: gated + skipped
         body = (
@@ -293,23 +361,35 @@ class AmtDriver(PowerMixin, CapabilityMixin):
                 f"AMT RequestPowerStateChange({state}) on {self.host} returned {rv} "
                 "(non-zero = the ME refused it; check AMT power-package support / provisioning)"
             )
+        if state in (_POWER["reset"], _POWER["off_hard"]):
+            self._note_hard_reset()
+            # Only the hard ops have been seen to wedge the ME (#251); a soft
+            # on/off must not pay for the probe.
+            if wait:
+                self._expect_me_alive(op)
 
     def power_on(self, wait: bool = True) -> None:
-        self._request_power(_POWER["on"], "amt.power_on", f"Power ON {self.host} (AMT)")
+        self._request_power(_POWER["on"], "amt.power_on", f"Power ON {self.host} (AMT)", wait=wait)
 
     def power_off(self, wait: bool = True) -> None:
         self._request_power(
-            _POWER["off_soft"], "amt.power_off", f"Graceful power OFF {self.host} (AMT, ACPI soft-off)"
+            _POWER["off_soft"], "amt.power_off", f"Graceful power OFF {self.host} (AMT, ACPI soft-off)",
+            wait=wait,
         )
 
     def power_off_hard(self, wait: bool = True) -> None:
         self._request_power(
-            _POWER["off_hard"], "amt.power_off_hard", f"HARD power off {self.host} (AMT, data-loss risk)"
+            _POWER["off_hard"], "amt.power_off_hard", f"HARD power off {self.host} (AMT, data-loss risk)",
+            wait=wait,
         )
 
     def reset_hard(self, wait: bool = True) -> None:
+        # NOT preceded by an IDE-R teardown (#251 asked for one): the ME shows the
+        # redirected CD to the BIOS only while the session is open, and the reset
+        # is what boots from it — the session must survive the reset (#252).
         self._request_power(
-            _POWER["reset"], "amt.reset_hard", f"HARD reset {self.host} (AMT master-bus reset)"
+            _POWER["reset"], "amt.reset_hard", f"HARD reset {self.host} (AMT master-bus reset)",
+            wait=wait,
         )
 
     # -- BootConfig -----------------------------------------------------
@@ -379,14 +459,27 @@ class AmtDriver(PowerMixin, CapabilityMixin):
                 "AMT boot overrides are single-use only (the ME clears them after the "
                 "next boot); persistent override is not available — omit --persistent."
             )
-        desc = f"Set next boot -> {key} (AMT single-use) on {self.host}"
+        # Booting the *redirected* CD needs more than the CD/DVD boot source —
+        # that alone points the BIOS at a physical optical drive. Intel's reference
+        # (Device Management Toolkit MPS, bootOptions.ts) also sets UseIDER +
+        # IDERBootDevice=1, so we do exactly that whenever this process is serving
+        # a disc to the host (#252).
+        use_ider = key in ("cd", "dvd") and self._ider is not None and self._ider.alive
+        desc = (
+            f"Set next boot -> {key} ({'IDE-R virtual CD' if use_ider else 'AMT single-use'}) "
+            f"on {self.host}"
+        )
         if not self.safety.guard("amt.set_boot_device", desc):
-            return self.get_boot_options()  # dry-run
-        self._put_boot_setting_data(bios_setup=(key == "bios"))
+            return self.get_boot_options() | {"use_ider": use_ider}  # dry-run
+        # Intel's order: clear any forced source first (AMT rejects UseIDER=true
+        # with InvalidValues while one is still active), write the settings, claim
+        # the single-use role, then force the source.
+        self._change_boot_order(None)
+        self._put_boot_setting_data(bios_setup=(key == "bios"), use_ider=use_ider)
+        self._set_boot_config_role(single_use=True)
         source_id = None if key in ("bios", "none") else _BOOT_SOURCE[key]
         self._change_boot_order(source_id)
-        self._set_boot_config_role(single_use=True)
-        return self.get_boot_options()
+        return self.get_boot_options() | {"use_ider": use_ider}
 
     def _rmw_put(
         self, uri: str, root_name: str, overrides: dict[str, str],
@@ -412,8 +505,9 @@ class AmtDriver(PowerMixin, CapabilityMixin):
         body = f'<p:{root_name} xmlns:p="{uri}">{"".join(parts)}</p:{root_name}>'
         self._wsman.put(uri, body, selectors=selectors)
 
-    def _put_boot_setting_data(self, *, bios_setup: bool) -> None:
-        """Reset AMT_BootSettingData, setting BIOSSetup for the 'bios' target.
+    def _put_boot_setting_data(self, *, bios_setup: bool, use_ider: bool = False) -> None:
+        """Reset AMT_BootSettingData, setting BIOSSetup for the 'bios' target and
+        UseIDER/IDERBootDevice (1 = the redirected CD) when booting our own disc.
 
         Some AMT firmware (observed on a Dell Latitude 5411, AMT 14.1.67) rejects
         ``BIOSSetup=true`` — boot-to-BIOS-setup — with an opaque
@@ -427,6 +521,8 @@ class AmtDriver(PowerMixin, CapabilityMixin):
                 "BIOSPause": "false",
                 "BootMediaIndex": "0",
                 "UserPasswordBypass": "false",
+                "UseIDER": "true" if use_ider else "false",
+                "IDERBootDevice": "1" if use_ider else "0",  # 1 = CD/DVD, 0 = floppy
             })
         except WsmanError as e:
             if bios_setup and "400" in str(e):
@@ -745,7 +841,10 @@ class AmtDriver(PowerMixin, CapabilityMixin):
                 "kvm_consent_required": consent,
                 "rfb_password_ok": self._rfb_password_ok(),
             }
-        return self._amt_health_cache
+        # NOT memoized with the rest: the WS-Man reads are cached because AMT
+        # flood-protects bursts, but this counter changes with every reset this
+        # process sends — a stale count would under-report churn (#251).
+        return {**self._amt_health_cache, "hard_resets_10m": self.hard_resets_recent()}
 
     def known_quirks(self, firmware: str | None = None) -> list:
         """AMT device/firmware quirks for the healthcheck (reuses the shared Quirk
@@ -766,13 +865,16 @@ class AmtDriver(PowerMixin, CapabilityMixin):
                              "'unsupported display mode', not a driver fault.",
                   source="observed"),
             Quirk(id="kvm-blank-when-display-asleep",
-                  summary="With the host's display DPMS-blanked, KVM serves a uniform BLACK "
-                          "800x600 framebuffer instead of the real desktop — and AMT pointer "
-                          "input does not wake it (observed on a Latitude 5411 @ 14.1.79 at a "
-                          "GDM greeter, eDP connected but disabled).",
-                  workaround="A black 800x600 capture means the panel is asleep, NOT that KVM "
-                             "is broken: the resolution drop is the tell. Wake the host at the "
-                             "OS (in-band SSH) or reset it and capture during POST.",
+                  summary="With the host's display in power-save (DPMS off / screen timeout / "
+                          "manually blanked), KVM serves a uniform BLACK 800x600 framebuffer "
+                          "instead of the real desktop, and AMT pointer input does not wake it "
+                          "(observed on a Latitude 5411 @ 14.1.79 at a GDM greeter, eDP "
+                          "connected but disabled). This says NOTHING about the lid: the panel "
+                          "sleeps with the lid open too (#250).",
+                  workaround="A black 800x600 capture means the panel is in power-save, NOT that "
+                             "KVM is broken and NOT that the lid is closed: the resolution drop "
+                             "is the tell. Wake the host at the OS (in-band SSH) or reset it and "
+                             "capture during POST.",
                   source="observed"),
             Quirk(id="kvm-5900-hardened-off",
                   summary="Newer ME builds permanently refuse Is5900PortEnabled "
@@ -808,6 +910,20 @@ class AmtDriver(PowerMixin, CapabilityMixin):
                           "sources work (observed on a Latitude 5411).",
                   workaround="set_boot_device('bios') raises a clear CapabilityError there; boot a "
                              "source (pxe/cd/hdd) instead.",
+                  source="observed"),
+            Quirk(id="me-wedge-on-redirection-churn",
+                  summary="Rapid redirection-session churn (repeated IDE-R mounts, KVM "
+                          "connects) interleaved with hard resets — 3 mounts + 3 resets in 12 "
+                          "min — wedged the ME: every AMT port (16992/16994/5900) went dark "
+                          "while the host booted fine. Same G3-only recovery as a firmware-"
+                          "update wedge. Observed on a Latitude 5411 @ 14.1.79 (#251).",
+                  workaround="Do NOT loop mount→boot-device→reset. One attempt: confirm "
+                             "`media-list` shows the IDE-R session connected and `boot-device "
+                             "cd` reported use_ider=true, then reset once. If the host still "
+                             "boots its disk, stop after two tries and use PXE or in-band "
+                             "`boot-device` over SSH. The healthcheck warns at 3 hard resets in "
+                             "10 min; a reset the ME accepts but then goes silent after is "
+                             "reported as the wedge, not as success.",
                   source="observed"),
         ]
         fw = firmware if firmware is not None else self._safe(self._amt_version)
@@ -931,11 +1047,22 @@ class AmtDriver(PowerMixin, CapabilityMixin):
     # mount_iso(), set_boot_device('cd'), then power_reset. EXPERIMENTAL:
     # emulator-tested only; live boot-from-ISO is unverified (#213/#217).
 
+    # The disc is streamed from THIS process, not staged on the device — so the
+    # CLI keeps serving after `mount` and the MCP result says where it lives.
+    media_streams_from_client = True
+
+    def serve_media(self) -> None:
+        """Block while the attached IDE-R disc is served — until it is ejected,
+        the ME closes the session, or the caller interrupts."""
+        if self._ider is not None:
+            self._ider.wait()
+
     def mount_iso(self, source: str, image_name: str | None = None, cdrom: bool = True) -> str:
         """Attach ``source`` (an ISO) as a virtual CD-ROM via AMT IDE-R. Gated.
 
-        The session streams the image live and stays open in the background;
-        pair with ``set_boot_device('cd')`` + a reset to boot from it."""
+        The session streams the image live from this process and outlives both
+        ``close()`` and the host's reset (see :mod:`.ider`). Pair with
+        ``set_boot_device('cd')`` (which then sets ``UseIDER``) + a reset."""
         if not cdrom:
             raise CapabilityError(
                 "AMT IDE-R redirects a bootable CD/DVD image only; USB mass-storage "
@@ -978,7 +1105,11 @@ class AmtDriver(PowerMixin, CapabilityMixin):
             "driver": "amt-ider",
             "connected": active,
             "image": self._ider.iso_path if self._ider is not None else None,
-            "note": "IDE-R streams the image live from this host; nothing is stored on the ME.",
+            "note": "IDE-R streams the image live from this process; nothing is stored on the "
+                    "ME. The disc stays attached across driver close() and the host's reset "
+                    "until eject — or until this process exits. Boot it with "
+                    "set_boot_device('cd') (reports use_ider=true), then reset ONCE; do NOT "
+                    "eject in between, and do not loop (#251/#252).",
         }
 
     # -- Video + HID (KVM redirection / RFB) ----------------------------
