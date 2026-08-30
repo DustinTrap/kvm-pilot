@@ -6,6 +6,17 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **CI: the MCP SDK shim type-checks against mcp 2.1.x again** (#256). mcp 2.1.0
+  re-added `mcp.server.fastmcp` as a *stub that raises* a migration message at
+  import. mypy does not execute modules, so it saw an importable module missing
+  `Context`/`Image`/`FastMCP` and failed the shim's 1.x fallback branch with
+  `attr-defined` — a code the existing `type: ignore[no-redef]` did not cover.
+  Every `test` job and the 2.x `mcp-majors` leg went red without a repo change.
+  **Runtime was never affected**: on 2.x the `mcp.server.mcpserver` branch
+  succeeds, and the MCP suite passes against 2.1.1. The lesson worth keeping:
+  `mcp.server.fastmcp` existing is no longer evidence of 1.x — `SDK_MAJOR` is.
+
 ## [0.1.0rc3] — 2026-08-05
 
 ### Fixed
