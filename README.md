@@ -364,6 +364,49 @@ returns a real firmware-level **BIOS/POST/GRUB screenshot** on a machine whose
 HDMI a capture-KVM can't see boot on a laptop. SOL and KVM listeners are opened
 remotely over WS-Man (`kvm-pilot amt enable-sol` / `enable-kvm`), no MEBx trip.
 
+## Help shape it — this is where you come in
+
+`kvm-pilot` is built in the open, and the thing standing between it and 1.0 is
+**not code — it's breadth of real hardware**. Three of the six drivers
+(`redfish`, `pikvm`, `blikvm`) have never run against a physical device, only
+emulators. Every rating you see is derived from a run ledger that ships inside
+the wheel, never hand-set, so the matrix only grows when someone runs it on real
+metal. That someone could be you.
+
+**The single most valuable thing you can send:** a
+[hardware report](https://github.com/DustinTrap/kvm-pilot/issues/new?template=hardware-report.yml).
+`kvm-pilot test-report --profile <name>` turns it into one command, it is
+read-only by default, and an hourly job folds the result into the published
+compatibility matrix. **Failures are as welcome as successes** — a driver that
+returns a confident wrong answer on your BMC is a more useful report than one
+that works, and it will be treated as a first-class finding, not swept up.
+
+Also genuinely wanted:
+
+- ⭐ **[Star the repo](https://github.com/DustinTrap/kvm-pilot)** if the idea is
+  useful to you. It is the cheapest signal that this problem is worth solving,
+  and it is what brings in the operators whose hardware the matrix still needs.
+- 🐛 **[Open an issue](https://github.com/DustinTrap/kvm-pilot/issues/new/choose)**
+  for anything: a bug, a device that misbehaves, a confusing error, a doc that
+  lied to you. This repo is *issue-per-finding* — an issue is the unit of record,
+  and "the error message didn't tell me what to do" is a legitimate report.
+- 💬 **Tell us what it got wrong.** Review the safety model, the approval flow,
+  the tool surface. Push back on the defaults. If an agent did something with
+  your machine that surprised you, that is exactly the feedback that makes this
+  safe for everyone else.
+- 🔌 **Ask for your device.** Missing driver, unsupported BMC, a KVM we've never
+  heard of? Open a driver request — the plugin architecture exists precisely so
+  that adding one doesn't mean forking the project, and
+  [`docs/plugin-development.md`](https://github.com/DustinTrap/kvm-pilot/blob/main/docs/plugin-development.md)
+  is the contract.
+- 🛠️ **Send a PR.** [`docs/CONTRIBUTING.md`](https://github.com/DustinTrap/kvm-pilot/blob/main/docs/CONTRIBUTING.md)
+  has the full pre-PR checklist; good first issues are
+  [labelled](https://github.com/DustinTrap/kvm-pilot/issues?q=is%3Aissue+is%3Aopen+label%3A%22good+first+issue%22).
+
+Nothing here phones home. The project has no telemetry that reports itself —
+every row in the compatibility matrix is there because a human chose to send it.
+That's the deal, and it's why your report actually matters.
+
 ## Documentation
 
 Full user and developer docs live in [`docs/`](https://github.com/DustinTrap/kvm-pilot/tree/main/docs/) (architecture, design
