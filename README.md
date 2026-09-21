@@ -155,8 +155,14 @@ destructive effect gated per class:
 | **KVM — pixels & HID** (PiKVM · GLKVM · BliKVM) | `snapshot` · `classify_screen` · `wait_for_state` · `power_state` · `logs` · `list_virtual_media` | `power` · `type_text` / `press_key` / `send_shortcut` / `mouse` · `calibrate_mouse` · `mount_iso` / `eject` |
 | **BMC — structured state** (Redfish · IPMI) | `info` · `boot_options` · `logs` (SEL) · sensors (CLI) | `power` · `set_boot_device` · SOL console (CLI `console`) |
 | **Firmware — Intel AMT/vPro** (spans both planes) | `info` · `snapshot` (firmware BIOS/POST/GRUB) · `boot_options` · `power_state` | `power` · `set_boot_device` · `type`/`mouse` · SOL (`console`) · `amt_enable` (open SOL/KVM listeners) |
-| **SSH — in-band & appliance** | `ssh_reachable` · `appliance_status` · `access_paths` | `ssh_exec` · `wake` (WoL) · `appliance_reboot` |
+| **SSH — in-band & appliance** | `ssh_reachable` · `appliance_status` · `access_paths` | `ssh_exec` · `host_exec` (ssh/winrm auto-picked) · `wake` (WoL) · `appliance_reboot` |
 | **Meta — evidence & intake** | `capabilities` · `support_matrix` · `healthcheck` | `file_firmware_report` |
+
+A machine with **no KVM and no BMC at all** is itself a first-class target:
+`driver = "ssh"` **plus `ssh_host`** (the machine's own address, #248) stands
+kvm-pilot on the recovery ladder's in-band rung — every device capability
+honestly absent, and the healthcheck saying plainly that there is no
+out-of-band recovery path there.
 
 The canonical per-tool reference — annotations, effect gates, approval
 lifecycle — is the [MCP server README](https://github.com/DustinTrap/kvm-pilot/blob/main/src/kvm_pilot/mcp/README.md);
@@ -165,7 +171,7 @@ the CLI covers the full surface in [docs/cli.md](https://github.com/DustinTrap/k
 ## Status & maturity
 
 > **Status: release candidate.** GA is gated on validation breadth, not code:
-> three of the six device drivers (`redfish`, `pikvm`, `blikvm`) have never run
+> three of the seven device drivers (`redfish`, `pikvm`, `blikvm`) have never run
 > against real hardware, only emulators. See the
 > [Hardware-Compatibility list](https://github.com/DustinTrap/kvm-pilot/wiki/Hardware-Compatibility)
 > for what has actually been exercised — and please add to it. (The exact version lives in the
@@ -367,7 +373,7 @@ remotely over WS-Man (`kvm-pilot amt enable-sol` / `enable-kvm`), no MEBx trip.
 ## Help shape it — this is where you come in
 
 `kvm-pilot` is built in the open, and the thing standing between it and 1.0 is
-**not code — it's breadth of real hardware**. Three of the six drivers
+**not code — it's breadth of real hardware**. Three of the seven drivers
 (`redfish`, `pikvm`, `blikvm`) have never run against a physical device, only
 emulators. Every rating you see is derived from a run ledger that ships inside
 the wheel, never hand-set, so the matrix only grows when someone runs it on real

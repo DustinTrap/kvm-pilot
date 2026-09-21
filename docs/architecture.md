@@ -22,11 +22,13 @@ grounding, portability rules, open questions) and [`decisions.md`](decisions.md)
 - **Consumers** — the CLI, the `KVMClient` facade, and `ScreenAnalyzer`. None of
   them care which device is behind the driver.
 - **Driver interface (the plugin seam)** — a set of small capability protocols.
-- **Registry** — `make_driver(kind)` plus entry-point discovery and host
-  autodetection (later step).
+- **Registry** — `make_driver(kind)` plus host autodetection (**shipped** — the
+  `auto` default, #235, see *Driver auto-detection* below) and entry-point
+  discovery (later step).
 - **Drivers** — concrete implementations: the PiKVM family (`PiKVMDriver`,
-  `GLKVMDriver`, `BliKVMDriver`), `RedfishDriver`, `IpmiDriver`, and a
-  `FakeDriver` for tests; JetKVM etc. later.
+  `GLKVMDriver`, `BliKVMDriver`), `RedfishDriver`, `IpmiDriver`, `AmtDriver`
+  (Intel AMT/vPro), `SshDriver` (an OS-plane target with **no device beneath
+  it**, #248), and a `FakeDriver` for tests; JetKVM etc. later.
 - **Transport** — generic HTTP (urllib + retry + secret redaction), with room
   for WebSocket/JSON-RPC transports; the IPMI driver channels through the
   system `ipmitool` binary (subprocess) rather than an in-process transport.
@@ -56,24 +58,70 @@ kvm.supports(Capability.GPIO) # -> True / False
 Devices differ widely, which is exactly why capabilities are segmented rather
 than assumed:
 
-| Capability | PiKVM / GLKVM / BliKVM | Redfish BMC | JetKVM | IPMI |
-|---|---|---|---|---|
-| Power | ✅ ATX | ✅ | ✅ | ✅ |
-| HID (keyboard/mouse) | ✅ | ❌ (SOL console) | ✅ | ❌ |
-| Video snapshot → vision | ✅ MJPEG | ❌ usually | ✅ | ❌ |
-| Virtual media | ✅ | ✅ (many) | partial | ❌ |
-| GPIO | ✅ | ❌ | ❌ | ❌ |
-| Event stream | ✅ WebSocket | ⚠️ event svc | ✅ | ❌ |
-| Logs | ✅ kvmd journal | ✅ SEL + lifecycle | ❌ | ✅ SEL |
-| Boot progress | ❌ (vision) | ✅ structured enum | ❌ (vision) | ⚠️ POST codes |
-| Sensors (temp/fan/watts) | ⚠️ Prometheus | ✅ | ⚠️ DC power | ✅ SDR/DCMI |
-| Serial console (text) | ❌ unless wired | ✅ SOL | ❌ | ✅ SOL |
-| Boot device control | ❌ (HID into firmware menus) | ✅ BootSourceOverride | ❌ | ✅ `chassis bootdev` |
-| Watchdog | ❌ | ⚠️ | ❌ | ✅ |
+| Capability | PiKVM / GLKVM / BliKVM | Redfish BMC | JetKVM | AMT / vPro | IPMI |
+|---|---|---|---|---|---|
+| Power | ✅ ATX | ✅ | ✅ | ✅ WS-Man | ✅ |
+| HID (keyboard/mouse) | ✅ | ❌ (SOL console) | ✅ | ✅ RFB redirection | ❌ |
+| Video snapshot → vision | ✅ MJPEG | ❌ usually | ✅ | ✅ BIOS/POST over RFB | ❌ |
+| Virtual media | ✅ | ✅ (many) | partial | ✅ IDE-R (client-streamed CD) | ❌ |
+| GPIO | ✅ | ❌ | ❌ | ❌ | ❌ |
+| Event stream | ✅ WebSocket | ⚠️ event svc | ✅ | ❌ | ❌ |
+| Logs | ✅ kvmd journal | ✅ SEL + lifecycle | ❌ | ❌ none found | ✅ SEL |
+| Boot progress | ❌ (vision) | ✅ structured enum | ❌ (vision) | ❌ | ⚠️ POST codes |
+| Sensors (temp/fan/watts) | ⚠️ Prometheus | ✅ | ⚠️ DC power | ❌ | ✅ SDR/DCMI |
+| Serial console (text) | ❌ unless wired | ✅ SOL | ❌ | ✅ SOL (16994) | ✅ SOL |
+| Boot device control | ❌ (HID into firmware menus) | ✅ BootSourceOverride | ❌ | ✅ single-use (`bios` fw-dependent, #215) | ✅ `chassis bootdev` |
+| Watchdog | ❌ | ⚠️ | ❌ | ❌ | ✅ |
+
+The matrix's rows describe **device** capabilities; the `ssh` kind (#248) is
+deliberately absent from it — an OS-plane target implements none of these
+protocols, which is exactly what its healthcheck reports (no out-of-band
+recovery path exists there — see
+[driver-features](driver-features.md)).
 
 `ScreenAnalyzer` already depends only on `Video` (it calls `snapshot_base64()`),
 so vision works against any driver that captures frames — and is simply
 unavailable on devices that don't.
+
+## Driver auto-detection (`auto`, #235)
+
+Until rc1 the driver default was a **silent `pikvm` assumption**: any address
+was treated as a PiKVM, and a wrong guess produced an authoritative-looking
+`CRITICAL api-reachable` against a host that was never a PiKVM. The default is
+now `auto` — a short pass of cheap, **read-only** probes at driver-build time,
+memoized per process. Explicit `--driver` / profile `driver` always win;
+`auto` never selects `ssh` (an SSH banner identifies a reachable OS, not a
+device — #248).
+
+Probe order = verdict priority (the richest capable interface wins, matching
+the interface-selection doctrine); the first marker that matches decides and
+the rest are skipped:
+
+| Verdict | Probe | Marker |
+|---|---|---|
+| `pikvm` | `GET /api/info` on the API port | kvmd-style JSON (`ok` key) |
+| `glkvm` | `GET /api/upgrade/version` (authenticated) | GL's proprietary endpoint |
+| `redfish` | `GET /redfish/v1/` | `RedfishVersion` / odata |
+| `amt` | `GET /` on 16992 (or 16993 TLS) | Intel AMT `Server` banner |
+| `ipmi` | RMCP/ASF presence ping (UDP 623) | ASF pong |
+
+Two subtleties worth knowing:
+
+- **`glkvm` vs stock `pikvm`:** GL firmware self-reports as a Raspberry Pi
+  PiKVM in `/api/info` (#126), so the only tell is GL's proprietary endpoint —
+  and kvmd auth-wraps unknown `/api/*` paths, so the refine probe must send
+  credentials to tell GL's `200` from stock's `404`. When the credentials
+  don't authenticate, the verdict stays `pikvm` and the healthcheck's
+  `driver-identity` check re-fingerprints later with working ones.
+- **Nothing matched:** only then is the full inventory assembled (including a
+  TCP/banner probe of SSH on :22), so the failure can say "this host answers
+  SSH only — not a KVM/BMC" instead of the misleading CRITICAL. For such a
+  host, set `driver = "ssh"` **plus** `ssh_host` (the target's own address)
+  explicitly (#248).
+
+Source of truth: [`detect.py`](../src/kvm_pilot/detect.py)'s probe table;
+per-probe network timeout is hard-capped (2 s) so detection stays cheap even
+against a fully-filtered host.
 
 ## Transport & auth
 
@@ -118,6 +166,16 @@ for `Power` (CIM `RequestPowerStateChange`), `SystemInfo`, and single-use
 **platform framebuffer**, i.e. a real BIOS/POST/GRUB screenshot on a machine
 whose HDMI a capture-KVM never sees boot. It is the first non-PiKVM driver to
 implement `Video`/`HID`, closing the seam Redfish leaves open.
+
+The **OS-plane** target (`make_driver("ssh")`,
+[`drivers/ssh_plane.py`](../src/kvm_pilot/drivers/ssh_plane.py), #248) is not a
+device driver: a machine reachable only over its own OS's SSH, with no KVM or
+BMC beneath it. It implements **no** capability protocol — its value is that
+`healthcheck` and the router can see the plane and report honestly that no
+out-of-band recovery exists. Because `host` means "the appliance" everywhere
+else, `from_config` **requires `ssh_host`** (the target's own address;
+`--ssh-host` / `KVM_PILOT_SSH_HOST`) and never accepts a device guess — select
+it explicitly.
 
 ## Safety
 
