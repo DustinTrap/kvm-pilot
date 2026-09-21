@@ -267,7 +267,7 @@ one unit, so `beta` shows as `n=1` on the wiki (≥3 runs promote further). See
 [amt.md](amt.md) for the protocol reference and the honest caveats (text-mode
 capture; 5900 absent on some AMT ≥12 SKUs).
 
-Structural set: `power, system_info, boot_config, serial_console, video, hid`
+Structural set: `power, system_info, boot_config, virtual_media, serial_console, video, hid`
 (plus driver-specific `enable_sol()` / `enable_kvm()` — remote listener toggles,
 both live-validated).
 
@@ -319,6 +319,36 @@ Structural set: `power, system_info, boot_config, sensors, logs, serial_console`
 > **Prerequisite:** `ipmitool` must be on `PATH` — the driver reports a clear
 > `CapabilityError` naming the package if it is missing, rather than failing
 > obscurely at the first command.
+
+## `ssh` — OS-plane target (no device beneath it, #248)
+
+[`SshDriver`](../src/kvm_pilot/drivers/ssh_plane.py) is not a device driver.
+It models a managed host reachable **only over its own OS's SSH** — no KVM
+appliance, no BMC. The justification is the project's own recovery ladder,
+`Wake-on-LAN → in-band SSH → KVM-side recovery → AMT → physical`: every rung
+above in-band SSH assumed you *owned* a device. `--driver ssh` stands
+kvm-pilot on the second rung directly, making it usable on the half of a
+mixed fleet with no BMC at all.
+
+**Deliberately almost empty.** Structural set: **none** — it implements no
+capability protocol (`capabilities()` is the empty set; `get_firmware_info()`
+reports `{"os_plane": true}`); `video_scope: none`, so vision is unavailable
+by construction. It carries only the `SSHChannel` every device driver also
+carries. Its value is not what it *does* (`ssh-exec` could always do that) —
+it is that `healthcheck` and the router can now **see** an OS-plane target
+and say the true, useful thing: **there is no out-of-band recovery here.** A
+`recovery-path` **CRITICAL** on an otherwise-healthy `ssh` profile is correct
+behavior, not a failure to fix.
+
+| Capability | CLI / MCP surface | Reliability | Testing level | Notes |
+|---|---|---|---|---|
+| *(all device capabilities — `power`, `video`, `hid`, `virtual_media`, `logs`, `sensors`, `boot_progress`, …)* | — | n/a | n/a | No capability protocol implemented — by design, see above. |
+| In-band shell | `ssh-check`, `ssh-exec`, `host-exec` | (per-profile channel) | unit (`tests/test_ssh_plane.py`) | The `ssh_*` channel is the whole offering; `host-exec` still auto-picks ssh/winrm. |
+
+**Never auto-detected.** `--driver auto` refuses to guess on a host that only
+answers SSH (#235) — an SSH banner identifies a reachable OS, not a device to
+manage. This kind is selected explicitly, by an operator who already knows
+what the target is.
 
 ## `fake` — in-process test double (no hardware)
 

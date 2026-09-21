@@ -65,7 +65,7 @@ Every key `resolve_host()` reads, with its default:
 | `ssl_ca_file` | `KVM_PILOT_SSL_CA_FILE` | unset | PEM path: pin TLS verification to a CA bundle or the device's own self-signed cert. Overrides `verify_ssl`; the cert's SAN must cover the host/IP you connect to. |
 | `timeout` | `KVM_PILOT_TIMEOUT` | `30.0` | HTTP per-request timeout (seconds); the CLI's global `--timeout` maps here. |
 | `totp_secret` | `KVM_PILOT_TOTP_SECRET` | unset | Base32 secret for 2FA; needs the `totp` extra. |
-| `driver` | `KVM_PILOT_DRIVER` | `auto` | `auto` (probe the device, #235) \| `pikvm` \| `glkvm` \| `blikvm` \| `redfish` \| `ipmi` \| `amt` \| `ssh` \| `fake`; the CLI `--driver` flag overrides. `auto` never selects `ssh` — the OS plane is explicit-only (#248). |
+| `driver` | `KVM_PILOT_DRIVER` | `auto` | `auto` (probe the device, #235 — see [Driver auto-detection](architecture.md#driver-auto-detection-auto-235)) \| `pikvm` \| `glkvm` \| `blikvm` \| `redfish` \| `ipmi` \| `amt` \| `ssh` \| `fake`; the CLI `--driver` flag overrides. `auto` never selects `ssh` — the OS plane is explicit-only (#248). |
 | `redfish_auth` | `KVM_PILOT_REDFISH_AUTH` | `session` | Redfish driver only: `session` or `basic` (for BMCs/emulators without a SessionService). Ignored by the PiKVM family. |
 | `ipmi_interface` | `KVM_PILOT_IPMI_INTERFACE` | `lanplus` | `ipmi` driver only: the ipmitool interface — `lanplus` (IPMI 2.0, recommended) or `lan` (1.5). |
 | `ipmi_port` | `KVM_PILOT_IPMI_PORT` | `623` | `ipmi` driver only: the RMCP/RMCP+ UDP port on the BMC. |
