@@ -54,7 +54,7 @@ support (`kvm-pilot capabilities` lists them, offline).
 
 Common selection flags on device commands: `--profile NAME` (config-file
 profile), `--host/--user/--passwd/--port/--scheme`, `--driver`
-(`pikvm`/`glkvm`/`blikvm`/`redfish`/`ipmi`/`amt`/`fake`), plus the `KVM_PILOT_*`
+(`auto`/`pikvm`/`glkvm`/`blikvm`/`redfish`/`ipmi`/`amt`/`ssh`/`fake`), plus the `KVM_PILOT_*`
 environment variables ([configuration reference](configuration.md)).
 
 See also: the [MCP server tool table](https://github.com/DustinTrap/kvm-pilot/blob/main/src/kvm_pilot/mcp/README.md)

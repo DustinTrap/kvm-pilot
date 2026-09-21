@@ -475,8 +475,10 @@ read-only lookup consumed only by the MCP layer (`mcp/act.py`).
   no human to answer an elicitation, so forcing elicitation-only would break the
   product's headline use case. Denials return through the same call path
   (`approved:false` + reason) so the agent recovers instead of hanging.
-- **Deferred to #72:** the signed/expiring consent receipt. The MVP result already
-  carries a stable `invocation_id` + effect class so that layer can build on it.
+- **Superseded (shipped via #72):** the signed/expiring consent receipt — now
+  implemented as signed, expiring, single-use receipts (`mcp/act.py`,
+  `KVM_PILOT_MCP_RECEIPT_TTL`) built on the MVP's stable `invocation_id` +
+  effect class. See the `#61` record's own successor notes and SECURITY.md.
 ### SSH bootstrap during install: guided, not blind full-auto (#81)
 The "expensive HID phase sets up the cheap phase" — reading the DHCP IP off the
 installer console and starting `sshd` over KVM HID so the rest of the install runs

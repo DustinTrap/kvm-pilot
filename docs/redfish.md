@@ -21,10 +21,13 @@ One stdlib (`urllib`) client for server BMCs. It advertises a BMC's
 | `Sensors` | `Chassis/{id}/Sensors` (unified) **or** legacy `Chassis/{id}/Thermal` + `/Power` |
 | `Logs` | a discovered `LogService` `Entries` collection (SEL / Lclog / IML) |
 | `VirtualMedia` | a `VirtualMedia` slot + `InsertMedia`/`EjectMedia` actions |
+| `BootConfig` | `ComputerSystem.Boot` `BootSourceOverride{Target,Enabled,Mode}` PATCH — `Once`/`Continuous`/`Disabled`; `BootSourceOverrideMode` only where advertised (older iLO4/iDRAC7 omit it) |
 
 **Not implemented** (a BMC has none): `HID`, `Video`, `GPIO`. **Deferred** ([#28](https://github.com/DustinTrap/kvm-pilot/issues/28)):
 `SerialConsole` (SOL is an SSH/IPMI descriptor, not an HTTP byte stream),
-`Events` (push/SSE), `Watchdog` (an IPMI primitive).
+`Events` (push/SSE), `Watchdog` (an IPMI primitive). Boot override
+(`BootConfig`) is **no longer among the #28 deferrals** — it shipped in
+`set_boot_device`/`get_boot_options` ([#201](https://github.com/DustinTrap/kvm-pilot/issues/201)).
 
 ## The cardinal rule: navigate hypermedia, don't hard-code
 
@@ -130,8 +133,10 @@ Reset and virtual-media insert/eject route through `SafetyPolicy.guard()` with t
 ## Open questions (need real hardware — [#29](https://github.com/DustinTrap/kvm-pilot/issues/29))
 
 Sync-vs-async per vendor/action; current iDRAC9/10 & iLO5/6 `ResetType` sets;
-ETag/If-Match enforcement (and empty-`""`-ETag handling) once boot-override lands
-([#28](https://github.com/DustinTrap/kvm-pilot/issues/28)); `LogService` selection
+ETag/If-Match enforcement (and empty-`""`-ETag handling) on the now-landed
+boot-override ([#28](https://github.com/DustinTrap/kvm-pilot/issues/28) →
+shipped, [#201](https://github.com/DustinTrap/kvm-pilot/issues/201) — hardware
+re-verification still open); `LogService` selection
 on unseen vendors; whether HPE can disable Basic auth.
 
 ## Sources
