@@ -66,7 +66,6 @@ P=ilo-dl380g9   # then repeat with P=idrac-r710
 uv run kvm-pilot healthcheck   --profile $P     # intake gate — expect no CRITICAL for a reachable BMC
 uv run kvm-pilot info          --profile $P     # manufacturer/model/BIOS/power_state/redfish_version
 uv run kvm-pilot capabilities  --profile $P     # expect: system_info, power, boot_progress, sensors, logs, virtual_media, boot_config
-uv run kvm-pilot power-state   --profile $P
 uv run kvm-pilot boot-device   --profile $P --show   # current override + ALLOWABLE targets + mode_settable
 uv run kvm-pilot sensors       --profile $P     # temps/fans/power (iLO4/iDRAC expose these)
 uv run kvm-pilot boot-progress --profile $P
@@ -120,7 +119,7 @@ once and reverts afterward.
 
 ```bash
 P=ilo-dl380g9
-uv run kvm-pilot power-state  --profile $P
+uv run kvm-pilot info --profile $P              # power_state before acting (there is no `power-state` subcommand)
 uv run kvm-pilot power on     --profile $P --yes    # verified against Redfish PowerState
 uv run kvm-pilot power off    --profile $P --yes    # graceful (GracefulShutdown)
 uv run kvm-pilot power reset  --profile $P --yes
@@ -160,8 +159,7 @@ shells out to the system `ipmitool`). The same phase structure applies:
 ```bash
 P=idrac-r710
 uv run kvm-pilot healthcheck   --profile $P     # intake gate
-uv run kvm-pilot info          --profile $P     # model from FRU Board Product (#206)
-uv run kvm-pilot power-state   --profile $P
+uv run kvm-pilot info          --profile $P     # model from FRU Board Product (#206) + power state
 uv run kvm-pilot sensors       --profile $P     # temps/fans/PSU via SDR
 uv run kvm-pilot logs          --profile $P     # SEL
 uv run kvm-pilot boot-device pxe --profile $P --yes   # then cd/hdd/none, as Phase B

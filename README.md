@@ -173,9 +173,9 @@ the CLI covers the full surface in [docs/cli.md](https://github.com/DustinTrap/k
 > install with `pip install --pre kvm-pilot`.) The core paths have graduated
 > from mocked-only to live-verified: a fleet of GL-RM1PE units has exercised
 > `snapshot`/`healthcheck`/`logs`/`power_state`/`virtual_media`/`info` across
-> two firmware lines — on V1.9.1 those capabilities sit at **beta** maturity in
-> the run ledger that ships in the wheel, derived from real runs, never
-> hand-edited — and a Dell iDRAC6 has exercised the IPMI driver live end-to-end
+> two firmware lines — on V1.9.1 the run ledger that ships in the wheel puts
+> `info`/`logs`/`healthcheck`/`power_state` at **ga**, `snapshot` at **rc**, and
+> `virtual_media` at **beta** — derived from real runs, never hand-edited — and a Dell iDRAC6 has exercised the IPMI driver live end-to-end
 > (power, boot-device, sensors, event log, SOL serial console). The paths that
 > can hurt are hardened: transports never re-fire a destructive request, MCP
 > approvals are signed single-use receipts with an audit trail, and every

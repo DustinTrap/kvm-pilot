@@ -67,8 +67,7 @@ reset is genuine out-of-band power — unlike a capture-KVM with unwired ATX), a
 ## 3 — Confirm identity and power
 
 ```bash
-kvm-pilot info --profile oldserver     # vendor/model from FRU
-kvm-pilot power --profile oldserver --show
+kvm-pilot info --profile oldserver     # vendor/model from FRU + current power state
 ```
 
 Identity comes from **FRU Board Product**, not the naive field — a real-hardware
