@@ -132,7 +132,8 @@ variable, and precedence.
 > that were mis-assumed PiKVMs no longer report a misleading
 > `api-reachable CRITICAL`. Pin `driver = "pikvm"` to restore the old behavior.
 > Since **0.1.0rc2**, hosts reachable **only over SSH** are first-class
-> targets: set `driver = "ssh"` explicitly (#248 — auto never guesses it).
+> targets: set `driver = "ssh"` **plus** `ssh_host` (the machine's own address)
+> explicitly (#248 — auto never guesses it).
 > Everything else breaking is in the
 > [CHANGELOG](https://github.com/DustinTrap/kvm-pilot/blob/main/CHANGELOG.md).
 

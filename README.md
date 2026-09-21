@@ -159,9 +159,10 @@ destructive effect gated per class:
 | **Meta — evidence & intake** | `capabilities` · `support_matrix` · `healthcheck` | `file_firmware_report` |
 
 A machine with **no KVM and no BMC at all** is itself a first-class target:
-`driver = "ssh"` (#248) stands kvm-pilot on the recovery ladder's in-band
-rung — every device capability honestly absent, and the healthcheck saying
-plainly that there is no out-of-band recovery path there.
+`driver = "ssh"` **plus `ssh_host`** (the machine's own address, #248) stands
+kvm-pilot on the recovery ladder's in-band rung — every device capability
+honestly absent, and the healthcheck saying plainly that there is no
+out-of-band recovery path there.
 
 The canonical per-tool reference — annotations, effect gates, approval
 lifecycle — is the [MCP server README](https://github.com/DustinTrap/kvm-pilot/blob/main/src/kvm_pilot/mcp/README.md);

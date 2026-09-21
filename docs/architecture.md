@@ -116,7 +116,8 @@ Two subtleties worth knowing:
 - **Nothing matched:** only then is the full inventory assembled (including a
   TCP/banner probe of SSH on :22), so the failure can say "this host answers
   SSH only — not a KVM/BMC" instead of the misleading CRITICAL. For such a
-  host, set `driver = "ssh"` explicitly (#248).
+  host, set `driver = "ssh"` **plus** `ssh_host` (the target's own address)
+  explicitly (#248).
 
 Source of truth: [`detect.py`](../src/kvm_pilot/detect.py)'s probe table;
 per-probe network timeout is hard-capped (2 s) so detection stays cheap even
@@ -165,6 +166,16 @@ for `Power` (CIM `RequestPowerStateChange`), `SystemInfo`, and single-use
 **platform framebuffer**, i.e. a real BIOS/POST/GRUB screenshot on a machine
 whose HDMI a capture-KVM never sees boot. It is the first non-PiKVM driver to
 implement `Video`/`HID`, closing the seam Redfish leaves open.
+
+The **OS-plane** target (`make_driver("ssh")`,
+[`drivers/ssh_plane.py`](../src/kvm_pilot/drivers/ssh_plane.py), #248) is not a
+device driver: a machine reachable only over its own OS's SSH, with no KVM or
+BMC beneath it. It implements **no** capability protocol — its value is that
+`healthcheck` and the router can see the plane and report honestly that no
+out-of-band recovery exists. Because `host` means "the appliance" everywhere
+else, `from_config` **requires `ssh_host`** (the target's own address;
+`--ssh-host` / `KVM_PILOT_SSH_HOST`) and never accepts a device guess — select
+it explicitly.
 
 ## Safety
 

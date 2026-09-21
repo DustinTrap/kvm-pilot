@@ -345,6 +345,11 @@ behavior, not a failure to fix.
 | *(all device capabilities — `power`, `video`, `hid`, `virtual_media`, `logs`, `sensors`, `boot_progress`, …)* | — | n/a | n/a | No capability protocol implemented — by design, see above. |
 | In-band shell | `ssh-check`, `ssh-exec`, `host-exec` | (per-profile channel) | unit (`tests/test_ssh_plane.py`) | The `ssh_*` channel is the whole offering; `host-exec` still auto-picks ssh/winrm. |
 
+**Requires `ssh_host`** (or `--ssh-host` / `KVM_PILOT_SSH_HOST`): the target's
+own address. `host` means "the appliance" for every other driver, and there is
+no appliance here — `from_config` raises a `CapabilityError` rather than
+guessing.
+
 **Never auto-detected.** `--driver auto` refuses to guess on a host that only
 answers SSH (#235) — an SSH banner identifies a reachable OS, not a device to
 manage. This kind is selected explicitly, by an operator who already knows
