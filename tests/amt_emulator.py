@@ -43,6 +43,8 @@ class AmtState:
         self.kvm_sap_requested: str | None = None
         self.kvm_sap_requests: list[str] = []  # every RequestedState, in order (proves a 3->2 cycle)
         self.optin_required = "1"       # IPS_OptInService: 0=none, 1=KVM, 4294967295=all
+        self.optin_state = "0"          # 0=none, 2=code displayed, 3=consent received
+        self.optin_code: str | None = None  # last SendOptInCode
         self.control_mode = "2"         # IPS_HostBasedSetupService: 1=CCM, 2=ACM
         self.provisioning_state = "2"   # 2 = post/provisioned
         self.amt_version = "16.1.25"
@@ -210,7 +212,8 @@ class _Handler(BaseHTTPRequestHandler):
             return _inst("IPS_OptInService", {
                 "Name": "Intel(r) AMT OptIn Service", "CreationClassName": "IPS_OptInService",
                 "SystemName": "Intel(r) AMT", "SystemCreationClassName": "CIM_ComputerSystem",
-                "OptInRequired": st.optin_required, "OptInState": "0", "CanModifyOptInPolicy": "1"})
+                "OptInRequired": st.optin_required, "OptInState": st.optin_state,
+                "CanModifyOptInPolicy": "1", "OptInCodeTimeout": "120"})
         if cls == "IPS_HostBasedSetupService":
             return _inst("IPS_HostBasedSetupService", {
                 "CurrentControlMode": st.control_mode,
@@ -253,6 +256,11 @@ class _Handler(BaseHTTPRequestHandler):
             if st.kvm_sap_requested is not None:
                 st.kvm_sap_requests.append(st.kvm_sap_requested)
             st.kvm_sap_state = "6" if st.kvm_sap_requested == "2" else "3"
+        elif method == "StartOptIn":
+            st.optin_state = "2"
+        elif method == "SendOptInCode":
+            st.optin_code = _text(req, "OptInCode")
+            st.optin_state = "3"
         # A non-zero ReturnValue on an HTTP-200 = the ME accepted the SOAP but
         # refused the op (bad power package, unprovisioned, etc.).
         rv = "1" if method in st.nonzero_methods else "0"

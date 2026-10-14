@@ -329,9 +329,12 @@ class RedirKvmStream:
     redirection_authenticated = True
 
     def __init__(self, host: str, user: str, passwd: str, *,
-                 port: int = 16994, timeout: float = 15.0):
+                 port: int = 16994, tls: bool = False, verify_ssl: bool = False,
+                 ssl_ca_file: str | None = None, timeout: float = 15.0):
         self.host, self.port = host, port
         self._user, self._passwd, self._timeout = user, passwd, timeout
+        # TLS (port 16995) is the only redirection transport CSME 19+ serves.
+        self._tls, self._verify_ssl, self._ssl_ca_file = tls, verify_ssl, ssl_ca_file
         self._chan: Any = None
         # Own buffer, because RedirectionChannel.recv() hands back everything it
         # has buffered regardless of the size asked for. The ME packs OPEN_REPLY
@@ -344,7 +347,8 @@ class RedirKvmStream:
         from .redir import START_KVM, RedirectionChannel
 
         self._chan = RedirectionChannel(
-            self.host, self._user, self._passwd, port=self.port, timeout=self._timeout
+            self.host, self._user, self._passwd, port=self.port, tls=self._tls,
+            verify_ssl=self._verify_ssl, ssl_ca_file=self._ssl_ca_file, timeout=self._timeout,
         )
         # Anything that throws from here on leaves a live socket (and, on the ME
         # side, a redirection session that counts against the one-session limit

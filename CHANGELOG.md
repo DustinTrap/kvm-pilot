@@ -6,6 +6,24 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **AMT `power off` is now the OS-graceful off; `power off-hard` the AMT power-down.**
+  `power off` sent CIM state 8, which Intel AMT executes as an immediate power-down
+  (the OS is not asked; Windows logs an unexpected shutdown), and `power off-hard`
+  sent 6, which is not among AMT's supported values. Now `power off` sends 12
+  (graceful; needs Intel LMS in the OS, and a refusal says so) and `power off-hard`
+  sends 8. Verified on an Intel Core Ultra desktop with CSME 21.0.6 in Client
+  Control Mode (Windows 11): 12 shut Windows down cleanly, 8 powered off at once.
+- **AMT KVM works on TLS-only firmware (CSME 19+).** With `amt_tls = true` the KVM
+  redirection tunnel now uses TLS port 16995 (as IDE-R already did) instead of
+  plaintext 16994, which CSME 19 and later refuse.
+
+### Added
+- **AMT user consent for KVM in Client Control Mode**: `kvm-pilot amt consent-start`
+  shows the 6-digit code on the host's screen, `kvm-pilot amt consent-code --code
+  <code>` sends it back; a KVM connect refused for lack of consent now says how to
+  give it instead of surfacing a transport error.
+
 ## [0.1.0rc4] — 2026-08-30
 
 **Fourth release candidate.** Everything here came out of reviewing the

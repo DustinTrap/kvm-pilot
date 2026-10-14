@@ -52,7 +52,7 @@ three, all **pure-stdlib** (no `python-amt`, no external VNC lib):
 | `Power`, `SystemInfo`, `BootConfig` | WS-Man (SOAP 1.2 over HTTP Digest) | 16992 (TLS 16993) | [`wsman.py`](../src/kvm_pilot/drivers/amt/wsman.py) |
 | `SerialConsole` (SOL) | AMT serial-over-LAN via `amtterm` | 16994 | [`driver.py`](../src/kvm_pilot/drivers/amt/driver.py) |
 | `VirtualMedia` (IDE-R) | AMT IDE-Redirect (binary redirection + digest) | 16994 (TLS 16995) | [`ider.py`](../src/kvm_pilot/drivers/amt/ider.py), [`redir.py`](../src/kvm_pilot/drivers/amt/redir.py) |
-| `Video` + `HID` | RFB / KVM-redirection (VNC) | 5900 (standard-port) | [`rfb.py`](../src/kvm_pilot/drivers/amt/rfb.py) |
+| `Video` + `HID` | RFB / KVM-redirection (VNC) | 5900 (standard-port), else tunnelled over the redirection port 16994 (TLS 16995) | [`rfb.py`](../src/kvm_pilot/drivers/amt/rfb.py) |
 
 ### WS-Man (power / inventory / boot)
 
@@ -62,8 +62,12 @@ and POSTs them over `urllib` with HTTP **Digest** auth, parsing responses with
 `enumerate` (Enumerate + Pull), `invoke`, `put`.
 
 - **Power** — read `CIM_AssociatedPowerManagementService.PowerState`; write
-  `CIM_PowerManagementService.RequestPowerStateChange`. CIM state codes:
-  on `2`, soft-off `8`, hard-off `6`, master-bus-reset `10`.
+  `CIM_PowerManagementService.RequestPowerStateChange` with Intel AMT's values:
+  on `2`, graceful off `12` (`power off`: the OS is asked to shut down, which
+  needs Intel LMS running in the OS), immediate power-down `8` (`power off-hard`:
+  the OS is not asked), master-bus-reset `10`. Intel lists 2, 5, 8 and 10 as
+  always supported and 12/14 as depending on the OS; the CIM enum's name for 8
+  ("Off - Soft") does not mean graceful, and 6 ("Off - Hard") is not an AMT value.
 - **SystemInfo** — `CIM_Chassis` / `CIM_ComputerSystemPackage` (manufacturer,
   model, serial), `CIM_SystemPackaging`/UUID, `AMT_SetupAndConfigurationService`
   (AMT version, provisioning state). `get_info` is best-effort: a fault in one
@@ -151,6 +155,14 @@ remotely (this is how MeshCommander / Intel's rpc-go work). Both are gated.
   `CIM_KVMRedirectionSAP.RequestStateChange(2)`, and — for `require_consent=False`
   — `IPS_OptInService.OptInRequired=0` to drop the on-screen consent prompt.
   Consent-off needs **Admin Control Mode** (rejected in Client Control Mode).
+- **User consent in Client Control Mode** — the ME starts a KVM session only after
+  a 6-digit code it shows on the host's own display is sent back:
+  `kvm-pilot amt consent-start` (`IPS_OptInService.StartOptIn`), read the code,
+  `kvm-pilot amt consent-code --code <code>` (`SendOptInCode`). A KVM connect that
+  fails while consent is missing says so instead of reporting a transport error.
+
+With `amt_tls = true` every redirection session (KVM, IDE-R) uses TLS port 16995;
+CSME 19 and later refuse the plaintext ports (16992, 16994, 5900) altogether.
 
 AMT's WS-Transfer Put is strict: send the **whole** object (a partial or
 reordered body is `InvalidRepresentation`), so the driver GET-modifies-PUTs the
