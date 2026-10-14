@@ -113,8 +113,15 @@ registration, hub link, `llms.txt` membership, and dead relative links.
 ## Hardware reports welcome
 
 You don't need to write code to help. If you run `kvm-pilot` against a device
-not in the compatibility table (PiKVM v3/v4, BliKVM, GL-RM1, etc.), open an
-issue with what worked and what didn't — that's directly useful.
+not in the [Hardware-Compatibility](https://github.com/DustinTrap/kvm-pilot/wiki/Hardware-Compatibility)
+table (stock PiKVM v3/v4, BliKVM, GL-RM1, a Redfish BMC such as iLO or iDRAC9),
+open a [hardware report](https://github.com/DustinTrap/kvm-pilot/issues/new?template=hardware-report.yml)
+with what worked and what didn't — that's directly useful. The
+[Discussions](https://github.com/DustinTrap/kvm-pilot/discussions) board is the
+place for questions and show-and-tell.
+
+This project follows the [Contributor Covenant](../CODE_OF_CONDUCT.md); please
+read it before participating.
 
 ## Testing without hardware
 

@@ -1,15 +1,19 @@
 name: Hardware report
 description: >-
   Ran kvm-pilot against real hardware? Tell us what happened — success or
-  failure, both are exactly what this alpha needs.
+  failure, both are exactly what this release candidate needs.
 title: "[hw] <device>: <short result>"
 labels: ["hardware-report"]
 body:
   - type: markdown
     attributes:
       value: |
-        Thanks! **Nothing in kvm-pilot has been validated on real hardware yet**, so
-        every report here directly improves the compatibility table.
+        Thanks! Three of kvm-pilot's drivers have been validated on real hardware
+        (GL-RM1PE, Dell iDRAC6 over IPMI, Intel AMT 14 on a Dell Latitude). The rest —
+        stock PiKVM, Redfish BMCs (iLO, iDRAC9, OpenBMC), BliKVM — have only run against
+        emulators. **Every report here, success or failure, moves a device up the
+        [Hardware-Compatibility](https://github.com/DustinTrap/kvm-pilot/wiki/Hardware-Compatibility)
+        table** — that page is the source of truth for what has actually been exercised.
 
         ⚠️ Please only exercise destructive operations (power, reset, virtual media,
         keystrokes) on machines you own and can safely interrupt — a hard power-off
@@ -25,6 +29,8 @@ body:
         - PiKVM v4
         - BliKVM
         - Redfish BMC (vendor + model below)
+        - IPMI BMC (vendor + model below)
+        - Intel AMT / vPro (vendor + model below)
         - Other (describe below)
     validations:
       required: true
@@ -32,7 +38,7 @@ body:
     id: device-detail
     attributes:
       label: Vendor / model detail
-      description: "For BMCs (e.g. Dell iDRAC9 on an R740, HPE iLO 6) or an \"Other\" device."
+      description: "For BMCs (e.g. Dell iDRAC9 on an R740, HPE iLO 6), AMT hosts (e.g. Dell Latitude 5411, AMT 14.1) or an \"Other\" device."
       placeholder: e.g. Dell iDRAC9, firmware 7.00.00.00, on a PowerEdge R740
   - type: input
     id: firmware
@@ -67,8 +73,8 @@ body:
       label: What worked
       description: >-
         Which features behaved as documented — e.g. info, snapshot, HID (type/key),
-        power/ATX, mass storage (mount/eject), GPIO, Redfish, WebSocket events,
-        vision classify/watch.
+        power/ATX, mass storage (mount/eject), GPIO, Redfish, IPMI/AMT SOL, AMT KVM
+        screenshot, WebSocket events, vision classify/watch.
       placeholder: |
         - info: OK
         - snapshot: OK
