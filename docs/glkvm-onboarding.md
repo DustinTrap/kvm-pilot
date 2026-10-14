@@ -49,9 +49,10 @@ kvmd block in:
 /etc/kvmd/nginx-kvmd.conf
 ```
 
-then restart kvmd. Until you do, kvm-pilot reports `ApiDisabledError` and names
-this file — that error is the tool telling you it got a 404 on *every* endpoint,
-not that the device is unreachable.
+then restart kvmd. Until you do, every call 404s, and kvm-pilot surfaces that as
+`ApiDisabledError` naming this file — full behaviour and the upgrade-reverts-it
+follow-ups live in
+[troubleshooting](troubleshooting.md#every-api-call-returns-404-glkvm).
 
 ## 2 — Write a profile
 

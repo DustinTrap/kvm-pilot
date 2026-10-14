@@ -22,15 +22,18 @@ pip install --pre kvm-pilot               # CLI + this skill + the MCP server
 pip install --pre "kvm-pilot[totp]"       # add if the device has 2FA enabled
 ```
 
-It's a pre-release, so `--pre` (or pinning the exact current version) is required — a bare
-`pip install kvm-pilot` deliberately picks up no pre-release. A single install brings
-the `kvm-pilot` CLI, the `kvm-pilot-mcp` server, and this skill. To make Claude
-Code discover the skill, run `kvm-pilot install-skill` (copies it to
+It's a pre-release, so install with `--pre` — explicit now, and still explicit once a stable
+release ships. (A bare `pip install kvm-pilot` resolves to the current beta *today* only
+because pip falls back to pre-releases while no stable release exists; that silently flips
+at GA — canonical note:
+[docs/troubleshooting.md](https://github.com/DustinTrap/kvm-pilot/blob/main/docs/troubleshooting.md#which-pip-install-line-should-i-use).)
+A single install brings the `kvm-pilot` CLI, the `kvm-pilot-mcp` server, and this
+skill. To make Claude Code discover the skill, run `kvm-pilot install-skill` (copies it to
 `~/.claude/skills/kvm-pilot`; re-run after upgrading, then restart the session).
 For the latest unreleased tree, install from git:
 
 ```bash
-pip install "kvm-pilot[totp,ws] @ git+https://github.com/DustinTrap/kvm-pilot"
+pip install "kvm-pilot[totp] @ git+https://github.com/DustinTrap/kvm-pilot"
 ```
 
 Credentials resolve from `KVM_PILOT_HOST` / `KVM_PILOT_USER` / `KVM_PILOT_PASSWD`

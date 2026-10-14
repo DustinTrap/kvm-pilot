@@ -54,9 +54,10 @@ power-cycle, and the boot console the agent actually saw:
 
 One install gives you the whole product — the **`kvm-pilot` CLI**, the
 **`kvm-pilot-mcp` MCP server**, and the bundled **Claude skill** — nothing to
-clone. The current release line is a **pre-release**: install it with `--pre`,
-which is explicit and keeps selecting the beta line once a stable release ships
-(`0.1.0a1` is yanked and much older than this README — don't pin it).
+clone. The current release line is a **pre-release**: install it with `--pre`, which is
+explicit now and stays explicit once a stable release ships. (`0.1.0a1` is yanked and much
+older than this README — don't pin it. Why the form without `--pre` is not the instruction:
+[troubleshooting](https://github.com/DustinTrap/kvm-pilot/blob/main/docs/troubleshooting.md#which-pip-install-line-should-i-use).)
 
 ```bash
 pip install --pre kvm-pilot                    # CLI + skill + MCP server + WebSocket events

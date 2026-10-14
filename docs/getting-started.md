@@ -17,10 +17,10 @@ Desktop, or any MCP host). For the Python library and CLI, see the
 pip install --pre kvm-pilot
 ```
 
-`kvm-pilot` is a pre-release. Use `--pre`: it says exactly what you mean, and it
-keeps selecting the beta line once a stable release exists. (A bare `pip install
-kvm-pilot` happens to work *today* only because pip falls back to pre-releases
-when no stable release exists — that silently changes at GA.) One install brings
+`kvm-pilot` is a pre-release. Use `--pre`: it says exactly what you mean, and it keeps
+selecting the beta line once a stable release exists (why the form without `--pre` is not the
+instruction — the pip fallback that makes it work today, and what changes at GA — is in
+[troubleshooting](troubleshooting.md#which-pip-install-line-should-i-use)). One install brings
 the `kvm-pilot` CLI, the `kvm-pilot-mcp` server, and the bundled Claude skill.
 
 The skill ships inside the package; to have **Claude Code** discover it, copy it
@@ -124,7 +124,9 @@ variable, and precedence.
 
 > **GLKVM (GL.iNet) devices:** the PiKVM REST API is **disabled by default** on GL
 > firmware. Enable it in `/etc/kvmd/nginx-kvmd.conf` on the device first, or every
-> call returns 404 — and note a firmware upgrade can revert it.
+> call returns 404 — and note a firmware upgrade can revert it. Steps and the
+> `ApiDisabledError` behaviour:
+> [troubleshooting](troubleshooting.md#every-api-call-returns-404-glkvm).
 
 > **Upgrading from an earlier prerelease?** Since **0.1.0rc1**, a profile that
 > doesn't name a `driver` **probes the device** (`auto`, #235) instead of
