@@ -673,6 +673,43 @@ def test_currency_none_when_unmatched(monkeypatch):
     assert health.check_firmware_currency(_fw()) is None
 
 
+def test_currency_info_when_entry_has_no_latest(monkeypatch):
+    """Entry matched but no `latest` field -> INFO, not None (Issue #254).
+
+    Previously both "entry absent" and "entry present, no latest" collapsed into
+    silent None, producing a false all-clear. With this fix the registry gap is
+    surfaced as an INFO finding so the operator knows currency was not verified.
+    """
+    from kvm_pilot import health
+
+    monkeypatch.setattr(health, "_REGISTRY_CACHE", {"firmware": [
+        {"vendor": "gl.inet", "product": "RV1126B"}]})
+    r = health.check_firmware_currency(_fw())
+    assert r is not None, "expected INFO, got None (silent false all-clear)"
+    assert r.severity is Severity.INFO
+    assert r.id == "firmware-currency"
+    assert "currency unknown" in r.title.lower()
+    assert "data gap" in r.detail.lower()
+    assert "hardware-report" in r.remediation
+
+
+def test_currency_info_when_entry_latest_is_null(monkeypatch):
+    """Explicit ``null`` latest (as shipped for both Dell entries) -> INFO (#254).
+
+    JSON ``null`` round-trips to Python ``None``, which is falsy, triggering the
+    same gap path as a missing key. Both Dell registry entries currently carry
+    `latest: null`, so this is the live production case.
+    """
+    from kvm_pilot import health
+
+    monkeypatch.setattr(health, "_REGISTRY_CACHE", {"firmware": [
+        {"vendor": "gl.inet", "product": "RV1126B", "latest": None}]})
+    r = health.check_firmware_currency(_fw())
+    assert r is not None, "expected INFO, got None (silent false all-clear)"
+    assert r.severity is Severity.INFO
+    assert "currency unknown" in r.title.lower()
+
+
 def test_capability_profile_warns_on_degraded_axis(monkeypatch):
     from kvm_pilot import health
 

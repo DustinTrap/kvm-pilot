@@ -1217,7 +1217,14 @@ def _firmware_remediation(entry: dict, source: str) -> str:
 
 
 def check_firmware_currency(driver: Any) -> CheckResult | None:
-    """Flag known-bad firmware or an available update, via the firmware registry."""
+    """Flag known-bad firmware or an available update, via the firmware registry.
+
+    Returns ``None`` only when the device is confirmed current (version >= latest).
+    When the registry has no ``latest`` for a matched entry -- a data gap, not a
+    clean bill of health -- returns an INFO rather than silence, so an operator
+    reading a clean healthcheck knows their firmware currency was *not* verified
+    (#254).
+    """
     fn = getattr(driver, "get_firmware_info", None)
     if fn is None:
         return None
@@ -1258,6 +1265,30 @@ def check_firmware_currency(driver: Any) -> CheckResult | None:
             detail=f"{product} is on {version}; latest known is {latest} (as of {entry.get('date', '?')}).",
             remediation=_firmware_remediation(entry, entry.get("source", "the vendor download page")),
         )
+
+    # 3) No currency data: entry present but no `latest` to compare against.
+    #    "We have no currency data" must not look like "we checked and you are
+    #    current" -- that is a false all-clear (#254). Emit INFO so the operator
+    #    knows the firmware pillar was not verified and point at the hardware-
+    #    report flow that will fill the gap.
+    if not latest:
+        return CheckResult(
+            id="firmware-currency",
+            pillar=Pillar.FIRMWARE,
+            severity=Severity.INFO,
+            title="Firmware currency unknown",
+            detail=(
+                f"No currency data for {product} {version} -- the registry has an entry"
+                " for this device but no `latest` version to compare against."
+                " This is a data gap, not a confirmed clean state."
+            ),
+            remediation=(
+                "Open a hardware report so the community can track currency for this"
+                " device: https://github.com/DustinTrap/kvm-pilot/issues/new"
+                "?template=hardware-report.yml"
+            ),
+        )
+
     return None  # current (or ahead) -> the pillar stays quiet
 
 

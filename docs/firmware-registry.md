@@ -127,7 +127,12 @@ so a hand-edited level cannot survive a pull request.
 - `check_firmware_currency` — match `(vendor, product)`; then:
   1. installed version satisfies a `known_bad.affected` range → that severity;
   2. else `version < latest` (ordered `_vercmp`) → `WARNING` "update available";
-  3. else **nothing** — a current device stays quiet (no over-reporting).
+  3. else `latest` is absent or `null` → `INFO` "currency unknown" — the registry
+     has an entry for the device but no currency data; this is a **data gap**, not a
+     confirmed clean state. The finding points at the hardware-report flow so
+     the operator knows nothing was verified (#254);
+  4. else version is current (`version >= latest`) → **nothing** — confirmed current
+     device stays quiet (no over-reporting).
 - `check_capability_profile` — surfaces the stored profile as the expected-UX
   line: `INFO` when all-good, `WARNING` when any axis is degraded (relative/no
   mouse, non-`reliable` vmedia, untrusted power).
