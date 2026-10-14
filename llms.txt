@@ -16,6 +16,7 @@ install with `pip install --pre kvm-pilot` (CLI `kvm-pilot`, MCP server
 ## Docs
 
 - [README](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/README.md): overview, install, quickstart, sensing and safety model, compatibility
+- [First run (tutorial, no hardware)](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/first-run.md): install, the fake driver, read plane, the safety gate refusing/rehearsing/executing, the MCP trust ladder
 - [Getting started (agents + MCP)](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/getting-started.md): enable the MCP server, trust ladder, credentials, first prompts
 - [Agent operating doctrine (bundled skill)](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/src/kvm_pilot/skill/SKILL.md): the core rules + when to read each playbook; also re-served mid-session by the MCP doctrine tool
 - [Skill playbook: interfaces](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/src/kvm_pilot/skill/references/interfaces.md): per-action interface matrix, multitasking rules, CLI command set
