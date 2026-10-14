@@ -6,6 +6,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **mcp floor raised to `>=1.21.1`** (was `>=1.17`, #271). pydantic 2.14 removed a
+  private helper that mcp 1.17–1.21.0 import at module load, so those versions no
+  longer import on a fresh install; 1.21.1 is the first 1.x that does (measured in
+  a clean venv against pydantic 2.14.1). The `mcp-majors` CI floor leg now pins
+  `mcp==1.21.1`. Nothing else changes — both SDK majors are still supported.
+
 ## [0.1.0rc4] — 2026-08-30
 
 **Fourth release candidate.** Everything here came out of reviewing the
