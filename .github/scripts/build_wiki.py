@@ -57,6 +57,7 @@ SECTIONS: list[str] = [
 PAGES: list[tuple[str, str, str | None, str | None]] = [
     ("docs/README.md", "Home.md", None, None),
     # Start here
+    ("docs/first-run.md", "first-run.md", "First run (tutorial, no hardware)", "Start here"),
     ("docs/getting-started.md", "getting-started.md", "Getting started", "Start here"),
     # Guides — task-oriented: how to accomplish something
     ("docs/amt-onboarding.md", "amt-onboarding.md", "Intel AMT onboarding runbook", "Guides"),

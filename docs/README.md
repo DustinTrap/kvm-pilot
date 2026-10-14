@@ -12,6 +12,7 @@ Adding a doc? See "Adding a doc" in [Contributing](CONTRIBUTING.md).
 
 ## Start here
 
+- **Never seen it run? Ten minutes, no hardware** → [First run](first-run.md) — the whole read → refuse → rehearse → act loop on the built-in fake driver, then from your agent
 - **New here? Drive a KVM from your agent** → [Getting started](getting-started.md)
 - **Overview, install, quickstart** → [README](https://github.com/DustinTrap/kvm-pilot/blob/main/README.md)
 - **Something's broken?** → [Troubleshooting & FAQ](troubleshooting.md)
