@@ -55,9 +55,10 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager, nullcontext
 from datetime import UTC, datetime
 from importlib.resources import files
-from typing import TYPE_CHECKING, Literal, cast
+from typing import TYPE_CHECKING, Annotated, Literal, cast
 
 import anyio
+from pydantic import Field
 
 from kvm_pilot import resolve_host
 from kvm_pilot.calibrate import (
@@ -113,6 +114,41 @@ if TYPE_CHECKING:
 
 mcp = MCPServer("kvm-pilot")
 _log = logging.getLogger("kvm_pilot.mcp")
+
+# Schema-level parameter descriptions (#278). ``Field(description=...)`` lands in
+# each tool's ``inputSchema`` so an agent can fill a parameter in without the
+# docstring spending its 900-char budget (#230) on it. The three parameters
+# shared by most tools are written once here; tool-specific ones inline.
+Profile = Annotated[
+    str | None,
+    Field(
+        description=(
+            "Profile name from ~/.config/kvm-pilot/config.toml selecting which "
+            "KVM/BMC (and its managed host) this call targets. Omit to use the "
+            "server's default (KVM_PILOT_PROFILE)."
+        )
+    ),
+]
+Confirm = Annotated[
+    bool,
+    Field(
+        description=(
+            "Per-invocation approval when the client cannot prompt a human: set "
+            "true to approve this exact call under the operator's standing policy. "
+            "Leave false when the client supports elicitation (a human is asked). "
+            "Never pre-set it speculatively; a denial returns outcome=not_confirmed."
+        )
+    ),
+]
+SSHHost = Annotated[
+    str | None,
+    Field(
+        description=(
+            "Override the profile's ssh_host for this call only, e.g. an "
+            "install-time DHCP address the profile cannot know yet."
+        )
+    ),
+]
 
 # Tool annotations (#195): every tool declares all four hints explicitly,
 # because clients act on them (auto-approval and parallel dispatch of read-only
@@ -339,14 +375,22 @@ def _vision_backend() -> VisionBackend:
 
 
 @mcp.tool(annotations=_READ)
-def info(profile: str | None = None) -> dict:
-    """Return device / system info (read-only)."""
+def info(profile: Profile = None) -> dict:
+    """Identify the device and the system behind it (read-only).
+
+    Returns ``host``/``driver`` plus the driver's ``info`` block: model, vendor,
+    firmware and hardware detail as the device reports them (a PiKVM/GLKVM
+    describes the appliance; a BMC describes itself and the managed system).
+    Use it to confirm what you are talking to. It says nothing about whether
+    the device is safe to act on (``healthcheck``), what it can do
+    (``capabilities``), or the host's power (``power_state``).
+    """
     with _driver(profile, confirm=deny_all, capability=Capability.SYSTEM_INFO) as (cfg, kvm):
         return {**_provenance(cfg), "info": cast("SystemInfo", kvm).get_info()}
 
 
 @mcp.tool(annotations=_READ)
-def healthcheck(profile: str | None = None) -> dict:
+def healthcheck(profile: Profile = None) -> dict:
     """Audit the device's readiness/recovery, security posture, and firmware (#80).
 
     Read-only. Returns per-check findings with a tiered severity; a ``CRITICAL``
@@ -383,7 +427,7 @@ _VIDEO_SCOPE_NOTES = {
 
 
 @mcp.tool(annotations=_READ)
-def capabilities(profile: str | None = None) -> dict:
+def capabilities(profile: Profile = None) -> dict:
     """List the capabilities the target's driver supports (read-only, offline).
 
     Structural — makes no network call and runs no preflight; it answers "which
@@ -424,9 +468,18 @@ def capabilities(profile: str | None = None) -> dict:
 
 @mcp.tool(annotations=_READ)
 def support_matrix(
-    vendor: str | None = None,
-    product: str | None = None,
-    firmware_version: str | None = None,
+    vendor: Annotated[
+        str | None,
+        Field(description="Filter: device vendor, case-insensitive exact match (e.g. 'GL.iNet', 'Dell')."),
+    ] = None,
+    product: Annotated[
+        str | None,
+        Field(description="Filter: product name, case-insensitive substring (e.g. 'RM1PE', 'iDRAC')."),
+    ] = None,
+    firmware_version: Annotated[
+        str | None,
+        Field(description="Filter: exact firmware version string as the device reports it."),
+    ] = None,
 ) -> dict:
     """What has actually been exercised on real hardware, per
     device+firmware+capability (read-only, offline — no device call).
@@ -474,7 +527,17 @@ def _md_title(text: str) -> str:
 
 
 @mcp.tool(annotations=_READ)
-def doctrine(topic: str | None = None) -> dict:
+def doctrine(
+    topic: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Playbook to return in full (e.g. 'recovery', 'interfaces'). "
+                "Omit to list the available topics."
+            )
+        ),
+    ] = None,
+) -> dict:
     """Re-serve the bundled operating doctrine (read-only; offline, no device I/O).
 
     The skill's playbooks ship inside this package; this tool re-serves them so
@@ -531,7 +594,7 @@ def _cached_firmware(cfg: HostConfig) -> str | None:
 
 
 @mcp.tool(annotations=_READ)
-def session(profile: str | None = None) -> dict:
+def session(profile: Profile = None) -> dict:
     """Report this server's current operating posture (read-only; offline, no
     device I/O — answers even when the device is down).
 
@@ -574,9 +637,16 @@ def session(profile: str | None = None) -> dict:
 
 
 @mcp.tool(annotations=_READ)
-def power_state(profile: str | None = None) -> dict:
-    """Return whether the host is powered on, plus ATX detail where the driver has it
-    (read-only)."""
+def power_state(profile: Profile = None) -> dict:
+    """Report whether the managed host is powered on (read-only).
+
+    Returns ``powered_on`` (bool) plus, on PiKVM-family devices, ``atx`` (the
+    power/HDD LEDs and button states); BMC/AMT drivers answer from the
+    controller's power state. The cheap check after ``power``/``wake`` when
+    their ``verified`` came back null, and before deciding whether a dark
+    ``snapshot`` means off or asleep. Changes nothing: to change power use
+    ``power``, to wake a sleeping host use ``wake``.
+    """
     with _driver(profile, confirm=deny_all, capability=Capability.POWER) as (cfg, kvm):
         state = {**_provenance(cfg), "powered_on": cast("Power", kvm).is_powered_on()}
         # ATX detail is PiKVM-family only; Redfish/fake answer via is_powered_on().
@@ -586,7 +656,12 @@ def power_state(profile: str | None = None) -> dict:
 
 
 @mcp.tool(annotations=_READ)
-def logs(seek: int = 0, profile: str | None = None) -> dict:
+def logs(
+    seek: Annotated[
+        int, Field(description="Seconds of lookback; 0 returns the whole buffer.", ge=0)
+    ] = 0,
+    profile: Profile = None,
+) -> dict:
     """Return the device/host event log as text (read-only).
 
     ``seek`` is seconds of lookback (0 = the whole buffer). This is the go-to
@@ -600,7 +675,7 @@ def logs(seek: int = 0, profile: str | None = None) -> dict:
 
 
 @mcp.tool(annotations=_READ)
-def snapshot(profile: str | None = None):
+def snapshot(profile: Profile = None):
     """Capture the current KVM screen (read-only).
 
     Returns ``[json_text, image]``: the JSON carries a ``frame_ref``
@@ -659,7 +734,18 @@ def _video_unavailable_error(exc: KVMPilotError) -> ToolError:
 
 
 @mcp.tool(annotations=_READ_VISION)
-def classify_screen(hint: str = "", profile: str | None = None):
+def classify_screen(
+    hint: Annotated[
+        str,
+        Field(
+            description=(
+                "Optional context for the vision backend, e.g. what you expect on "
+                "screen ('Fedora installer, language page')."
+            )
+        ),
+    ] = "",
+    profile: Profile = None,
+):
     """Classify the current screen's boot/run phase (read-only).
 
     Uses the server-side vision backend when configured; cheap on-device gates
@@ -775,10 +861,32 @@ def _final_frame_ref(cfg: HostConfig, kvm: KVMDriver, state) -> str | None:
 @mcp.tool(annotations=_READ_VISION_WAIT)
 async def wait_for_state(
     ctx: Context,
-    phase: str,
-    timeout: float = 60.0,
-    hint: str = "",
-    profile: str | None = None,
+    phase: Annotated[
+        str,
+        Field(
+            description=(
+                "Target boot/run phase token as classify_screen names it (e.g. 'bios', "
+                "'bootloader', 'os_login'); an unknown token fails fast with the valid list."
+            )
+        ),
+    ],
+    timeout: Annotated[
+        float,
+        Field(
+            description="Seconds to wait before returning reached=false; capped server-side at 300.",
+            gt=0,
+        ),
+    ] = 60.0,
+    hint: Annotated[
+        str,
+        Field(
+            description=(
+                "Optional context for the vision backend, e.g. what you expect on "
+                "screen ('Fedora installer, language page')."
+            )
+        ),
+    ] = "",
+    profile: Profile = None,
 ) -> dict:
     """Wait (bounded) until the screen reaches a boot/run phase (read-only).
 
@@ -943,9 +1051,17 @@ def _verify_power(
 @mcp.tool(annotations=_DESTRUCTIVE)
 async def power(
     ctx: Context,
-    action: Literal["on", "off", "off-hard", "reset"],
-    confirm: bool = False,
-    profile: str | None = None,
+    action: Annotated[
+        Literal["on", "off", "off-hard", "reset"],
+        Field(
+            description=(
+                "on/off are graceful (ACPI power button); off-hard forces power off "
+                "(data loss); reset is a hard reset. Use wake for Wake-on-LAN."
+            )
+        ),
+    ],
+    confirm: Confirm = False,
+    profile: Profile = None,
 ) -> dict:
     """Change host power state. DESTRUCTIVE.
 
@@ -990,7 +1106,7 @@ async def power(
 
 
 @mcp.tool(annotations=_READ)
-def boot_options(profile: str | None = None) -> dict:
+def boot_options(profile: Profile = None) -> dict:
     """Show the host's current boot override (Redfish BootSourceOverride) — read-only.
 
     Reports ``enabled`` (Disabled/Once/Continuous), the normalized ``target``, the
@@ -1005,11 +1121,23 @@ def boot_options(profile: str | None = None) -> dict:
 @mcp.tool(annotations=_DESTRUCTIVE)
 async def set_boot_device(
     ctx: Context,
-    device: Literal["pxe", "cd", "hdd", "usb", "bios", "diag", "none"],
-    once: bool = True,
-    uefi: bool = True,
-    confirm: bool = False,
-    profile: str | None = None,
+    device: Annotated[
+        Literal["pxe", "cd", "hdd", "usb", "bios", "diag", "none"],
+        Field(
+            description=(
+                "Boot source to override with; 'none' clears the override. Must be in "
+                "boot_options' allowable list."
+            )
+        ),
+    ],
+    once: Annotated[
+        bool, Field(description="True = next boot only; false = persistent until cleared.")
+    ] = True,
+    uefi: Annotated[
+        bool, Field(description="True = UEFI boot mode; false = legacy BIOS where the BMC offers it.")
+    ] = True,
+    confirm: Confirm = False,
+    profile: Profile = None,
 ) -> dict:
     """Set the next-boot (or persistent) boot device via BootSourceOverride. CONFIG MUTATION.
 
@@ -1035,10 +1163,26 @@ async def set_boot_device(
 @mcp.tool(annotations=_DESTRUCTIVE)
 async def amt_enable(
     ctx: Context,
-    feature: Literal["sol", "kvm"],
-    consent_off: bool = False,
-    confirm: bool = False,
-    profile: str | None = None,
+    feature: Annotated[
+        Literal["sol", "kvm"],
+        Field(
+            description=(
+                "'sol' opens the SOL/IDE-R listener (port 16994); 'kvm' opens KVM "
+                "redirection (5900) and sets the RFB password."
+            )
+        ),
+    ],
+    consent_off: Annotated[
+        bool,
+        Field(
+            description=(
+                "KVM only: true disables the on-screen user-consent prompt (needs the "
+                "KVM_PILOT_MCP_ALLOW_CONSENT_OFF gate too). Leave false to keep the prompt."
+            )
+        ),
+    ] = False,
+    confirm: Confirm = False,
+    profile: Profile = None,
 ) -> dict:
     """Enable an Intel AMT redirection listener over WS-Man (Intel AMT/vPro only). CONFIG MUTATION.
 
@@ -1091,11 +1235,24 @@ async def amt_enable(
 @mcp.tool(annotations=_DESTRUCTIVE)
 async def wake(
     ctx: Context,
-    mac: str | None = None,
-    broadcast: str | None = None,
-    count: int = 3,
-    confirm: bool = False,
-    profile: str | None = None,
+    mac: Annotated[
+        str | None,
+        Field(description="Target NIC MAC (aa:bb:cc:dd:ee:ff). Defaults to the profile's mac."),
+    ] = None,
+    broadcast: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Broadcast address to send to. Defaults to the profile's wol_broadcast, "
+                "else 255.255.255.255."
+            )
+        ),
+    ] = None,
+    count: Annotated[
+        int, Field(description="Magic packets to send (a few, spaced, survive loss).", ge=1)
+    ] = 3,
+    confirm: Confirm = False,
+    profile: Profile = None,
 ) -> dict:
     """Send a Wake-on-LAN magic packet to power the host on. POWER (soft).
 
@@ -1245,13 +1402,28 @@ async def _act(
 
 @mcp.tool(annotations=_DESTRUCTIVE)
 async def type_text(
-    ctx: Context, text: str, confirm: bool = False, profile: str | None = None
+    ctx: Context,
+    text: Annotated[
+        str,
+        Field(
+            description=(
+                "Printable text to type verbatim. Press Enter separately with "
+                "press_key('Enter')."
+            )
+        ),
+    ],
+    confirm: Confirm = False,
+    profile: Profile = None,
 ) -> dict:
-    """Type ``text`` on the managed host's console over the HID keyboard. DESTRUCTIVE.
+    """Type a string on the managed host's console over the HID keyboard. DESTRUCTIVE.
 
-    Requires the operator to enable HID (``KVM_PILOT_MCP_ALLOW_HID``) *and* a
-    per-invocation approval — a human elicitation when the client supports it, else
-    an explicit ``confirm=true`` under the operator's standing policy.
+    For printable text (commands, installer fields, passwords); nothing echoes
+    back and no Enter is appended — ``press_key('Enter')`` to submit. Keys that
+    aren't text go through ``press_key``; chords through ``send_shortcut``.
+    Keystrokes land wherever the host's focus is: ``snapshot`` first to confirm
+    the screen, and after to see the effect. Needs ``KVM_PILOT_MCP_ALLOW_HID``
+    + per-invocation approval (elicitation, or ``confirm=true`` under standing
+    policy). Returns the typed act outcome (receipt, or the denial reason).
     """
     return await _act(
         ctx, profile, tool="type_text", effect=EffectClass.HID_INPUT, op="hid.type_text",
@@ -1263,11 +1435,27 @@ async def type_text(
 
 @mcp.tool(annotations=_DESTRUCTIVE)
 async def press_key(
-    ctx: Context, key: str, confirm: bool = False, profile: str | None = None
+    ctx: Context,
+    key: Annotated[
+        str,
+        Field(
+            description=(
+                "One kvmd key code, case-sensitive: Enter, Escape, Tab, F2, ArrowDown, "
+                "Space, KeyA, Digit1... Not a chord."
+            )
+        ),
+    ],
+    confirm: Confirm = False,
+    profile: Profile = None,
 ) -> dict:
-    """Press a single key (a kvmd key code, e.g. ``Enter``/``Escape``/``F2``). DESTRUCTIVE.
+    """Press and release one key on the managed host's console. DESTRUCTIVE (HID).
 
-    Same gating as ``type_text`` (HID input): ``KVM_PILOT_MCP_ALLOW_HID`` + approval.
+    For a single non-text key: ``Enter`` to submit, ``Escape``, ``F2``/``F12``
+    at POST, arrows and ``Tab`` in firmware menus. For a chord use
+    ``send_shortcut``; for words use ``type_text``; for Ctrl+Alt+Del use
+    ``ctrl_alt_delete`` (power gate). Nothing echoes back — ``snapshot`` after.
+    Same gating as ``type_text``: ``KVM_PILOT_MCP_ALLOW_HID`` + per-invocation
+    approval. Returns the typed act outcome (receipt, or the denial reason).
     """
     return await _act(
         ctx, profile, tool="press_key", effect=EffectClass.HID_INPUT, op="hid.press_key",
@@ -1279,7 +1467,18 @@ async def press_key(
 
 @mcp.tool(annotations=_DESTRUCTIVE)
 async def send_shortcut(
-    ctx: Context, keys: str, confirm: bool = False, profile: str | None = None
+    ctx: Context,
+    keys: Annotated[
+        str,
+        Field(
+            description=(
+                "Comma-separated kvmd key codes pressed together, modifiers first: "
+                "'ControlLeft,AltLeft,F2'."
+            )
+        ),
+    ],
+    confirm: Confirm = False,
+    profile: Profile = None,
 ) -> dict:
     """Send a key chord — comma-separated kvmd key codes, e.g.
     ``ControlLeft,AltLeft,Delete`` or ``ControlLeft,AltLeft,F2``. DESTRUCTIVE.
@@ -1300,13 +1499,16 @@ async def send_shortcut(
 
 @mcp.tool(annotations=_DESTRUCTIVE)
 async def ctrl_alt_delete(
-    ctx: Context, confirm: bool = False, profile: str | None = None
+    ctx: Context, confirm: Confirm = False, profile: Profile = None
 ) -> dict:
-    """Send Ctrl+Alt+Del to the managed host. DESTRUCTIVE.
+    """Send Ctrl+Alt+Del to the managed host over the keyboard. DESTRUCTIVE (reboot).
 
-    A reboot delivered over the keyboard — classified ``power_soft``, so it needs
-    ``KVM_PILOT_MCP_ALLOW_POWER`` (the same gate as the ``power`` tool), never the
-    weaker HID gate.
+    A reboot (or the OS's secure-attention screen) delivered through HID, so it
+    is classified ``power_soft`` and needs ``KVM_PILOT_MCP_ALLOW_POWER`` — the
+    ``power`` tool's gate — never the weaker HID gate. Prefer
+    ``power(action='reset')`` when the device has out-of-band power: that is
+    verifiable, this chord is not (a hung host simply ignores it). Returns the
+    typed act outcome; confirm with ``wait_for_state`` or ``snapshot``.
     """
     return await _act(
         ctx, profile, tool="ctrl_alt_delete", effect=EffectClass.POWER_SOFT,
@@ -1406,13 +1608,38 @@ def _run_mouse(
 @mcp.tool(annotations=_DESTRUCTIVE)
 async def mouse(
     ctx: Context,
-    x: float,
-    y: float,
-    observed_frame_ref: str | None = None,
-    coord_space: Literal["percent", "pixel", "raw"] = "percent",
-    button: Literal["left", "right", "middle"] | None = None,
-    confirm: bool = False,
-    profile: str | None = None,
+    x: Annotated[
+        float,
+        Field(description="Horizontal target in coord_space units (percent: 0.0 left to 1.0 right)."),
+    ],
+    y: Annotated[
+        float,
+        Field(description="Vertical target in coord_space units (percent: 0.0 top to 1.0 bottom)."),
+    ],
+    observed_frame_ref: Annotated[
+        str | None,
+        Field(
+            description=(
+                "frame_ref from the snapshot the click was planned on. Required for a "
+                "click; a stale or foreign ref is refused."
+            )
+        ),
+    ] = None,
+    coord_space: Annotated[
+        Literal["percent", "pixel", "raw"],
+        Field(
+            description=(
+                "percent = fraction of the screen (survives resolution changes); "
+                "pixel = capture pixels; raw = kvmd units."
+            )
+        ),
+    ] = "percent",
+    button: Annotated[
+        Literal["left", "right", "middle"] | None,
+        Field(description="Button to click after moving. Omit for a move only (no frame ref needed)."),
+    ] = None,
+    confirm: Confirm = False,
+    profile: Profile = None,
 ) -> dict:
     """Move the mouse (and optionally click) on the host. DESTRUCTIVE (HID input).
 
@@ -1462,9 +1689,18 @@ async def mouse(
 @mcp.tool(annotations=_REVERSIBLE_WRITE)
 async def calibrate_mouse(
     ctx: Context,
-    confirm: bool = False,
-    tolerance: float = 0.02,
-    profile: str | None = None,
+    confirm: Confirm = False,
+    tolerance: Annotated[
+        float,
+        Field(
+            description=(
+                "Max held-out verification error, as a fraction of the screen, for "
+                "the fit to be stored."
+            ),
+            gt=0,
+        ),
+    ] = 0.02,
+    profile: Profile = None,
 ) -> dict:
     """Measure and store this host's mouse commanded→observed correction (#128).
 
@@ -1525,7 +1761,7 @@ async def calibrate_mouse(
 
 
 @mcp.tool(annotations=_READ)
-def list_virtual_media(profile: str | None = None) -> dict:
+def list_virtual_media(profile: Profile = None) -> dict:
     """Inventory the KVM's virtual-media (MSD) storage (read-only).
 
     Check this BEFORE asking the operator to download or upload an ISO — the
@@ -1548,11 +1784,21 @@ def list_virtual_media(profile: str | None = None) -> dict:
 @mcp.tool(annotations=_REVERSIBLE_WRITE_REMOTE)
 async def mount_iso(
     ctx: Context,
-    source: str,
-    name: str | None = None,
-    usb: bool = False,
-    confirm: bool = False,
-    profile: str | None = None,
+    source: Annotated[
+        str,
+        Field(
+            description="Local path on the server host, or an http(s):// URL the device fetches/streams."
+        ),
+    ],
+    name: Annotated[
+        str | None,
+        Field(description="Image name to store it under on the device; defaults to the source's basename."),
+    ] = None,
+    usb: Annotated[
+        bool, Field(description="True presents it as a USB flash drive instead of a CD-ROM.")
+    ] = False,
+    confirm: Confirm = False,
+    profile: Profile = None,
 ) -> dict:
     """Mount an ISO as virtual media on the host. GATED act (media effect gate); reversible.
 
@@ -1583,10 +1829,14 @@ async def mount_iso(
 
 
 @mcp.tool(annotations=_REVERSIBLE_WRITE)
-async def eject(ctx: Context, confirm: bool = False, profile: str | None = None) -> dict:
-    """Detach virtual media (the inverse of ``mount_iso``). GATED act (media effect gate); reversible.
+async def eject(ctx: Context, confirm: Confirm = False, profile: Profile = None) -> dict:
+    """Detach the virtual media presented to the host (inverse of ``mount_iso``). GATED, reversible.
 
-    Needs ``KVM_PILOT_MCP_ALLOW_MEDIA`` + per-invocation approval.
+    Needs ``KVM_PILOT_MCP_ALLOW_MEDIA`` + per-invocation approval. With nothing
+    attached it returns ``detached=false`` and says so — not an error. Touches
+    neither power nor the boot order: a host running from the ISO keeps running
+    until it reboots; on BMCs, ``set_boot_device`` picks what boots next.
+    Returns the typed act outcome.
     """
     def _run(_cfg: HostConfig, kvm: KVMDriver) -> dict:
         if nothing_to_eject(kvm):
@@ -1608,7 +1858,7 @@ async def eject(ctx: Context, confirm: bool = False, profile: str | None = None)
 
 
 @mcp.tool(annotations=_READ)
-def ssh_reachable(profile: str | None = None, host: str | None = None) -> dict:
+def ssh_reachable(profile: Profile = None, host: SSHHost = None) -> dict:
     """Is the managed host's OS reachable over SSH? (read-only, in-band).
 
     Targets the host *behind* the KVM (its own ``ssh_host`` / `KVM_PILOT_SSH_HOST`),
@@ -1638,10 +1888,13 @@ def ssh_reachable(profile: str | None = None, host: str | None = None) -> dict:
 @mcp.tool(annotations=_DESTRUCTIVE)
 async def ssh_exec(
     ctx: Context,
-    command: str,
-    confirm: bool = False,
-    profile: str | None = None,
-    host: str | None = None,
+    command: Annotated[
+        str,
+        Field(description="Shell command line to run on the managed host as the profile's SSH user."),
+    ],
+    confirm: Confirm = False,
+    profile: Profile = None,
+    host: SSHHost = None,
 ) -> dict:
     """Run a command on the managed host's OS over SSH. DESTRUCTIVE / in-band.
 
@@ -1675,7 +1928,7 @@ async def ssh_exec(
 
 
 @mcp.tool(annotations=_READ)
-def appliance_status(profile: str | None = None) -> dict:
+def appliance_status(profile: Profile = None) -> dict:
     """Read-only diagnostics from the KVM APPLIANCE's own OS over SSH.
 
     Targets the KVM appliance itself (its ``appliance_ssh`` channel), NOT the
@@ -1702,7 +1955,7 @@ def appliance_status(profile: str | None = None) -> dict:
 
 @mcp.tool(annotations=_DESTRUCTIVE)
 async def appliance_reboot(
-    ctx: Context, confirm: bool = False, profile: str | None = None
+    ctx: Context, confirm: Confirm = False, profile: Profile = None
 ) -> dict:
     """Reboot the KVM APPLIANCE (not the target) to clear a wedged encoder. DESTRUCTIVE.
 
@@ -1732,7 +1985,7 @@ async def appliance_reboot(
 
 
 @mcp.tool(annotations=_READ)
-def access_paths(profile: str | None = None) -> dict:
+def access_paths(profile: Profile = None) -> dict:
     """Which INDEPENDENT recovery paths are live for the device — the lockout view.
 
     Rolls up the REST API, appliance-SSH, target-SSH, out-of-band power, and
@@ -1748,7 +2001,17 @@ def access_paths(profile: str | None = None) -> dict:
 
 
 @mcp.tool(annotations=_READ)
-def events(count: int = 20, duration: float = 5.0, profile: str | None = None) -> dict:
+def events(
+    count: Annotated[int, Field(description="Stop after this many events.", ge=1)] = 20,
+    duration: Annotated[
+        float,
+        Field(
+            description="Stop after this many seconds (capped at 30), whichever comes first.",
+            gt=0,
+        ),
+    ] = 5.0,
+    profile: Profile = None,
+) -> dict:
     """Collect typed device events from the kvmd stream (read-only, bounded).
 
     MCP twin of CLI ``events`` minus follow mode (#233 — an endless stream
@@ -1777,7 +2040,7 @@ def events(count: int = 20, duration: float = 5.0, profile: str | None = None) -
 
 
 @mcp.tool(annotations=_READ)
-def firmware_check(profile: str | None = None) -> dict:
+def firmware_check(profile: Profile = None) -> dict:
     """Report the device's firmware currency vs the bundled registry (read-only).
 
     The read half of ``file_firmware_report`` (#233): reconciles the device's
@@ -1803,11 +2066,24 @@ def firmware_check(profile: str | None = None) -> dict:
 @mcp.tool(annotations=_REVERSIBLE_WRITE_REMOTE)
 async def file_firmware_report(
     ctx: Context,
-    confirm: bool = False,
-    repo: str | None = None,
-    source: str | None = None,
-    dry_run: bool = False,
-    profile: str | None = None,
+    confirm: Confirm = False,
+    repo: Annotated[
+        str | None,
+        Field(description="GitHub repo to file in (owner/name). Defaults to kvm-pilot's own."),
+    ] = None,
+    source: Annotated[
+        str | None,
+        Field(
+            description=(
+                "Free-text provenance recorded in the issue (who/what observed the "
+                "newer firmware)."
+            )
+        ),
+    ] = None,
+    dry_run: Annotated[
+        bool, Field(description="True previews the exact issue title/body without filing.")
+    ] = False,
+    profile: Profile = None,
 ) -> dict:
     """File the device's firmware-currency report as a GitHub issue when the
     registry is behind (MCP twin of CLI ``firmware-check``, #189/#190).
@@ -1862,7 +2138,19 @@ async def file_firmware_report(
 
 
 @mcp.tool(annotations=_READ)
-def ssh_discover(cidr: str, confirm: bool = False, port: int = 22) -> dict:
+def ssh_discover(
+    cidr: Annotated[
+        str,
+        Field(
+            description=(
+                "Network to scan in CIDR form, e.g. '10.0.1.0/24'. The user must own or "
+                "be authorized to probe it."
+            )
+        ),
+    ],
+    confirm: Confirm = False,
+    port: Annotated[int, Field(description="TCP port to probe.", ge=1, le=65535)] = 22,
+) -> dict:
     """Scan a CIDR for hosts with an open SSH port. RISKY — opt-in.
 
     An active network scan: noisy, and only acceptable on networks the user owns or
