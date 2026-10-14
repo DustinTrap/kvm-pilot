@@ -7,6 +7,18 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Changed
+- **MCP tool schemas now describe every parameter** (#278). All 87 parameters
+  across the 34 tools carry a schema-level `description` (via
+  `Annotated[..., Field(description=...)]`; the shared `profile` / `confirm` /
+  `host` texts are written once), so an agent can fill a parameter in from the
+  schema alone — previously 0 of 87 were described and Glama's TDQS review
+  scored `power_state` B 3.2 for exactly that. Numeric bounds (`seek>=0`,
+  `timeout>0`, `port` 1–65535, …) are declared too. The six thinnest tool
+  descriptions (`info`, `power_state`, `type_text`, `press_key`,
+  `ctrl_alt_delete`, `eject`) now state what comes back and which sibling tool
+  to use instead. Wire-verified on mcp 1.21.1 and 2.3.0; no tool names,
+  parameters or defaults changed.
+- `glama.json` added at the repo root (maintainer claim for the Glama listing, #278).
 - **mcp floor raised to `>=1.21.1`** (was `>=1.17`, #271). pydantic 2.14 removed a
   private helper that mcp 1.17–1.21.0 import at module load, so those versions no
   longer import on a fresh install; 1.21.1 is the first 1.x that does (measured in
