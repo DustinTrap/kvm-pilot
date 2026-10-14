@@ -106,7 +106,7 @@ kvm.press_key("Enter")
 For the latest unreleased tree:
 
 ```bash
-pip install "kvm-pilot[totp,ws] @ git+https://github.com/DustinTrap/kvm-pilot"
+pip install "kvm-pilot[totp] @ git+https://github.com/DustinTrap/kvm-pilot"
 ```
 
 ### CLI

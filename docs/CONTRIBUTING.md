@@ -198,3 +198,19 @@ project's standards (optional aids — the CI checks above remain the gates):
 - **`/claude-api`** — read before changing anything under `src/kvm_pilot/vision/`;
   it covers current Anthropic model ids and vision parameters.
 - **`/find-skills`** — discover other useful skills in the ecosystem.
+
+## Release checklist
+
+The version lives in `src/kvm_pilot/__about__.py`; releases publish to PyPI via
+GitHub Trusted Publishing (`.github/workflows/release.yml`, environment `pypi`)
+on a published GitHub Release (full doctrine in `CLAUDE.md` → *Release*). When
+cutting one:
+
+1. Bump the version in `src/kvm_pilot/__about__.py`.
+2. Update `CHANGELOG.md` for the release.
+3. **Refresh or delete `RESUME.md`.** `CLAUDE.md` tells every session to read it
+   first, but it is a local, untracked scratch file (#209) that goes stale each
+   release — it has been found asserting the previous `rc` as released while the
+   tree was already on the next one. After a release, either bring it up to date
+   or delete it so a fresh clone falls back to the open issues + `CHANGELOG`.
+4. Publish the GitHub Release to trigger the PyPI publish.

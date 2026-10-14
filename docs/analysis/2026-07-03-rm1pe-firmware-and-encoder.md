@@ -1,5 +1,7 @@
 # 2026-07-03 — RM1PE: remote firmware update declined; native-res encoder wedge
 
+> **Point-in-time field report.** Dated session analysis, kept as written — file paths, versions, and driver locations here may have moved since; see current docs and open issues for live state.
+
 *Session-level analysis (see `docs/analysis/`): a field report from a real GL
 
 > Device identifiers in this report are redacted to stable labels (`unit-A`/`unit-B`/`unit-C`); exact addresses live in the operator's private ledger, not in the published repo (#209/#243).

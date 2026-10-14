@@ -1,5 +1,7 @@
 # 2026-07-01 — Top-to-bottom review: narrative
 
+> **Point-in-time field report.** Dated session analysis, kept as written — file paths, versions, and driver locations here may have moved since; see current docs and open issues for live state.
+
 *This is the first entry in `docs/analysis/` — session-level analysis output
 that is too narrative for `decisions.md` (which records individual judgment
 calls) but worth keeping: what was reviewed, how, what was found, and what
