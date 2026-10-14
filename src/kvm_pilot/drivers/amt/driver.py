@@ -55,7 +55,7 @@ _ME_LIVENESS_S = 15.0
 
 if TYPE_CHECKING:
     from ...config import HostConfig
-    from .rfb import Rfb
+    from .rfb import RedirKvmStream, Rfb
 
 # WS-Addressing / WS-Man URIs used when building Endpoint References (EPRs) and
 # selector sets inside method-input bodies (the generic Wsman client stays
@@ -66,7 +66,13 @@ _ANON = "http://schemas.xmlsoap.org/ws/2004/08/addressing/role/anonymous"
 
 # CIM_PowerManagementService.RequestPowerStateChange PowerState codes. A soft
 # request asks the OS to shut down (ACPI); a hard one cuts power immediately.
-_POWER = {"on": 2, "off_soft": 8, "off_hard": 6, "reset": 10, "cycle_soft": 5}
+# RequestPowerStateChange values as Intel AMT implements them (Intel AMT Implementation
+# and Reference Guide, CIM_PowerManagementService): 2, 5, 8 and 10 are always supported;
+# 12 and 14 (the OS-graceful off/reset) only when the OS agent (Intel LMS) is running.
+# The CIM enum names 8 "Off - Soft", but on AMT it is the immediate power-down -- the OS
+# is not asked, Windows logs an unexpected shutdown. 6 ("Off - Hard") is in neither of
+# AMT's supported lists, and unsupported values return ReturnValue 2.
+_POWER = {"on": 2, "off_graceful": 12, "off_hard": 8, "reset": 10, "cycle_soft": 5}
 
 # The service instance is selected by its four CIM keys.
 _PWR_SVC_SEL = {
@@ -126,7 +132,7 @@ class AmtDriver(PowerMixin, CapabilityMixin):
         self._sol_port = sol_port
         self._kvm_port = kvm_port
         # Which KVM transport answered last: 'standard' (5900) or
-        # 'redirection' (16994). None until the first successful connect (#245).
+        # 'redirection' (16994, or 16995 over TLS). None until the first successful connect (#245).
         self._kvm_transport: str | None = None
         # Adopt a virtual CD this process is already serving to the host (#252):
         # the MCP server builds one driver per tool call, and the disc must stay
@@ -357,10 +363,11 @@ class AmtDriver(PowerMixin, CapabilityMixin):
         )
         rv = findtext(out, "ReturnValue")
         if rv not in (None, "0"):
-            raise WsmanError(
-                f"AMT RequestPowerStateChange({state}) on {self.host} returned {rv} "
-                "(non-zero = the ME refused it; check AMT power-package support / provisioning)"
-            )
+            hint = "non-zero = the ME refused it; check AMT power-package support / provisioning"
+            if state == _POWER["off_graceful"]:
+                hint = ("a graceful off needs the OS agent (Intel LMS) running in the host OS; "
+                        "`power off-hard` powers down without asking the OS")
+            raise WsmanError(f"AMT RequestPowerStateChange({state}) on {self.host} returned {rv} ({hint})")
         if state in (_POWER["reset"], _POWER["off_hard"]):
             self._note_hard_reset()
             # Only the hard ops have been seen to wedge the ME (#251); a soft
@@ -372,14 +379,17 @@ class AmtDriver(PowerMixin, CapabilityMixin):
         self._request_power(_POWER["on"], "amt.power_on", f"Power ON {self.host} (AMT)", wait=wait)
 
     def power_off(self, wait: bool = True) -> None:
+        # 12, not 8: on AMT 8 powers down at once without the OS (see _POWER).
         self._request_power(
-            _POWER["off_soft"], "amt.power_off", f"Graceful power OFF {self.host} (AMT, ACPI soft-off)",
+            _POWER["off_graceful"], "amt.power_off",
+            f"Graceful power OFF {self.host} (AMT asks the OS to shut down; needs Intel LMS)",
             wait=wait,
         )
 
     def power_off_hard(self, wait: bool = True) -> None:
         self._request_power(
-            _POWER["off_hard"], "amt.power_off_hard", f"HARD power off {self.host} (AMT, data-loss risk)",
+            _POWER["off_hard"], "amt.power_off_hard",
+            f"HARD power off {self.host} (AMT power-down without the OS, data-loss risk)",
             wait=wait,
         )
 
@@ -670,6 +680,20 @@ class AmtDriver(PowerMixin, CapabilityMixin):
                 f"AMT {action} was rejected by the ME: {exc}\n{self._redirection_hint(exc)}"
             ) from exc
 
+    def _redir_port(self) -> int:
+        """The redirection port SOL/IDE-R/KVM sessions use: 16995 over TLS, else 16994.
+        CSME 19 and later refuse non-TLS connections, so there only 16995 answers."""
+        return 16995 if self._tls else self._sol_port
+
+    def _redir_kvm_stream(self, timeout: float | None = None) -> RedirKvmStream:
+        from .rfb import RedirKvmStream
+
+        return RedirKvmStream(
+            self.host, self._user, self._passwd, port=self._redir_port(), tls=self._tls,
+            verify_ssl=self._verify_ssl, ssl_ca_file=self._ssl_ca_file,
+            timeout=self._timeout if timeout is None else timeout,
+        )
+
     def _kvm_redirection_serves(self) -> bool | None:
         """Does KVM actually serve over the redirection port right now?
 
@@ -680,11 +704,8 @@ class AmtDriver(PowerMixin, CapabilityMixin):
         Rather than pick the likelier story — which I did three times, wrongly —
         open the session and find out. It costs one connection.
         """
-        from .rfb import RedirKvmStream
-
         try:
-            RedirKvmStream(self.host, self._user, self._passwd,
-                           port=self._sol_port, timeout=min(self._timeout, 10.0)).connect().close()
+            self._redir_kvm_stream(timeout=min(self._timeout, 10.0)).connect().close()
         except (ConnectionError, ProtocolError, AuthError):
             return False        # asked and answered: the path does not serve
         except Exception:       # noqa: BLE001 - see below
@@ -711,27 +732,28 @@ class AmtDriver(PowerMixin, CapabilityMixin):
         # ("The specified feature is not supported. (subcode e:UnsupportedFeature)"),
         # but firmware phrasing varies and either alone is a clear enough signal.
         if "unsupportedfeature" in detail or "not supported" in detail:
+            rp = self._redir_port()
             head = (
                 "The ME refuses to enable the STANDARD VNC PORT (5900) for KVM. Newer "
                 "builds harden that legacy plain-RFB port off permanently and serve KVM "
-                "only over the authenticated redirection port 16994, which kvm-pilot uses "
+                f"only over the authenticated redirection port {rp}, which kvm-pilot uses "
                 "automatically — so this refusal alone does not tell you KVM is broken. "
             )
             serves = self._kvm_redirection_serves()
             if serves is True:
                 return head + (
-                    "CHECKED: KVM IS SERVING over 16994 on this device right now, so there "
+                    f"CHECKED: KVM IS SERVING over {rp} on this device right now, so there "
                     "is nothing to fix — `snapshot` and `console` work. Do not touch MEBx."
                 )
             if serves is False:
                 return head + (
-                    "CHECKED: KVM did NOT answer over 16994 either, so this one is real. "
+                    f"CHECKED: KVM did NOT answer over {rp} either, so this one is real. "
                     "Confirm KVM redirection is enabled in MEBx (a firmware setting no "
                     "remote call can change) and that the redirection listener is on "
                     "(`kvm-pilot amt enable-sol`)."
                 )
             return head + (
-                "The 16994 path could not be tested from here, so this is unresolved: run "
+                f"The {rp} path could not be tested from here, so this is unresolved: run "
                 "`kvm-pilot snapshot` — if it returns an image, KVM is fine and only the "
                 "5900 listener is gone."
             )
@@ -763,6 +785,51 @@ class AmtDriver(PowerMixin, CapabilityMixin):
         if svc is None:
             return None
         return {"1": "ccm", "2": "acm"}.get((findtext(svc, "CurrentControlMode") or "").strip())
+
+    # -- User consent (Client Control Mode) -------------------------------
+    #
+    # In CCM the ME starts no KVM session until a 6-digit code it paints on the
+    # host's own display is sent back (IPS_OptInService); the consent then holds
+    # for an ME-defined while. Admin Control Mode can drop the requirement
+    # (``enable_kvm(require_consent=False)``).
+
+    def consent_state(self) -> dict[str, str | None]:
+        """OptInRequired (0 none, 1 KVM, 4294967295 all), OptInState (0 none,
+        1 requested, 2 code shown, 3 consent received, 4 session in progress)
+        and OptInCodeTimeout (seconds), as the ME reports them."""
+        opt = self._wsman.get(self._OPTIN)
+        return {k: findtext(opt, k) for k in ("OptInRequired", "OptInState", "OptInCodeTimeout")}
+
+    def request_consent(self) -> None:
+        """Make the ME show a 6-digit consent code on the host's own screen."""
+        self._optin_invoke("StartOptIn", "")
+
+    def send_consent_code(self, code: str) -> None:
+        """Send back the code read off the host's screen; consent is then in force."""
+        if not (code.isdigit() and len(code) == 6):
+            raise KVMPilotError("the AMT consent code is the 6 digits shown on the host's screen")
+        self._optin_invoke("SendOptInCode", f"<p:OptInCode>{int(code)}</p:OptInCode>")
+
+    def _optin_invoke(self, method: str, inner: str) -> None:
+        body = f'<p:{method}_INPUT xmlns:p="{self._OPTIN}">{inner}</p:{method}_INPUT>'
+        out = self._wsman.invoke(self._OPTIN, method, body, selectors=self._optin_selectors())
+        rv = findtext(out, "ReturnValue")
+        if rv not in (None, "0"):
+            hint = ("wrong or expired code — request a new one" if method == "SendOptInCode"
+                    else "a consent request may already be pending; send its code or wait for it to expire")
+            raise WsmanError(f"AMT IPS_OptInService.{method} on {self.host} returned {rv} ({hint})")
+
+    def _kvm_consent_missing(self) -> bool:
+        """True when this ME is in Client Control Mode, demands KVM consent and
+        none is in force. Best-effort: False whenever it cannot tell."""
+        try:
+            if self._control_mode() != "ccm":
+                return False
+            st = self.consent_state()
+        except (WsmanError, KVMPilotError):
+            return False
+        return ((st["OptInRequired"] or "0").strip() != "0"
+                and (st["OptInState"] or "0").strip() not in ("3", "4"))
 
     def _check_rfb_password(self) -> None:
         """AMT's standard-port (5900) RFB password must be EXACTLY 8 chars with an
@@ -1075,7 +1142,7 @@ class AmtDriver(PowerMixin, CapabilityMixin):
             self._ider = None
         ider = IderSession(
             self.host, self._user, self._passwd, source,
-            port=(16995 if self._tls else self._sol_port), tls=self._tls,
+            port=self._redir_port(), tls=self._tls,
             verify_ssl=self._verify_ssl, ssl_ca_file=self._ssl_ca_file, timeout=self._timeout,
         )
         ider.start()
@@ -1121,16 +1188,13 @@ class AmtDriver(PowerMixin, CapabilityMixin):
 
     def _rfb_on(self, transport: str) -> Rfb:
         """An unconnected RFB session bound to one transport (see :meth:`_connect_rfb`)."""
-        from .rfb import RedirKvmStream, Rfb
+        from .rfb import Rfb
 
         if transport == "standard":
             return Rfb(self.host, self._kvm_port, self._kvm_password, timeout=self._timeout)
-        stream = RedirKvmStream(
-            self.host, self._user, self._passwd,
-            port=self._sol_port, timeout=self._timeout,
-        )
+        stream = self._redir_kvm_stream()
         # The RFB password is still the KVM credential once the tunnel is up.
-        return Rfb(self.host, self._sol_port, self._kvm_password,
+        return Rfb(self.host, self._redir_port(), self._kvm_password,
                    timeout=self._timeout, stream_factory=stream.connect)
 
     def _connect_rfb(self) -> Rfb:
@@ -1151,17 +1215,29 @@ class AmtDriver(PowerMixin, CapabilityMixin):
         if self._kvm_transport is not None:
             order = (self._kvm_transport,)
         first_error: ConnectionError | None = None
-        for transport in order:
-            session = self._rfb_on(transport)
-            try:
-                session.connect()
-            except ConnectionError as exc:
-                first_error = first_error or exc
-                continue
-            self._kvm_transport = transport
-            return session
-        assert first_error is not None
-        raise first_error
+        try:
+            for transport in order:
+                session = self._rfb_on(transport)
+                try:
+                    session.connect()
+                except ConnectionError as exc:
+                    first_error = first_error or exc
+                    continue
+                self._kvm_transport = transport
+                return session
+            assert first_error is not None
+            raise first_error
+        except (ConnectionError, ProtocolError) as exc:
+            # In Client Control Mode a refused session usually just means nobody
+            # has confirmed the on-screen code yet; say so instead of the
+            # transport error (and keep snapshot() from cycling the SAP for it).
+            if self._kvm_consent_missing():
+                raise CapabilityError(
+                    f"AMT on {self.host} needs user consent before a KVM session (Client "
+                    "Control Mode): run `kvm-pilot amt consent-start`, read the 6-digit code "
+                    "on the host's own screen, then `kvm-pilot amt consent-code --code <code>`."
+                ) from exc
+            raise
 
     def _rfb_snapshot_session(self) -> Rfb:
         return self._connect_rfb()

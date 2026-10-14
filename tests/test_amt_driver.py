@@ -56,8 +56,10 @@ def test_is_powered_on_reads_cim_powerstate(amt_emu):
 
 
 @pytest.mark.parametrize(
+    # Intel's AMT values, not the CIM enum names: 8 is AMT's immediate power-down
+    # (the OS is not asked), 12 the OS-graceful off; 6 is not an AMT-supported value.
     "method,expected",
-    [("power_on", "2"), ("power_off", "8"), ("power_off_hard", "6"), ("reset_hard", "10")],
+    [("power_on", "2"), ("power_off", "12"), ("power_off_hard", "8"), ("reset_hard", "10")],
 )
 def test_power_actions_map_to_cim_codes(amt_emu, method, expected):
     getattr(make(amt_emu), method)()
@@ -1881,3 +1883,95 @@ def test_hard_reset_accounting_survives_concurrent_calls(amt_emu):
     for t in threads:
         t.join()
     assert drv.hard_resets_recent() == 8
+
+
+# -- CSME 19+: TLS-only redirection, power-state semantics, user consent -----
+
+
+def test_graceful_off_refusal_names_the_os_agent_and_the_hard_alternative(amt_emu):
+    # A graceful off (12) is refused when no OS agent (Intel LMS) can act on it;
+    # the error must say so and point at the immediate power-down instead.
+    amt_emu.state.nonzero_methods = {"RequestPowerStateChange"}
+    with pytest.raises(WsmanError) as ei:
+        make(amt_emu).power_off()
+    assert "Intel LMS" in str(ei.value) and "off-hard" in str(ei.value)
+
+
+def test_kvm_redirection_uses_the_tls_port_when_tls_is_on():
+    # CSME 19+ refuses every plaintext port; KVM must ride TLS 16995 like IDE-R does.
+    d = AmtDriver("127.0.0.1", "admin", "secret", port=16993, tls=True, verify_ssl=False)
+    st = d._redir_kvm_stream()
+    assert (st.port, st._tls, st._verify_ssl) == (16995, True, False)
+    assert d._rfb_on("redirection").port == 16995
+
+
+def test_kvm_redirection_stays_on_16994_without_tls():
+    d = AmtDriver("127.0.0.1", "admin", "secret")
+    assert (d._redir_kvm_stream().port, d._redir_kvm_stream()._tls) == (16994, False)
+
+
+def test_redir_kvm_stream_hands_tls_to_the_redirection_channel(monkeypatch):
+    seen = {}
+
+    class _Chan(_FakeRedirChan):
+        def __init__(self, *a, **kw):
+            seen.update(kw)
+            super().__init__(bytes([0x41, 0, 0, 0, 0, 0, 0, 0]))
+
+    monkeypatch.setattr("kvm_pilot.drivers.amt.redir.RedirectionChannel", _Chan)
+    from kvm_pilot.drivers.amt.rfb import RedirKvmStream
+
+    RedirKvmStream("h", "admin", "pw", port=16995, tls=True, verify_ssl=True).connect()
+    assert (seen["port"], seen["tls"], seen["verify_ssl"]) == (16995, True, True)
+
+
+def test_consent_request_and_code_round_trip(amt_emu):
+    d = make(amt_emu)
+    d.request_consent()
+    assert d.consent_state()["OptInState"] == "2"      # code now on the host's screen
+    d.send_consent_code("123456")
+    assert amt_emu.state.optin_code == "123456"
+    assert d.consent_state()["OptInState"] == "3"      # consent received
+
+
+def test_consent_code_must_be_six_digits(amt_emu):
+    with pytest.raises(KVMPilotError):
+        make(amt_emu).send_consent_code("12a456")
+    assert amt_emu.state.optin_code is None
+
+
+def test_wrong_consent_code_is_reported(amt_emu):
+    amt_emu.state.nonzero_methods = {"SendOptInCode"}
+    with pytest.raises(WsmanError, match="wrong or expired code"):
+        make(amt_emu).send_consent_code("123456")
+
+
+class _RefusedSession:
+    port = 0
+
+    def connect(self):
+        raise ConnectionError("refused")
+
+
+def _ccm_kvm_refused(amt_emu, monkeypatch):
+    amt_emu.state.control_mode = "1"     # Client Control Mode
+    amt_emu.state.optin_required = "1"   # KVM needs consent
+    d = make(amt_emu)
+    monkeypatch.setattr(d, "_rfb_on", lambda transport: _RefusedSession())
+    return d
+
+
+def test_kvm_without_consent_in_ccm_says_how_to_consent(amt_emu, monkeypatch):
+    d = _ccm_kvm_refused(amt_emu, monkeypatch)
+    with pytest.raises(CapabilityError, match="amt consent-start"):
+        d.snapshot()
+    # Not a stuck session, so no SAP disable/enable cycling for it.
+    assert amt_emu.state.kvm_sap_requests == []
+
+
+def test_kvm_refusal_with_consent_in_force_keeps_the_transport_error(amt_emu, monkeypatch):
+    d = _ccm_kvm_refused(amt_emu, monkeypatch)
+    amt_emu.state.optin_state = "3"      # consent already given: the cause is elsewhere
+    monkeypatch.setattr(d, "reset_kvm_session", lambda: None)
+    with pytest.raises(ConnectionError, match="refused"):
+        d.snapshot()

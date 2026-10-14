@@ -1102,6 +1102,24 @@ def test_amt_enable_kvm_no_consent_via_cli(amt_emu, monkeypatch, capsys):
     assert "CONSENT OFF" in capsys.readouterr().out
 
 
+def test_amt_consent_start_and_code_via_cli(amt_emu, monkeypatch, capsys):
+    monkeypatch.setenv("KVM_PILOT_AMT_PORT", str(amt_emu.port))
+    base = ["--driver", "amt", "--host", "127.0.0.1", "--user", "admin", "--passwd", "secret", "--yes"]
+    assert main(["amt", "consent-start", *base]) == 0
+    assert amt_emu.state.optin_state == "2"
+    assert "120 s" in capsys.readouterr().out
+    assert main(["amt", "consent-code", "--code", "654321", *base]) == 0
+    assert amt_emu.state.optin_code == "654321"
+
+
+def test_amt_consent_code_needs_a_code(amt_emu, monkeypatch, capsys):
+    monkeypatch.setenv("KVM_PILOT_AMT_PORT", str(amt_emu.port))
+    rc = main(["amt", "consent-code", "--driver", "amt", "--host", "127.0.0.1",
+               "--user", "admin", "--passwd", "secret", "--yes"])
+    assert rc == 2
+    assert "--code" in capsys.readouterr().err
+
+
 # -- install-skill (#226) -----------------------------------------------------
 
 

@@ -721,6 +721,23 @@ def cmd_amt(args) -> int:
                " (the on-screen consent prompt stays on)"
         print(f"AMT KVM redirection {'would be enabled' if dry else 'enabled'} on {kvm.host} "
               f"(port 5900){note}.")
+    elif args.action == "consent-start":
+        if dry:
+            print(f"Would ask AMT on {kvm.host} to show a KVM consent code on its screen.")
+            return 0
+        kvm.request_consent()
+        timeout = kvm.consent_state().get("OptInCodeTimeout") or "?"
+        print(f"AMT on {kvm.host} now shows a 6-digit consent code on the host's own screen; "
+              f"send it within {timeout} s: kvm-pilot amt consent-code --code <code>")
+    elif args.action == "consent-code":
+        if not args.code:
+            print("consent-code needs --code <the 6 digits shown on the host's screen>", file=sys.stderr)
+            return 2
+        if dry:
+            print(f"Would send the consent code to AMT on {kvm.host}.")
+            return 0
+        kvm.send_consent_code(args.code)
+        print(f"AMT user consent accepted on {kvm.host}; KVM sessions can start now.")
     else:  # reset-kvm
         kvm.reset_kvm_session()
         print(f"AMT KVM session {'would be cleared' if dry else 'cleared'} on {kvm.host}.")
@@ -1888,9 +1905,13 @@ def build_parser() -> argparse.ArgumentParser:
         "amt",
         help="Intel AMT feature enablement over WS-Man: open the SOL/KVM listeners, "
              "clear a stuck KVM session (needs --driver amt)")
-    p.add_argument("action", choices=["enable-sol", "enable-kvm", "reset-kvm"],
+    p.add_argument("action", choices=["enable-sol", "enable-kvm", "reset-kvm", "consent-start",
+                                      "consent-code"],
                    help="enable-sol (open 16994), enable-kvm (open 5900 + set the 8-char RFB "
-                        "password), reset-kvm (clear a wedged single KVM session)")
+                        "password), reset-kvm (clear a wedged single KVM session), consent-start "
+                        "(Client Control Mode: show a 6-digit KVM consent code on the host's "
+                        "screen), consent-code (send that code back, with --code)")
+    p.add_argument("--code", help="consent-code only: the 6 digits shown on the host's screen")
     p.add_argument("--no-consent", dest="no_consent", action="store_true",
                    help="enable-kvm only: DISABLE the on-screen user-consent prompt (Admin "
                         "Control Mode only). Anyone with the AMT credentials can then watch/"
