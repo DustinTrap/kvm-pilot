@@ -41,7 +41,7 @@ from typing import Any
 from .errors import KVMPilotError
 
 # Version compare + known-bad range matching live in firmware_registry (shared with reconcile).
-from .firmware_registry import _affected, _vercmp
+from .firmware_registry import _affected, _ver_tuple, _vercmp
 from .safety import ConfirmCallback
 
 __all__ = [
@@ -1265,6 +1265,15 @@ def check_firmware_currency(driver: Any) -> CheckResult | None:
         # #254: an entry added from a live run (profile/maturity) but with no
         # citable `latest` must not read the same as "checked and current".
         return _currency_unknown(product, version, "the registry entry has no latest-known release")
+    if str(version).strip().lower() != str(latest).strip().lower() and (
+        not _ver_tuple(str(version)) or not _ver_tuple(str(latest))
+    ):
+        # Distinct strings that `_vercmp` can only call "equal" (a purely
+        # non-numeric scheme): nothing was established, so say so.
+        return _currency_unknown(
+            product, version,
+            f"the installed version and the latest known ({latest}) cannot be ordered",
+        )
 
     # 3) Current (or ahead): say so, with the date the comparison is only as good as.
     return CheckResult(

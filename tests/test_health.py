@@ -694,6 +694,21 @@ def test_currency_unknown_is_a_visible_info_not_silence(monkeypatch, registry, w
     assert "firmware-update" not in r.remediation  # a data gap is not a flash prompt
 
 
+def test_currency_unknown_when_versions_cannot_be_ordered(monkeypatch):
+    """CodeRabbit on #280: `_vercmp` calls two distinct non-numeric strings equal,
+    which must not become an OK "current" verdict."""
+    from kvm_pilot import health
+
+    monkeypatch.setattr(health, "_REGISTRY_CACHE", {"firmware": [
+        {"vendor": "gl.inet", "product": "RV1126B", "latest": "stable-b",
+         "source": "https://x", "date": "2026-01-01"}]})
+    r = health.check_firmware_currency(_fw(version="stable-a"))
+    assert r.severity is Severity.INFO and "cannot be ordered" in r.detail
+    # The same non-numeric string on both sides IS current.
+    r = health.check_firmware_currency(_fw(version="stable-b"))
+    assert r.severity is Severity.OK
+
+
 def test_currency_known_bad_still_fires_without_latest(monkeypatch):
     from kvm_pilot import health
 
