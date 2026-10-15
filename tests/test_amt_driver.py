@@ -92,6 +92,19 @@ def test_graceful_off_accepted_but_ignored_is_not_success(amt_emu, monkeypatch):
     make(amt_emu).power_off(wait=False)
 
 
+def test_graceful_off_with_unreadable_state_does_not_claim_still_on(amt_emu, monkeypatch):
+    """CodeRabbit on #285: an unreadable PowerState is not evidence the host is on."""
+    from kvm_pilot.drivers.amt import driver as mod
+    from kvm_pilot.errors import TimeoutError as KvmTimeout
+
+    monkeypatch.setattr(mod, "_GRACEFUL_OFF_S", 0.2)
+    monkeypatch.setattr(mod, "_GRACEFUL_POLL_S", 0.05)
+    amt_emu.state.power_state_missing = True       # is_powered_on raises on every read
+    with pytest.raises(KvmTimeout) as ei:
+        make(amt_emu).power_off()
+    assert "could not be read" in str(ei.value) and "still on" not in str(ei.value)
+
+
 def test_graceful_off_returns_once_the_host_is_off(amt_emu):
     amt_emu.state.power_state = "2"
     d = make(amt_emu)

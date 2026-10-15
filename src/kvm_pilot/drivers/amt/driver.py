@@ -402,10 +402,22 @@ class AmtDriver(PowerMixin, CapabilityMixin):
 
     def _expect_powered_off(self) -> None:
         deadline = time.monotonic() + _GRACEFUL_OFF_S
+        observed_on = False
         while time.monotonic() < deadline:
-            if self._safe(self.is_powered_on) is False:
+            powered = self._safe(self.is_powered_on)
+            if powered is False:
                 return
+            observed_on = observed_on or powered is True
             time.sleep(min(_GRACEFUL_POLL_S, max(0.0, deadline - time.monotonic())))
+        if not observed_on:
+            # Every read failed: say that, not "still on" — an unmeasured host
+            # condition would send the operator to off-hard on a box that may
+            # already be shutting down (the #243 false-diagnosis class).
+            raise TimeoutError(
+                f"AMT accepted the graceful power-off of {self.host} but its power state "
+                f"could not be read for {_GRACEFUL_OFF_S:.0f}s (WS-Man did not answer), so "
+                "whether the host went down is unknown. Check the host before `power off-hard`."
+            )
         raise TimeoutError(
             f"AMT accepted the graceful power-off of {self.host} but the host is still on "
             f"after {_GRACEFUL_OFF_S:.0f}s: the OS did not shut down (Intel LMS not running, "
