@@ -21,7 +21,8 @@ description: >-
 > live-verified on GL-RM1PE at beta maturity, but many device+capability combos
 > are still unit-tested with mocks only (see the
 > [Hardware-Compatibility list](https://github.com/DustinTrap/kvm-pilot/wiki/Hardware-Compatibility)
-> for what actually has). Treat every result as unverified, expect bugs, and
+> for what actually has). Treat any combo the matrix does not show as
+> live-verified as unverified, expect bugs there, and
 > never point a destructive operation (power, reset, media, keystrokes) at a
 > machine the user can't afford to have power-cycled unexpectedly. Surface each
 > destructive step to the user before executing it.

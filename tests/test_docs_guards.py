@@ -120,7 +120,8 @@ def test_install_command_consistent():
             f"{doc.relative_to(_ROOT)}: missing the canonical install command "
             f"{_INSTALL_CMD!r}"
         )
-    pre = re.compile(r'pip install --pre "?kvm-pilot')
+    # Options may precede the package in any order (`--upgrade --pre`, `--pre -U`).
+    pre = re.compile(r'pip install(?:\s+-[-\w=.]*)*\s+--pre(?:\s+-[-\w=.]*)*\s+"?kvm-pilot')
     for doc in _current_doc_files():
         # Collapse whitespace so a command wrapped across a line break (as
         # markdown prose does) still matches.

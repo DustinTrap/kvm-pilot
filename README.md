@@ -196,8 +196,9 @@ the CLI covers the full surface in [docs/cli.md](https://github.com/DustinTrap/k
 > [hardware report](https://github.com/DustinTrap/kvm-pilot/issues/new?template=hardware-report.yml)
 > takes two minutes and the hourly ingest does the rest. Anything the
 > [Hardware-Compatibility list](https://github.com/DustinTrap/kvm-pilot/wiki/Hardware-Compatibility)
-> doesn't show as exercised is still unverified: expect some API movement before
-> 1.0, note the remote firmware-flash no-op on GL-RM1PE
+> doesn't show as exercised is still unverified: the 1.x line keeps the public
+> API stable, but a rating only moves when a live run moves it; note the remote
+> firmware-flash no-op on GL-RM1PE
 > ([#94](https://github.com/DustinTrap/kvm-pilot/issues/94)/[#95](https://github.com/DustinTrap/kvm-pilot/issues/95)),
 > and don't point destructive ops at a machine you can't afford to have
 > power-cycled unexpectedly. See [Compatibility](#compatibility).
@@ -369,8 +370,9 @@ remotely over WS-Man (`kvm-pilot amt enable-sol` / `enable-kvm`), no MEBx trip.
 
 ## Help shape it — this is where you come in
 
-`kvm-pilot` is built in the open, and the thing standing between it and 1.0 is
-**not code — it's breadth of real hardware**. Three of the seven drivers
+`kvm-pilot` is built in the open. 1.0 shipped on the evidence of three device
+types; what it still needs is **not code — it's breadth of real hardware**.
+Three of the seven drivers
 (`redfish`, `pikvm`, `blikvm`) have never run against a physical device, only
 emulators. Every rating you see is derived from a run ledger that ships inside
 the wheel, never hand-set, so the matrix only grows when someone runs it on real

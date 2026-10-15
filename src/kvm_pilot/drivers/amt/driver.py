@@ -835,8 +835,9 @@ class AmtDriver(PowerMixin, CapabilityMixin):
             "required_raw": required or None,
             "state": self._OPTIN_STATES.get(state, state or None),
             "state_raw": state or None,
-            # How long the on-screen code stays valid (seconds), as the ME reports
-            # it — the window the operator has to type it back (from #265).
+            # Intel's OptInCodeTimeout: the idle window (seconds) AFTER the ME has
+            # accepted the code, before a KVM session must start. (The display
+            # timeout for typing the code back is OptInDisplayTimeout.) From #265.
             "code_timeout_s": int(timeout) if timeout.isdigit() else None,
             "control_mode": self._control_mode(),
         }
