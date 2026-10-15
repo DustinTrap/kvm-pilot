@@ -721,9 +721,25 @@ def cmd_amt(args) -> int:
                " (the on-screen consent prompt stays on)"
         print(f"AMT KVM redirection {'would be enabled' if dry else 'enabled'} on {kvm.host} "
               f"(port 5900){note}.")
-    else:  # reset-kvm
+    elif args.action == "reset-kvm":
         kvm.reset_kvm_session()
         print(f"AMT KVM session {'would be cleared' if dry else 'cleared'} on {kvm.host}.")
+    elif args.action == "consent-state":
+        st = kvm.consent_state()
+        print(json.dumps(st, indent=2) if args.json else
+              f"AMT KVM consent on {kvm.host}: required={st['required']} state={st['state']} "
+              f"control_mode={st['control_mode']}")
+    elif args.action == "consent-start":
+        kvm.request_consent()
+        print(f"Consent requested: the ME is painting a 6-digit code on {kvm.host}'s own display. "
+              "Read it there, then: kvm-pilot amt consent-code --code NNNNNN")
+    else:  # consent-code
+        if args.code is None:
+            print("consent-code needs --code NNNNNN (the 6 digits shown on the host's display).",
+                  file=sys.stderr)
+            return 2
+        kvm.send_consent_code(args.code)
+        print(f"Consent code accepted by {kvm.host}; KVM sessions may open now.")
     return 0
 
 
@@ -1888,9 +1904,15 @@ def build_parser() -> argparse.ArgumentParser:
         "amt",
         help="Intel AMT feature enablement over WS-Man: open the SOL/KVM listeners, "
              "clear a stuck KVM session (needs --driver amt)")
-    p.add_argument("action", choices=["enable-sol", "enable-kvm", "reset-kvm"],
+    p.add_argument("action", choices=["enable-sol", "enable-kvm", "reset-kvm",
+                                      "consent-state", "consent-code", "consent-start"],
                    help="enable-sol (open 16994), enable-kvm (open 5900 + set the 8-char RFB "
-                        "password), reset-kvm (clear a wedged single KVM session)")
+                        "password), reset-kvm (clear a wedged single KVM session); "
+                        "consent-state / consent-start / consent-code --code N: the KVM "
+                        "user-consent flow the ME enforces in Client Control Mode (#264)")
+    p.add_argument("--code", type=int, help="consent-code only: the 6-digit code the ME "
+                                             "painted on the host's display")
+    p.add_argument("--json", action="store_true", help="consent-state only: JSON output")
     p.add_argument("--no-consent", dest="no_consent", action="store_true",
                    help="enable-kvm only: DISABLE the on-screen user-consent prompt (Admin "
                         "Control Mode only). Anyone with the AMT credentials can then watch/"

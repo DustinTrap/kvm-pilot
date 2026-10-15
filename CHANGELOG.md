@@ -6,6 +6,31 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **AMT `power off` is now the OS-graceful shutdown (12) and `power off-hard`
+  the platform power-down (8)** (#264, reported on a CSME 21 desktop). The
+  driver sent 8 as "graceful" — CIM "Power Off - Soft" is the platform forcing
+  S5 with the OS not asked (Windows logged Kernel-Power 41) — and 6 for hard,
+  which is in neither of Intel's supported lists. A refused 12 names Intel LMS
+  and points at `off-hard`; an accepted 12 with the host still on after 90 s
+  raises instead of reporting success (`wait=False` opts out).
+- **AMT KVM redirection honours `amt_tls`** (#264): the KVMR tunnel now opens
+  16995 under TLS with the same verify/CA settings IDE-R uses, via one
+  `_redirection_port()` helper shared by KVM, IDE-R and the healthcheck. With
+  TLS on, the redirection transport is tried before the plaintext 5900 listener
+  that TLS-only MEs (CSME 19+) refuse — previously `snapshot`/`key` could not
+  connect at all there.
+
+### Added
+- **AMT KVM user-consent flow** (#264): `kvm-pilot amt consent-start`,
+  `consent-code --code NNNNNN`, `consent-state` (library `request_consent()`,
+  `send_consent_code()`, `cancel_consent()`, `consent_state()`) drive
+  `IPS_OptInService` for Client Control Mode, where the ME opens no KVM session
+  until the on-screen code is returned. A KVM connect that fails with consent
+  required and not yet received now raises a `CapabilityError` naming those
+  steps instead of a bare transport error (and no longer cycles the KVM SAP for
+  it). Emulator-tested; live evidence is the reporter's CSME 21 measurements.
+
 ### Changed
 - **MCP tool schemas now describe every parameter** (#278). All 87 parameters
   across the 34 tools carry a schema-level `description` (via

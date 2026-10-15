@@ -43,6 +43,10 @@ class AmtState:
         self.kvm_sap_requested: str | None = None
         self.kvm_sap_requests: list[str] = []  # every RequestedState, in order (proves a 3->2 cycle)
         self.optin_required = "1"       # IPS_OptInService: 0=none, 1=KVM, 4294967295=all
+        self.optin_state = "0"          # IPS_OptInService.OptInState: 0 not started, 2 displayed, 3 received
+        self.optin_code = "123456"      # the code the ME "paints" on the host display
+        self.optin_requests: list[str] = []  # StartOptIn / SendOptInCode:<n> / CancelOptIn, in order
+        self.graceful_off_ignored = False  # OS without LMS: the ME accepts 12 but nothing happens
         self.control_mode = "2"         # IPS_HostBasedSetupService: 1=CCM, 2=ACM
         self.provisioning_state = "2"   # 2 = post/provisioned
         self.amt_version = "16.1.25"
@@ -210,7 +214,8 @@ class _Handler(BaseHTTPRequestHandler):
             return _inst("IPS_OptInService", {
                 "Name": "Intel(r) AMT OptIn Service", "CreationClassName": "IPS_OptInService",
                 "SystemName": "Intel(r) AMT", "SystemCreationClassName": "CIM_ComputerSystem",
-                "OptInRequired": st.optin_required, "OptInState": "0", "CanModifyOptInPolicy": "1"})
+                "OptInRequired": st.optin_required, "OptInState": st.optin_state,
+                "CanModifyOptInPolicy": "1"})
         if cls == "IPS_HostBasedSetupService":
             return _inst("IPS_HostBasedSetupService", {
                 "CurrentControlMode": st.control_mode,
@@ -240,8 +245,22 @@ class _Handler(BaseHTTPRequestHandler):
         method = action.rsplit("/", 1)[-1]
         if method == "RequestPowerStateChange":
             st.last_power_request = _text(req, "PowerState")
-            # Reflect the new state so a follow-up is_powered_on() sees it.
-            st.power_state = "2" if st.last_power_request == "2" else "8"
+            # Reflect the new state so a follow-up is_powered_on() sees it. 12 is
+            # OS-pending: with no LMS the ME says 0 and the host stays on (#264).
+            if not (st.last_power_request == "12" and st.graceful_off_ignored):
+                st.power_state = "2" if st.last_power_request == "2" else "8"
+        elif method == "StartOptIn":
+            st.optin_requests.append("StartOptIn")
+            st.optin_state = "2"
+        elif method == "SendOptInCode":
+            code = _text(req, "OptInCode")
+            st.optin_requests.append(f"SendOptInCode:{code}")
+            if code != st.optin_code:
+                return _body(_inst("SendOptInCode_OUTPUT", {"ReturnValue": "2"}))
+            st.optin_state = "3"
+        elif method == "CancelOptIn":
+            st.optin_requests.append("CancelOptIn")
+            st.optin_state = "0"
         elif method == "ChangeBootOrder":
             # The forced source is the Selector inside the <Source> EPR (a "Force…"
             # InstanceID). The header SelectorSet names the boot-config instance, so
