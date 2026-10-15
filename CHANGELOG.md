@@ -6,6 +6,16 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **`docs/python-library.md`** (#260): the library reference that was missing
+  next to the CLI/config/MCP pages — the public import surface, every driver
+  kind with its constructor, the capability protocols and `VideoScope`, the
+  `KVMClient` method surface, the safety gate (`dry_run` first, then
+  `confirm`; `EffectClass`), the health gate, the full error hierarchy, the
+  vision contract and sensing hierarchy, the two SSH channels, the
+  auto-detection probe table, and the evidence-data helpers. Every snippet was
+  run against the fake driver. Registered in the wiki (Reference), the docs
+  hub and `llms.txt`.
 ### Fixed
 - **`ga` maturity now needs ≥ 3 distinct UTC dates** (#253). `rc` already had a
   distinct-date floor; `ga` had none, so five same-afternoon re-runs of

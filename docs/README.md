@@ -36,6 +36,7 @@ Descriptive: what exists and how it behaves.
 
 - [CLI reference](cli.md) — every `kvm-pilot` subcommand: capability required, destructive gating, key flags.
 - [Configuration](configuration.md) — the config file, every `KVM_PILOT_*` env var, and precedence.
+- [Python library reference](python-library.md) — the public import surface: building a driver, the capability protocols, the `KVMClient` method surface, safety gating, the health gate, the error hierarchy, the vision contract, SSH channels, auto-detection probes ([#260](https://github.com/DustinTrap/kvm-pilot/issues/260)).
 - [Driver features](driver-features.md) — the complete per-driver capability list with per-feature reliability + testing level (honest maturity; points at the support-matrix source of truth) ([#171](https://github.com/DustinTrap/kvm-pilot/issues/171)).
 - [Architecture](architecture.md) — the driver-plugin design, capability protocols, and diagrams.
 - [Redfish reference](redfish.md) — the BMC driver: hypermedia navigation, auth, and firmware quirks.
