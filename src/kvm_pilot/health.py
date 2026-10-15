@@ -1010,7 +1010,7 @@ def check_amt_redirection(driver: Any) -> CheckResult | None:
     sap_on = h.get("kvm_sap_enabled")
     off = []
     if sol_on is False:
-        off.append("SOL/IDE-R (16994)")
+        off.append(f"SOL/IDE-R ({h.get('redirection_port') or 16994})")
     # KVM rides EITHER transport: the legacy plain-RFB listener on 5900, or a
     # KVMR session inside the redirection port. Newer ME builds harden 5900 off
     # permanently and serve KVM only over 16994 — measured on a 5411 @ 14.1.79,

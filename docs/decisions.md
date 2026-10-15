@@ -648,6 +648,22 @@ a `mc info`/chassis-status parser overfit to Dell would surface here. It didn't 
   management plane — the one AMT failure with no remote recovery — and
   reporting success there is the false-all-clear class of bug. `wait=False`
   skips the probe.
+- **AMT `power off` sends 12, `off-hard` sends 8 (#264).** The driver shipped
+  8 as "graceful": CIM's "Power Off - Soft" is the platform forcing S5 and the
+  OS is not asked (Windows logs Kernel-Power 41). Intel's reference lists 12
+  (Off-Soft Graceful, via LMS) among the OS-pending states and 6 in no list at
+  all. A graceful request the ME accepts is only *forwarded*, so `power off`
+  waits (bounded) for the state and raises if the host stays on — "requested"
+  is not "off". The hard-op churn bookkeeping keys on off-hard/reset by name,
+  so the renumbering moves nothing there.
+- **Consent requests are not gated.** `StartOptIn` paints a code on the host's
+  display and changes nothing about its running state; gating it would add a
+  prompt in front of the prompt. `send_consent_code` likewise. What the consent
+  *unlocks* (KVM) stays gated as before.
+- **With `amt_tls` the redirection KVM path is tried before 5900.** TLS-only
+  MEs (CSME 19+) refuse every plaintext port, so the historical order would
+  always pay a refused connect first; the transport that answered is still
+  remembered per process either way.
 - **AMT registry entries are currency-less by design (#254).** The AMT driver's
   `firmware_version` is the ME/AMT version (`14.1.79`); OEMs ship ME updates
   inside BIOS capsules and publish no ME-version list, so there is no citable

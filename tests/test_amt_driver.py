@@ -57,12 +57,68 @@ def test_is_powered_on_reads_cim_powerstate(amt_emu):
 
 @pytest.mark.parametrize(
     "method,expected",
-    [("power_on", "2"), ("power_off", "8"), ("power_off_hard", "6"), ("reset_hard", "10")],
+    [("power_on", "2"), ("power_off", "12"), ("power_off_hard", "8"), ("reset_hard", "10")],
 )
 def test_power_actions_map_to_cim_codes(amt_emu, method, expected):
+    """#264: 12 is the OS-graceful off (via Intel LMS); 8 is CIM "Power Off - Soft",
+    the platform forcing S5 with the OS not asked — i.e. the HARD off. 6 was in
+    neither of Intel's supported lists."""
     getattr(make(amt_emu), method)()
     assert amt_emu.state.last_power_request == expected
     assert ("RequestPowerStateChange", "CIM_PowerManagementService") in amt_emu.state.calls
+
+
+def test_graceful_off_refusal_names_lms_and_off_hard(amt_emu):
+    amt_emu.state.nonzero_methods = {"RequestPowerStateChange"}
+    with pytest.raises(WsmanError) as ei:
+        make(amt_emu).power_off()
+    assert "LMS" in str(ei.value) and "off-hard" in str(ei.value)
+
+
+def test_graceful_off_accepted_but_ignored_is_not_success(amt_emu, monkeypatch):
+    """The ME forwarding 12 to LMS is not the host going down (#264). An accepted
+    request with the host still on must raise, not return."""
+    from kvm_pilot.drivers.amt import driver as mod
+    from kvm_pilot.errors import TimeoutError as KvmTimeout
+
+    monkeypatch.setattr(mod, "_GRACEFUL_OFF_S", 0.3)
+    monkeypatch.setattr(mod, "_GRACEFUL_POLL_S", 0.05)
+    amt_emu.state.power_state = "2"
+    amt_emu.state.graceful_off_ignored = True
+    with pytest.raises(KvmTimeout) as ei:
+        make(amt_emu).power_off()
+    assert "still on" in str(ei.value) and "off-hard" in str(ei.value)
+    # wait=False is the escape hatch: fire and return, as for the hard ops.
+    make(amt_emu).power_off(wait=False)
+
+
+def test_graceful_off_with_unreadable_state_does_not_claim_still_on(amt_emu, monkeypatch):
+    """CodeRabbit on #285: an unreadable PowerState is not evidence the host is on."""
+    from kvm_pilot.drivers.amt import driver as mod
+    from kvm_pilot.errors import TimeoutError as KvmTimeout
+
+    monkeypatch.setattr(mod, "_GRACEFUL_OFF_S", 0.2)
+    monkeypatch.setattr(mod, "_GRACEFUL_POLL_S", 0.05)
+    amt_emu.state.power_state_missing = True       # is_powered_on raises on every read
+    with pytest.raises(KvmTimeout) as ei:
+        make(amt_emu).power_off()
+    assert "could not be read" in str(ei.value) and "still on" not in str(ei.value)
+
+
+def test_graceful_off_returns_once_the_host_is_off(amt_emu):
+    amt_emu.state.power_state = "2"
+    d = make(amt_emu)
+    d.power_off()            # the emulator reflects the new state at once
+    assert d.is_powered_on() is False
+
+
+def test_hard_off_is_the_one_that_counts_as_churn(amt_emu):
+    """The churn/liveness bookkeeping keys on the hard ops; renumbering must not move it."""
+    d = make(amt_emu)
+    d.power_off(wait=False)
+    assert d.hard_resets_recent() == 0
+    d.power_off_hard(wait=False)
+    assert d.hard_resets_recent() == 1
 
 
 def test_power_dry_run_sends_nothing(amt_emu):
@@ -1033,6 +1089,10 @@ def test_snapshot_reraises_when_every_attempt_drops(amt_emu, amt_rfb, monkeypatc
 
     monkeypatch.setattr(amt_mod.time, "sleep", lambda *_a: None)
     amt_rfb.drop_first = 5  # more than the 3 attempts -> the ConnectionError survives
+    # This models a wedged session, not a missing consent code: with consent
+    # required and never given, the #264 hook would (rightly) name consent once
+    # the SAP cycle has re-enabled KVM — so turn consent off for this scenario.
+    amt_emu.state.optin_required = "0"
     with pytest.raises(ConnectionError):
         _driver_wsman_and_rfb(amt_emu, amt_rfb).snapshot()
 
@@ -1434,6 +1494,169 @@ def test_untestable_redirection_says_so_rather_than_guessing(amt_emu):
         d.enable_kvm()
     msg = str(ei.value)
     assert "could not be tested" in msg and "kvm-pilot snapshot" in msg
+
+
+# -- #264: TLS on the KVM redirection path ---------------------------------
+
+
+def test_redirection_port_follows_amt_tls():
+    assert AmtDriver("h", "u", "p")._redirection_port() == 16994
+    assert AmtDriver("h", "u", "p", tls=True)._redirection_port() == 16995
+    kw = AmtDriver("h", "u", "p", tls=True, verify_ssl=True)._redirection_kwargs()
+    assert kw == {"port": 16995, "tls": True, "verify_ssl": True, "ssl_ca_file": None}
+
+
+def test_kvm_redirection_stream_gets_tls_when_amt_tls(monkeypatch):
+    """With amt_tls the KVM tunnel must open 16995 under TLS like IDE-R does —
+    CSME 19+ refuses every plaintext port, so 16994 cannot answer there (#264)."""
+    from kvm_pilot.drivers.amt import rfb as rfb_mod
+
+    seen = {}
+
+    class Recorder:
+        def __init__(self, host, user, passwd, **kw):
+            seen.update(kw)
+
+        def connect(self):
+            raise AssertionError("not reached")
+
+    monkeypatch.setattr(rfb_mod, "RedirKvmStream", Recorder)
+    AmtDriver("h", "u", "p", tls=True, verify_ssl=True, kvm_password="Abcd123!")._rfb_on("redirection")
+    assert seen["port"] == 16995 and seen["tls"] is True and seen["verify_ssl"] is True
+
+
+def test_redir_stream_passes_tls_to_the_channel(monkeypatch):
+    from kvm_pilot.drivers.amt import redir as redir_mod
+    from kvm_pilot.drivers.amt.rfb import RedirKvmStream
+
+    seen = {}
+
+    class Chan:
+        def __init__(self, host, user, passwd, **kw):
+            seen.update(kw)
+
+        def open(self, tag):
+            raise ConnectionError("stop here")
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(redir_mod, "RedirectionChannel", Chan)
+    with pytest.raises(ConnectionError):
+        RedirKvmStream("h", "u", "p", port=16995, tls=True, ssl_ca_file="/ca.pem").connect()
+    assert seen["tls"] is True and seen["ssl_ca_file"] == "/ca.pem" and seen["port"] == 16995
+
+
+def test_tls_tries_the_redirection_transport_first(monkeypatch):
+    order = []
+
+    class Failing:
+        def __init__(self, transport):
+            self.transport = transport
+
+        def connect(self):
+            order.append(self.transport)
+            raise ConnectionError(f"{self.transport} refused")
+
+    for tls, expected in ((False, ["standard", "redirection"]), (True, ["redirection", "standard"])):
+        order.clear()
+        d = AmtDriver("h", "u", "p", tls=tls)
+        monkeypatch.setattr(d, "_rfb_on", Failing)
+        monkeypatch.setattr(d, "_raise_if_consent_blocks", lambda cause: None)
+        with pytest.raises(ConnectionError):
+            d._connect_rfb()
+        assert order == expected, tls
+
+
+# -- #264: KVM user-consent flow (IPS_OptInService) -------------------------
+
+
+def test_consent_state_reads_the_optin_service(amt_emu):
+    amt_emu.state.control_mode = "1"
+    st = make(amt_emu).consent_state()
+    assert st == {"required": True, "required_raw": "1", "state": "not_started",
+                  "state_raw": "0", "control_mode": "ccm"}
+    amt_emu.state.optin_required = "0"
+    assert make(amt_emu).consent_state()["required"] is False
+
+
+def test_consent_flow_start_then_code(amt_emu):
+    d = make(amt_emu)
+    d.request_consent()
+    assert amt_emu.state.optin_state == "2"           # the ME is showing the code
+    assert d.consent_state()["state"] == "displayed"
+    d.send_consent_code(123456)
+    assert d.consent_state()["state"] == "received"
+    assert amt_emu.state.optin_requests == ["StartOptIn", "SendOptInCode:123456"]
+    d.cancel_consent()
+    assert amt_emu.state.optin_state == "0"
+
+
+def test_wrong_consent_code_is_a_named_refusal(amt_emu):
+    d = make(amt_emu)
+    d.request_consent()
+    with pytest.raises(WsmanError) as ei:
+        d.send_consent_code(654321)
+    assert "SendOptInCode" in str(ei.value) and "expired" in str(ei.value)
+    assert amt_emu.state.optin_state == "2"           # still waiting for the right code
+    with pytest.raises(ValueError):
+        d.send_consent_code(1_000_000)
+
+
+def _refusing_rfb(transport):
+    class R:
+        def connect(self):
+            raise ConnectionError(f"{transport} refused")
+    return R()
+
+
+def test_kvm_connect_refused_with_consent_pending_names_the_flow(amt_emu, monkeypatch):
+    """The reporter's case: CCM, KVM enabled, no code given — the ME opens no
+    session and a bare transport error (plus a pointless SAP cycle) was all the
+    operator got (#264)."""
+    amt_emu.state.control_mode = "1"
+    amt_emu.state.kvm_sap_state = "6"
+    d = make(amt_emu, kvm_password="Abcd123!")
+    monkeypatch.setattr(d, "_rfb_on", _refusing_rfb)
+    with pytest.raises(CapabilityError) as ei:
+        d._connect_rfb()
+    msg = str(ei.value)
+    assert "consent-start" in msg and "consent-code" in msg and "Client Control Mode" in msg
+    assert "refused" in msg                            # the underlying error is kept
+
+
+def test_kvm_connect_refused_after_consent_received_is_a_transport_error(amt_emu, monkeypatch):
+    amt_emu.state.kvm_sap_state = "6"
+    amt_emu.state.optin_state = "3"
+    d = make(amt_emu, kvm_password="Abcd123!")
+    monkeypatch.setattr(d, "_rfb_on", _refusing_rfb)
+    with pytest.raises(ConnectionError):
+        d._connect_rfb()
+
+
+def test_consent_is_not_blamed_when_kvm_is_simply_disabled(amt_emu, monkeypatch):
+    """SAP disabled + consent pending must keep the existing (correct) diagnosis:
+    the KVM service is off, not waiting for a code."""
+    amt_emu.state.kvm_sap_state = "3"
+    amt_emu.state.control_mode = "1"
+    d = make(amt_emu, kvm_password="Abcd123!")
+    monkeypatch.setattr(d, "_rfb_on", _refusing_rfb)
+    with pytest.raises(ConnectionError):
+        d._connect_rfb()
+
+
+def test_acm_consent_message_offers_the_no_consent_route(amt_emu, monkeypatch):
+    amt_emu.state.control_mode = "2"
+    amt_emu.state.kvm_sap_state = "6"
+    d = make(amt_emu, kvm_password="Abcd123!")
+    monkeypatch.setattr(d, "_rfb_on", _refusing_rfb)
+    with pytest.raises(CapabilityError) as ei:
+        d._connect_rfb()
+    assert "--no-consent" in str(ei.value)
+
+
+def test_amt_health_reports_the_redirection_port(amt_emu):
+    assert make(amt_emu).amt_health()["redirection_port"] == 16994
 
 
 # -- #245: KVM over the redirection port (16994) ---------------------------

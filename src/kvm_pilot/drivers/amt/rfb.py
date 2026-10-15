@@ -299,7 +299,7 @@ def _decode_zrle_tile(u: bytes, w: int, h: int) -> list[int]:
 
 
 class RedirKvmStream:
-    """RFB byte-stream carried by an authenticated AMT redirection session (16994).
+    """RFB byte-stream carried by an authenticated AMT redirection session (16994 / TLS 16995).
 
     AMT offers KVM two ways: the legacy plain-RFB listener on the standard VNC
     port 5900, and the same pixel protocol tunnelled inside a redirection
@@ -329,9 +329,13 @@ class RedirKvmStream:
     redirection_authenticated = True
 
     def __init__(self, host: str, user: str, passwd: str, *,
-                 port: int = 16994, timeout: float = 15.0):
+                 port: int = 16994, timeout: float = 15.0, tls: bool = False,
+                 verify_ssl: bool = False, ssl_ca_file: str | None = None):
         self.host, self.port = host, port
         self._user, self._passwd, self._timeout = user, passwd, timeout
+        # TLS exactly as IDE-R does it (port 16995, #264): CSME 19+ refuses the
+        # plaintext 16994, so an ``amt_tls`` operator has no other KVM path.
+        self._tls, self._verify_ssl, self._ssl_ca_file = tls, verify_ssl, ssl_ca_file
         self._chan: Any = None
         # Own buffer, because RedirectionChannel.recv() hands back everything it
         # has buffered regardless of the size asked for. The ME packs OPEN_REPLY
@@ -344,7 +348,8 @@ class RedirKvmStream:
         from .redir import START_KVM, RedirectionChannel
 
         self._chan = RedirectionChannel(
-            self.host, self._user, self._passwd, port=self.port, timeout=self._timeout
+            self.host, self._user, self._passwd, port=self.port, timeout=self._timeout,
+            tls=self._tls, verify_ssl=self._verify_ssl, ssl_ca_file=self._ssl_ca_file,
         )
         # Anything that throws from here on leaves a live socket (and, on the ME
         # side, a redirection session that counts against the one-session limit
