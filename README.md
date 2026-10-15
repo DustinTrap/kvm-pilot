@@ -54,9 +54,8 @@ power-cycle, and the boot console the agent actually saw:
 
 One install gives you the whole product — the **`kvm-pilot` CLI**, the
 **`kvm-pilot-mcp` MCP server**, and the bundled **Claude skill** — nothing to
-clone. The current release line is a **pre-release**: install it with `--pre`,
-which is explicit and keeps selecting the beta line once a stable release ships
-(`0.1.0a1` is yanked and much older than this README — don't pin it).
+clone. The current release line is a **pre-release**, so install it with
+`--pre` ([why](https://github.com/DustinTrap/kvm-pilot/blob/main/docs/troubleshooting.md#which-pip-install-line-should-i-use)).
 
 ```bash
 pip install --pre kvm-pilot                    # CLI + skill + MCP server + WebSocket events
@@ -106,7 +105,7 @@ kvm.press_key("Enter")
 For the latest unreleased tree:
 
 ```bash
-pip install "kvm-pilot[totp,ws] @ git+https://github.com/DustinTrap/kvm-pilot"
+pip install "kvm-pilot[totp] @ git+https://github.com/DustinTrap/kvm-pilot"
 ```
 
 ### CLI
@@ -138,11 +137,8 @@ every `KVM_PILOT_*` environment variable, and the precedence between flags,
 env, and profiles.
 
 > **GLKVM setup note:** on GL.iNet firmware the PiKVM REST API is **disabled by
-> default** (every `/api/*` call 404s, surfaced as a clear `ApiDisabledError`),
-> and a firmware upgrade can re-disable it. Enable it in
-> `/etc/kvmd/nginx-kvmd.conf` and pin the driver with `--driver glkvm` /
-> `driver = "glkvm"` — full steps in the
-> [troubleshooting guide](https://github.com/DustinTrap/kvm-pilot/blob/main/docs/troubleshooting.md#every-api-call-returns-404-glkvm).
+> default** and a firmware upgrade can re-disable it — enable it first, per
+> [Every `/api/*` call returns 404](https://github.com/DustinTrap/kvm-pilot/blob/main/docs/troubleshooting.md#every-api-call-returns-404-glkvm).
 
 ## The tool surface, by plane
 

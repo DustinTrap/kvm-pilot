@@ -30,7 +30,7 @@ way. (On the PiKVM family a device can't report its *product* firmware
 version, so kvmd is the currency proxy; on BMCs the reported version *is* the
 upgradeable one.)
 
-## Data model (`data/firmware_registry.json`, schema v2)
+## Data model (`src/kvm_pilot/data/firmware_registry.json`, schema v2)
 
 ```jsonc
 {
@@ -108,7 +108,7 @@ page (#103).
 | `alpha` | 0 live passes (mocks only, or live failures only) |
 | `beta`  | ≥ 1 live pass |
 | `rc`    | ≥ 3 live passes across ≥ 2 distinct UTC dates (destructive caps use the same ladder; the harness's explicit include gate, #99, guarantees they were deliberate) |
-| `ga`    | ≥ 5 live passes spanning ≥ 14 days, all **after** the capability's most recent live failure (a new failure resets the window) |
+| `ga`    | ≥ 5 live passes across ≥ 3 distinct UTC dates spanning ≥ 14 days, all **after** the capability's most recent live failure (a new failure resets the window). The distinct-date floor (#253) means re-running `test-report` five times in one afternoon cannot promote anything |
 
 The overall `level` is the `min()` of the exercised capabilities' levels.
 Regenerate with:
@@ -181,7 +181,7 @@ component version, so the report and the registry key match the UI.
 
 ## Distribution & refresh
 
-- **Bundled on PyPI.** `data/firmware_registry.json` ships in the wheel, so the
+- **Bundled on PyPI.** `src/kvm_pilot/data/firmware_registry.json` ships in the wheel, so the
   check works fully **offline** — the stdlib-only core never fetches on its own.
 - **Loader precedence** (`load_registry`): `KVM_PILOT_FIRMWARE_DB` (explicit
   file) → the user cache a refresh writes (`~/.cache/kvm-pilot/`) → the bundled

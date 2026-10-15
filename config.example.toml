@@ -13,7 +13,8 @@ verify_ssl = false          # GL/PiKVM ship self-signed certs (a warning is logg
 # ssl_ca_file = "/path/device-cert.pem"  # better: pin the device cert (overrides verify_ssl)
 timeout = 30.0
 driver = "glkvm"            # auto (default: probe the device) | pikvm | glkvm |
-                            # blikvm | redfish | ipmi | amt | fake
+                            # blikvm | redfish | ipmi | amt | ssh | fake
+                            # ("ssh" = OS plane, no KVM/BMC; explicit only, #248)
 # totp_secret = "BASE32SECRET"   # only if 2FA is enabled (needs the 'totp' extra)
 # redfish_auth = "session"       # redfish driver only: "session" (default) or "basic"
 

@@ -70,6 +70,9 @@ PAGES: list[tuple[str, str, str | None, str | None]] = [
     # Reference — descriptive: what exists and how it behaves
     ("docs/cli.md", "cli.md", "CLI reference", "Reference"),
     ("docs/configuration.md", "configuration.md", "Configuration", "Reference"),
+    # Named python-library (not library.md): the skill playbook below already
+    # publishes as library.md and wiki links map by stem (#260).
+    ("docs/python-library.md", "python-library.md", "Python library reference", "Reference"),
     ("docs/driver-features.md", "driver-features.md", "Driver features", "Reference"),
     ("docs/architecture.md", "architecture.md", "Architecture", "Reference"),
     ("docs/redfish.md", "redfish.md", "Redfish reference", "Reference"),
