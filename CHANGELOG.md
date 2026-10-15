@@ -7,6 +7,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Changed
+- **Docs hygiene** (#261): `mcpb/manifest.json` said `MIT` — the project is
+  Apache-2.0 everywhere else; the four `docs/analysis/` reports carry a
+  point-in-time banner (and the RM1PE one no longer cites the pre-#140 driver
+  path as current); `docs/CONTRIBUTING.md` gains the release checklist it never
+  had, including "refresh or delete `RESUME.md`"; the GL "REST API ships
+  disabled" block and the `pip install --pre` rationale each live in one place
+  (`troubleshooting.md`) with one-line links from README, getting-started,
+  first-run, firmware-update and glkvm-onboarding; the README's VCS install line
+  drops the no-op `ws` extra.
 - **MCP tool schemas now describe every parameter** (#278). All 87 parameters
   across the 34 tools carry a schema-level `description` (via
   `Annotated[..., Field(description=...)]`; the shared `profile` / `confirm` /

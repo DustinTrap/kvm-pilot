@@ -1,5 +1,10 @@
 # End-to-end operator tasks, a13 → a14: the "leaner cut"
 
+> **Point-in-time field report (2026-07-08).** It describes the tree, fleet and issue
+> states as they were that day and is kept as a record, not maintained — paths,
+> versions and verdicts may have moved since (the GL driver, for one, moved
+> from `drivers/pikvm.py` to `drivers/glkvm.py` in #140).
+
 **Date:** 2026-07-08 · **Versions:** kvm-pilot `0.1.0a13` → `0.1.0a14` · **Fleet:** `unit-A` (unit-A-host/Fedora 44) · `unit-B` (RHEL 10) · `unit-C` (unit-C-host/Win11)
 
 > Device identifiers in this report are redacted to stable labels (`unit-A`/`unit-B`/`unit-C`); exact addresses live in the operator's private ledger, not in the published repo (#209/#243).

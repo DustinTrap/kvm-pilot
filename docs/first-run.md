@@ -19,10 +19,10 @@ pip install --pre kvm-pilot
 kvm-pilot --version
 ```
 
-`--pre` matters: `kvm-pilot` is a release candidate, and that flag keeps
-selecting it once a stable release exists. One install brings the `kvm-pilot`
-CLI, the `kvm-pilot-mcp` server your agent will load in step 5, and the bundled
-Claude skill.
+`--pre` matters because `kvm-pilot` is a release candidate
+([why](troubleshooting.md#which-pip-install-line-should-i-use)). One install
+brings the `kvm-pilot` CLI, the `kvm-pilot-mcp` server your agent will load in
+step 5, and the bundled Claude skill.
 
 ## 2. Meet the stand-in device
 

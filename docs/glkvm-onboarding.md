@@ -42,16 +42,12 @@ Four things surprise every newcomer, and all four are the device, not the tool:
 
 ## 1 — Enable the REST API (once per unit, and after every firmware upgrade)
 
-SSH to the appliance (or use the web console's terminal) and uncomment the
-kvmd block in:
-
-```
-/etc/kvmd/nginx-kvmd.conf
-```
-
-then restart kvmd. Until you do, kvm-pilot reports `ApiDisabledError` and names
-this file — that error is the tool telling you it got a 404 on *every* endpoint,
-not that the device is unreachable.
+GL firmware ships the PiKVM REST API disabled, and a firmware upgrade reverts
+it. Enable it per
+[Every `/api/*` call returns 404](troubleshooting.md#every-api-call-returns-404-glkvm)
+(uncomment the kvmd block in `/etc/kvmd/nginx-kvmd.conf`, restart kvmd). Until
+you do, kvm-pilot reports `ApiDisabledError` naming that file — the tool telling
+you it got a 404 on *every* endpoint, not that the device is unreachable.
 
 ## 2 — Write a profile
 
