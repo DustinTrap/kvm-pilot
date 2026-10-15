@@ -16,7 +16,7 @@
   "homepage": "https://github.com/DustinTrap/kvm-pilot",
   "documentation": "https://github.com/DustinTrap/kvm-pilot/wiki",
   "support": "https://github.com/DustinTrap/kvm-pilot/issues",
-  "license": "MIT",
+  "license": "Apache-2.0",
   "keywords": ["kvm", "bmc", "ipmi", "redfish", "amt", "pikvm", "bare-metal", "infrastructure"],
   "server": {
     "type": "uv",

@@ -30,7 +30,7 @@ way. (On the PiKVM family a device can't report its *product* firmware
 version, so kvmd is the currency proxy; on BMCs the reported version *is* the
 upgradeable one.)
 
-## Data model (`data/firmware_registry.json`, schema v2)
+## Data model (`src/kvm_pilot/data/firmware_registry.json`, schema v2)
 
 ```jsonc
 {
@@ -108,7 +108,7 @@ page (#103).
 | `alpha` | 0 live passes (mocks only, or live failures only) |
 | `beta`  | ≥ 1 live pass |
 | `rc`    | ≥ 3 live passes across ≥ 2 distinct UTC dates (destructive caps use the same ladder; the harness's explicit include gate, #99, guarantees they were deliberate) |
-| `ga`    | ≥ 5 live passes spanning ≥ 14 days, all **after** the capability's most recent live failure (a new failure resets the window) |
+| `ga`    | ≥ 5 live passes across ≥ 3 distinct UTC dates spanning ≥ 14 days, all **after** the capability's most recent live failure (a new failure resets the window). The distinct-date floor (#253) means re-running `test-report` five times in one afternoon cannot promote anything |
 
 The overall `level` is the `min()` of the exercised capabilities' levels.
 Regenerate with:
@@ -127,7 +127,15 @@ so a hand-edited level cannot survive a pull request.
 - `check_firmware_currency` — match `(vendor, product)`; then:
   1. installed version satisfies a `known_bad.affected` range → that severity;
   2. else `version < latest` (ordered `_vercmp`) → `WARNING` "update available";
-  3. else **nothing** — a current device stays quiet (no over-reporting).
+  3. else, with a `latest` on the entry → `OK` "Firmware current" (names the
+     release and the `date` it was true as of);
+  4. **no entry, or an entry without `latest`** → `INFO` "Firmware currency
+     unknown" (#254). This is deliberately present, not silent: an entry added
+     from a live run carries `profile`/`maturity` but no citable release, and
+     "we did not check" must never read the same as "checked, current". The
+     remediation is the Firmware-report form, never a flash. Some entries stay
+     here by design — the AMT driver reports the ME version, which has no
+     published release list (see `decisions.md`).
 - `check_capability_profile` — surfaces the stored profile as the expected-UX
   line: `INFO` when all-good, `WARNING` when any axis is degraded (relative/no
   mouse, non-`reliable` vmedia, untrusted power).
@@ -173,7 +181,7 @@ component version, so the report and the registry key match the UI.
 
 ## Distribution & refresh
 
-- **Bundled on PyPI.** `data/firmware_registry.json` ships in the wheel, so the
+- **Bundled on PyPI.** `src/kvm_pilot/data/firmware_registry.json` ships in the wheel, so the
   check works fully **offline** — the stdlib-only core never fetches on its own.
 - **Loader precedence** (`load_registry`): `KVM_PILOT_FIRMWARE_DB` (explicit
   file) → the user cache a refresh writes (`~/.cache/kvm-pilot/`) → the bundled

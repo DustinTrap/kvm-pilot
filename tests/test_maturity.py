@@ -65,6 +65,11 @@ def _run(day: str, caps: list[tuple[str, bool]], *, source: str | None = "real",
         ([(f"2026-07-{d:02d}", True) for d in (1, 4, 7, 10, 14)], "rc"),
         # 5 passes spanning 14 days, zero failures -> ga
         ([(f"2026-07-{d:02d}", True) for d in (1, 4, 7, 10, 15)], "ga"),
+        # #253: 5 passes spanning 14 days but on only 2 distinct dates (one run,
+        # then four re-runs in one afternoon a fortnight later) -> rc, not ga
+        ([("2026-07-01", True)] + [("2026-07-15", True)] * 4, "rc"),
+        # #253: same 5 passes spread over 3 distinct dates -> ga (the floor)
+        ([("2026-07-01", True), ("2026-07-08", True)] + [("2026-07-15", True)] * 3, "ga"),
         # an interleaved failure resets the ga window -> not ga (still rc)
         ([("2026-07-01", True), ("2026-07-02", False)]
          + [(f"2026-07-{d:02d}", True) for d in (3, 4, 7, 10, 15)], "rc"),
@@ -73,7 +78,8 @@ def _run(day: str, caps: list[tuple[str, bool]], *, source: str | None = "real",
          + [("2026-07-16", False)], "rc"),
     ],
     ids=["alpha-empty", "beta-one-pass", "beta-single-date", "rc-two-dates",
-         "rc-13-day-span", "ga-14-day-span", "ga-window-reset", "fail-demotes-ga"],
+         "rc-13-day-span", "ga-14-day-span", "ga-needs-3-dates", "ga-3-dates",
+         "ga-window-reset", "fail-demotes-ga"],
 )
 def test_promotion_boundaries(events: list[tuple[str, bool]], expected: str) -> None:
     records = [_run(day, [("snapshot", ok)], run_id=f"r{i}") for i, (day, ok) in enumerate(events)]

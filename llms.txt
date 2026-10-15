@@ -28,6 +28,7 @@ install with `pip install --pre kvm-pilot` (CLI `kvm-pilot`, MCP server
 - [MCP server reference](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/src/kvm_pilot/mcp/README.md): every tool with annotations, effect gates, approval/receipt lifecycle, env vars
 - [CLI reference](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/cli.md): every subcommand, required capability, gating
 - [Configuration](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/configuration.md): config file, profiles, every KVM_PILOT_* env var, precedence
+- [Python library reference](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/python-library.md): public import surface, driver kinds + constructors, capability protocols, safety/health/error contracts, vision backend contract
 - [Driver features & maturity](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/driver-features.md): per-driver capability × reliability × testing matrix, derived maturity ladder
 - [Troubleshooting & FAQ](https://raw.githubusercontent.com/DustinTrap/kvm-pilot/main/docs/troubleshooting.md): GLKVM API 404, snapshot failures, approval cancel, dark-host recovery
 

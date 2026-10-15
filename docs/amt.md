@@ -214,7 +214,7 @@ screenshot (validated live at 1920×1080); `type_text`/`press_key`/`send_shortcu
 driver = "amt"
 host   = "10.0.1.20"
 user   = "admin"
-# passwd via KVM_PILOT_PASSWORD / config — the WS-Man + SOL credential
+# passwd via KVM_PILOT_PASSWD / config — the WS-Man + SOL credential
 amt_port = 16992          # WS-Man; 16993 with amt_tls = true
 amt_tls  = false
 # amt_kvm_password: the *separate* KVM-redirection (RFB) password — must be

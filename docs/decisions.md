@@ -664,6 +664,13 @@ a `mc info`/chassis-status parser overfit to Dell would surface here. It didn't 
   MEs (CSME 19+) refuse every plaintext port, so the historical order would
   always pay a refused connect first; the transport that answered is still
   remembered per process either way.
+- **AMT registry entries are currency-less by design (#254).** The AMT driver's
+  `firmware_version` is the ME/AMT version (`14.1.79`); OEMs ship ME updates
+  inside BIOS capsules and publish no ME-version list, so there is no citable
+  `latest` + `source` for a Latitude 5411 and inventing one would produce
+  confident wrong "update available" findings. The healthcheck says *currency
+  unknown* for such devices instead of staying quiet; tracking the BIOS version
+  separately is a different feature, not a registry fix.
 - **The churn log is per process, not persisted.** Three hard resets in ten
   minutes from *this* process is what #251 measured; a cross-process ledger
   would be speculative generality.
