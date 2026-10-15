@@ -17,7 +17,7 @@ Examples:
     kvm-pilot capabilities --profile homelab        # what this driver supports
     kvm-pilot snapshot out.jpg --profile homelab
     kvm-pilot --timeout 60 power-cycle --profile homelab --dry-run
-    kvm-pilot events --profile homelab --count 5    # needs the 'ws' extra
+    kvm-pilot events --profile homelab --count 5    # WebSocket event stream
     kvm-pilot watch grub_menu --profile homelab --backend local \\
         --vision-url http://127.0.0.1:1234/v1 --vision-model qwen2.5-vl-7b
 
@@ -1337,7 +1337,7 @@ def cmd_events(args) -> int:
             if args.count and seen >= args.count:
                 break
     except ImportError as exc:
-        # The 'ws' extra (websocket-client) is not installed.
+        # websocket-client is a base dependency (#142); only a broken install lands here.
         print(f"error: {exc}", file=sys.stderr)
         return 1
     except KeyboardInterrupt:
@@ -1918,7 +1918,7 @@ def build_parser() -> argparse.ArgumentParser:
     _add_vision(p)
     p.set_defaults(func=cmd_watch)
 
-    p = sub.add_parser("events", help="Stream device events (requires the 'ws' extra)")
+    p = sub.add_parser("events", help="Stream device events over the kvmd WebSocket")
     p.add_argument("--duration", type=float,
                    help="Stop after N seconds (default: until interrupted)")
     p.add_argument("--count", type=int, help="Stop after N events")

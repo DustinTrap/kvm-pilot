@@ -73,7 +73,7 @@ ledger, never hand-set** (CI fails on drift):
 | `alpha` | 0 live passes (mocks only, or live failures only) |
 | `beta` | ≥ 1 live pass |
 | `rc` | ≥ 3 live passes across ≥ 2 distinct UTC dates |
-| `ga` | ≥ 5 live passes spanning ≥ 14 days, all after the most recent live failure |
+| `ga` | ≥ 5 live passes across ≥ 3 distinct UTC dates spanning ≥ 14 days, all after the most recent live failure |
 
 See [firmware-registry.md](firmware-registry.md#maturity-derived-from-the-run-ledger-98).
 
