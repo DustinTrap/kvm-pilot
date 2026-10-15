@@ -127,7 +127,15 @@ so a hand-edited level cannot survive a pull request.
 - `check_firmware_currency` — match `(vendor, product)`; then:
   1. installed version satisfies a `known_bad.affected` range → that severity;
   2. else `version < latest` (ordered `_vercmp`) → `WARNING` "update available";
-  3. else **nothing** — a current device stays quiet (no over-reporting).
+  3. else, with a `latest` on the entry → `OK` "Firmware current" (names the
+     release and the `date` it was true as of);
+  4. **no entry, or an entry without `latest`** → `INFO` "Firmware currency
+     unknown" (#254). This is deliberately present, not silent: an entry added
+     from a live run carries `profile`/`maturity` but no citable release, and
+     "we did not check" must never read the same as "checked, current". The
+     remediation is the Firmware-report form, never a flash. Some entries stay
+     here by design — the AMT driver reports the ME version, which has no
+     published release list (see `decisions.md`).
 - `check_capability_profile` — surfaces the stored profile as the expected-UX
   line: `INFO` when all-good, `WARNING` when any axis is degraded (relative/no
   mouse, non-`reliable` vmedia, untrusted power).

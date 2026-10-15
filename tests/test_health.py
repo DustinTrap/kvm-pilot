@@ -657,20 +657,62 @@ def test_currency_known_bad_range_is_critical(monkeypatch):
     assert health.check_firmware_currency(_fw()).severity is Severity.CRITICAL
 
 
-def test_currency_quiet_when_current(monkeypatch):
+def test_currency_ok_when_current(monkeypatch):
     from kvm_pilot import health
 
     monkeypatch.setattr(health, "_REGISTRY_CACHE", {"firmware": [
         {"vendor": "gl.inet", "product": "RV1126B", "latest": "4.82",
          "source": "https://x", "date": "2026-01-01"}]})
-    assert health.check_firmware_currency(_fw()) is None
+    r = health.check_firmware_currency(_fw())
+    # Current is a positive verdict, not silence (#254): it names what it was
+    # compared against and how fresh that comparison is.
+    assert r.severity is Severity.OK and r.title == "Firmware current"
+    assert "latest known is 4.82 (as of 2026-01-01)" in r.detail
 
 
-def test_currency_none_when_unmatched(monkeypatch):
+# #254: "no currency data" must never read like "checked, current". Both the
+# unmatched device and the entry-without-latest (the shipped Dell rows) get a
+# present, non-alarming INFO that says the check did NOT happen.
+@pytest.mark.parametrize(
+    ("registry", "why"),
+    [
+        ({"firmware": []}, "no entry"),
+        ({"firmware": [{"vendor": "gl.inet", "product": "RV1126B",
+                        "profile": {"mouse": "absolute"}}]}, "no latest-known release"),
+    ],
+    ids=["unmatched-device", "entry-without-latest"],
+)
+def test_currency_unknown_is_a_visible_info_not_silence(monkeypatch, registry, why):
     from kvm_pilot import health
 
-    monkeypatch.setattr(health, "_REGISTRY_CACHE", {"firmware": []})
-    assert health.check_firmware_currency(_fw()) is None
+    monkeypatch.setattr(health, "_REGISTRY_CACHE", registry)
+    r = health.check_firmware_currency(_fw())
+    assert r is not None and r.severity is Severity.INFO
+    assert r.title == "Firmware currency unknown"
+    assert why in r.detail and "NOT checked" in r.detail
+    assert health.FIRMWARE_REPORT_URL in r.remediation
+    assert "firmware-update" not in r.remediation  # a data gap is not a flash prompt
+
+
+def test_currency_known_bad_still_fires_without_latest(monkeypatch):
+    from kvm_pilot import health
+
+    monkeypatch.setattr(health, "_REGISTRY_CACHE", {"firmware": [
+        {"vendor": "gl.inet", "product": "RV1126B", "known_bad": [
+            {"affected": "<=4.82", "severity": "critical", "issue": "ATX unwired", "source": "https://x"}]}]})
+    # known_bad is checked before the latest/unknown split: a range match must
+    # not be hidden behind "currency unknown".
+    assert health.check_firmware_currency(_fw()).severity is Severity.CRITICAL
+
+
+def test_shipped_registry_dell_entries_report_unknown_not_silence():
+    """The real #254 case: both Dell entries ship with ``latest: null``."""
+    from kvm_pilot import health
+
+    for product, version in (("PowerEdge R710", "2.92"), ("Latitude 5411", "14.1.79")):
+        r = health.check_firmware_currency(_fw(vendor="dell", product=product, version=version))
+        assert r is not None and r.severity is Severity.INFO, product
+        assert "NOT checked" in r.detail
 
 
 def test_capability_profile_warns_on_degraded_axis(monkeypatch):

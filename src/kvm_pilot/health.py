@@ -1185,6 +1185,9 @@ def _load_firmware_registry() -> dict[str, Any]:
     return _REGISTRY_CACHE
 
 
+FIRMWARE_REPORT_URL = "https://github.com/DustinTrap/kvm-pilot/issues/new?template=firmware-report.yml"
+
+
 def _match_firmware(entries: list[dict], vendor: str, product: str) -> dict | None:
     """First registry entry whose vendor equals and whose product is a substring
     of the device's reported product (so ``RV1126B`` matches the messy board
@@ -1232,7 +1235,7 @@ def check_firmware_currency(driver: Any) -> CheckResult | None:
         return None
     entry = _match_firmware(_load_firmware_registry().get("firmware", []), vendor, product)
     if entry is None:
-        return None
+        return _currency_unknown(product, version, "the firmware registry has no entry for this device")
 
     # 1) Known-bad: the installed version falls in an affected range.
     for bad in entry.get("known_bad", []):
@@ -1258,7 +1261,44 @@ def check_firmware_currency(driver: Any) -> CheckResult | None:
             detail=f"{product} is on {version}; latest known is {latest} (as of {entry.get('date', '?')}).",
             remediation=_firmware_remediation(entry, entry.get("source", "the vendor download page")),
         )
-    return None  # current (or ahead) -> the pillar stays quiet
+    if not latest:
+        # #254: an entry added from a live run (profile/maturity) but with no
+        # citable `latest` must not read the same as "checked and current".
+        return _currency_unknown(product, version, "the registry entry has no latest-known release")
+
+    # 3) Current (or ahead): say so, with the date the comparison is only as good as.
+    return CheckResult(
+        id="firmware-currency",
+        pillar=Pillar.FIRMWARE,
+        severity=Severity.OK,
+        title="Firmware current",
+        detail=f"{product} is on {version}; latest known is {latest} (as of {entry.get('date', '?')}).",
+    )
+
+
+def _currency_unknown(product: str, version: str, why: str) -> CheckResult:
+    """The 'we did not check' verdict (#254).
+
+    Silence here used to be indistinguishable from "checked, current". A missing
+    ``latest`` is a data gap on our side, not an operator problem, so it is INFO
+    (present, never a WARNING) and the remediation is how to close the gap, not a
+    firmware flash. Some devices will stay here by design: the AMT driver reports
+    the ME version, which Dell ships inside BIOS capsules with no published list,
+    so there is no honest ``latest`` to cite (docs/decisions.md).
+    """
+    return CheckResult(
+        id="firmware-currency",
+        pillar=Pillar.FIRMWARE,
+        severity=Severity.INFO,
+        title="Firmware currency unknown",
+        detail=f"{product} is on {version}; {why}, so currency was NOT checked.",
+        remediation=(
+            "Nothing to fix on the device. To close the data gap, file the vendor's "
+            "latest release through the 'Firmware report' issue form "
+            f"({FIRMWARE_REPORT_URL}); on devices that self-report updates, "
+            "`kvm-pilot firmware-check` looks it up and files it for you (#189)."
+        ),
+    )
 
 
 def check_capability_profile(driver: Any) -> CheckResult | None:

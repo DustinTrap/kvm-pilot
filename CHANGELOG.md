@@ -6,6 +6,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **`healthcheck` no longer passes the firmware pillar silently when it never
+  checked** (#254). A device with no registry entry, or an entry without a
+  `latest` (both shipped Dell rows), now gets an `INFO` "Firmware currency
+  unknown" finding that says the check did NOT happen and points at the
+  Firmware-report form; a device that *is* current gets an explicit `OK`
+  naming the release it was compared against. Previously all three cases were
+  byte-identical silence — a false all-clear on every IPMI and AMT healthcheck.
+
 ### Changed
 - **MCP tool schemas now describe every parameter** (#278). All 87 parameters
   across the 34 tools carry a schema-level `description` (via
