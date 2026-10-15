@@ -18,9 +18,13 @@ only **live** runs (``source == "real"``; synthetic/mock runs never promote):
 * ``beta``  — at least ``BETA_MIN_PASSES`` live passes.
 * ``rc``    — at least ``RC_MIN_PASSES`` live passes across at least
   ``RC_MIN_DISTINCT_DATES`` distinct UTC calendar dates.
-* ``ga``    — at least ``GA_MIN_PASSES`` live passes spanning at least
+* ``ga``    — at least ``GA_MIN_PASSES`` live passes across at least
+  ``GA_MIN_DISTINCT_DATES`` distinct UTC calendar dates spanning at least
   ``GA_MIN_SPAN_DAYS`` days, **all after the capability's most recent live
-  failure** (a new failure resets the ga window).
+  failure** (a new failure resets the ga window). The distinct-date floor
+  (#253) is what stops five same-afternoon re-runs of ``test-report`` from
+  promoting a capability: the harness makes same-day repeats easy, and the
+  strongest claim the ladder makes should not be reachable in a loop.
 
 Interpretation decisions (recorded on issue #98):
 
@@ -70,6 +74,7 @@ BETA_MIN_PASSES = 1          # >=1 live pass
 RC_MIN_PASSES = 3            # >=3 live passes ...
 RC_MIN_DISTINCT_DATES = 2    # ... across >=2 distinct UTC calendar dates
 GA_MIN_PASSES = 5            # >=5 live passes ...
+GA_MIN_DISTINCT_DATES = 3    # ... across >=3 distinct UTC calendar dates (#253; stricter than rc) ...
 GA_MIN_SPAN_DAYS = 14        # ... spanning >=14 days, zero failures in the window
 
 # The command that regenerates the derived rows when drift is reported.
@@ -149,7 +154,11 @@ def _capability_level(events: list[tuple[date, bool]]) -> str:
     # ga considers only passes strictly after the most recent live failure —
     # a failure resets the window (interpretation decision 3).
     window = [d for d in passes if last_fail is None or d > last_fail]
-    if len(window) >= GA_MIN_PASSES and (window[-1] - window[0]).days >= GA_MIN_SPAN_DAYS:
+    if (
+        len(window) >= GA_MIN_PASSES
+        and len(set(window)) >= GA_MIN_DISTINCT_DATES
+        and (window[-1] - window[0]).days >= GA_MIN_SPAN_DAYS
+    ):
         return "ga"
     if len(passes) >= RC_MIN_PASSES and len(set(passes)) >= RC_MIN_DISTINCT_DATES:
         return "rc"

@@ -6,6 +6,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **`ga` maturity now needs ≥ 3 distinct UTC dates** (#253). `rc` already had a
+  distinct-date floor; `ga` had none, so five same-afternoon re-runs of
+  `kvm-pilot test-report` fourteen days after one earlier pass could promote a
+  capability to the ladder's strongest claim. `GA_MIN_DISTINCT_DATES = 3`
+  mirrors the `rc` guard (a policy constant per #98 — 3 keeps every current
+  `ga` row, which all rest on 4 dates). No derived level changed.
+
 ### Changed
 - **MCP tool schemas now describe every parameter** (#278). All 87 parameters
   across the 34 tools carry a schema-level `description` (via

@@ -108,7 +108,7 @@ page (#103).
 | `alpha` | 0 live passes (mocks only, or live failures only) |
 | `beta`  | ≥ 1 live pass |
 | `rc`    | ≥ 3 live passes across ≥ 2 distinct UTC dates (destructive caps use the same ladder; the harness's explicit include gate, #99, guarantees they were deliberate) |
-| `ga`    | ≥ 5 live passes spanning ≥ 14 days, all **after** the capability's most recent live failure (a new failure resets the window) |
+| `ga`    | ≥ 5 live passes across ≥ 3 distinct UTC dates spanning ≥ 14 days, all **after** the capability's most recent live failure (a new failure resets the window). The distinct-date floor (#253) means re-running `test-report` five times in one afternoon cannot promote anything |
 
 The overall `level` is the `min()` of the exercised capabilities' levels.
 Regenerate with:
