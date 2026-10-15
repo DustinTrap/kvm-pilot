@@ -41,6 +41,6 @@
   <text class="triad" x="142" y="470">gated, verified, audited</text>
 
   <!-- footer -->
-  <text class="pip mono" x="142" y="536">pip install --pre kvm-pilot</text>
+  <text class="pip mono" x="142" y="536">pip install kvm-pilot</text>
   <text class="url mono" x="700" y="536">github.com/DustinTrap/kvm-pilot</text>
 </svg>
