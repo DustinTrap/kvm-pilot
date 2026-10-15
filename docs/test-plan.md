@@ -359,8 +359,8 @@ and the shipped support matrix
   false-confidence incident). The field is optional and pre-#156 rows stay
   valid; maturity derivation ignores it.
 - **Maturity is derived, never hand-set** (`maturity.py`): `alpha` (no live
-  passes) → `beta` (≥1) → `rc` (≥3 across ≥2 dates) → `ga` (≥5 over ≥14 days, all
-  after the last failure). A new failure resets the `ga` window. CI re-derives
+  passes) → `beta` (≥1) → `rc` (≥3 across ≥2 dates) → `ga` (≥5 across ≥3 dates
+  over ≥14 days, all after the last failure; same-day repeats count once, #253). A new failure resets the `ga` window. CI re-derives
   and fails on drift — so honest failures in the ledger correctly hold a device
   back from claiming maturity it hasn't earned.
 - Anything in `never_exercised` (or a combo with no row) is **unverified** — keep
