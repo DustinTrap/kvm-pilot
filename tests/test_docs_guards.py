@@ -83,16 +83,14 @@ def test_skill_tool_list_matches_server_surface():
 
 # The install command is duplicated across every self-sufficient surface (the
 # shipped SKILL.md / mcp README must work offline, README is the PyPI page).
-# This guard turns a many-file drift into one failure — it will fire usefully
-# at GA, when `--pre` stops being the working command everywhere at once.
-_INSTALL_CMD = "pip install --pre kvm-pilot"
+# This guard turns a many-file drift into one failure. It fired at GA exactly
+# as planned (1.0.0, 2026-10-15): the canonical command dropped `--pre`, and
+# the pre-release-era flag may now appear only where a doc explains the
+# history (troubleshooting.md's "Which pip install line" and getting-started's
+# pointer to it) — never as the instruction.
+_INSTALL_CMD = "pip install kvm-pilot"
 _INSTALL_DOCS = (_README, _GETTING_STARTED, _SKILL_SETUP, _MCP_README)
-# A bare `pip install kvm-pilot` may appear only when *warning* that it does
-# nothing on a pre-release line, as the named batteries-included doctrine
-# ("`pip install kvm-pilot` ships everything", CLAUDE.md), or as a VCS install
-# (`@ git+...`, which ignores pre-release gating) — never as a working
-# release-install instruction. These words mark the allowed contexts.
-_BARE_OK_WORDS = ("deliberately", "pre-release", "nothing", "ships everything", "git+")
+_PRE_OK_WORDS = ("Older docs said", "era say", "still works", "no longer needed", "unnecessary")
 
 
 def _current_doc_files() -> list[Path]:
@@ -108,32 +106,32 @@ def _current_doc_files() -> list[Path]:
 
 
 def test_install_command_consistent():
-    """The canonical install command appears verbatim on every install surface.
+    """The canonical install command appears verbatim on every install surface,
+    and the pre-release-era ``--pre`` no longer appears as an instruction.
 
-    A bare ``pip install kvm-pilot`` must never be shown as the instruction. Not
-    because it fails — measured 2026-08-03, it resolves to the current beta,
-    since pip falls back to pre-releases when no stable release exists (#243
-    corrected the docs, which claimed it "installs nothing") — but because that
-    behavior flips silently the day a stable release ships. ``--pre`` is
-    unambiguous in both worlds.
+    Before 1.0.0 this guard enforced ``pip install --pre kvm-pilot`` everywhere
+    (a bare install resolved to the beta only via pip's pre-release fallback,
+    which flips silently once a stable release exists). At GA the flip happened,
+    so the guard inverted: ``--pre`` may survive only inside prose that explains
+    the history, never as the command a reader is told to run.
     """
     for doc in _INSTALL_DOCS:
         assert _INSTALL_CMD in doc.read_text(encoding="utf-8"), (
             f"{doc.relative_to(_ROOT)}: missing the canonical install command "
             f"{_INSTALL_CMD!r}"
         )
-    bare = re.compile(r'pip install "?kvm-pilot')
+    pre = re.compile(r'pip install --pre "?kvm-pilot')
     for doc in _current_doc_files():
         # Collapse whitespace so a command wrapped across a line break (as
         # markdown prose does) still matches.
         flat = " ".join(doc.read_text(encoding="utf-8").split())
-        for m in bare.finditer(flat):
-            window = flat[max(0, m.start() - 120): m.end() + 120]
-            assert any(w in window for w in _BARE_OK_WORDS), (
-                f"{doc.relative_to(_ROOT)}: shows `pip install kvm-pilot` "
-                f"without --pre as the instruction (context: ...{window}...) — "
-                f"use {_INSTALL_CMD!r}, or keep the surrounding prose that "
-                f"explains why the bare form is not what you want"
+        for m in pre.finditer(flat):
+            window = flat[max(0, m.start() - 160): m.end() + 160]
+            assert any(w in window for w in _PRE_OK_WORDS), (
+                f"{doc.relative_to(_ROOT)}: still shows `pip install --pre kvm-pilot` "
+                f"as the instruction (context: ...{window}...) — since 1.0.0 the "
+                f"command is {_INSTALL_CMD!r}; keep --pre only in prose that explains "
+                "the pre-release era"
             )
 
 

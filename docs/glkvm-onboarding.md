@@ -36,7 +36,7 @@ Four things surprise every newcomer, and all four are the device, not the tool:
 
 - The appliance's IP (the **KVM's** address — not the managed host's).
 - Web-console credentials (`admin` by default — change it).
-- `pip install --pre kvm-pilot`.
+- `pip install kvm-pilot`.
 - Optional: appliance-SSH (`root@<kvm-ip>`, key-based) for the diagnostics REST
   cannot see — see *Hazards* below.
 

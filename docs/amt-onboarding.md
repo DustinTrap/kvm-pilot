@@ -91,7 +91,7 @@ for a factory-fresh ME.
 ## Part 2 — Bring it online with kvm-pilot (already provisioned)
 
 ### Prerequisites
-- `kvm-pilot` installed (`pip install --pre kvm-pilot`).
+- `kvm-pilot` installed (`pip install kvm-pilot`).
 - `amtterm` on `PATH` for SOL (`brew install amtterm` / `apt install amtterm`).
 - Network reachability to the AMT ports (test `nc -vz <host> 16992`).
 

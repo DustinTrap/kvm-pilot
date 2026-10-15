@@ -5,7 +5,8 @@ through its KVM." It targets the **agent + MCP** workflow (Claude Code, Claude
 Desktop, or any MCP host). For the Python library and CLI, see the
 [README](https://github.com/DustinTrap/kvm-pilot/blob/main/README.md#quickstart).
 
-> ⚠️ Release candidate. The core read paths are live-verified on GL-RM1PE (the
+> **Verify against the matrix.** The core paths are live-verified on GL-RM1PE,
+> a Dell iDRAC6 and a Dell AMT laptop (the
 > [Hardware-Compatibility list](https://github.com/DustinTrap/kvm-pilot/wiki/Hardware-Compatibility)
 > shows what's actually been exercised); treat anything not on that list as
 > unverified, and **confirm destructive steps** (power, media, keystrokes)
@@ -14,13 +15,13 @@ Desktop, or any MCP host). For the Python library and CLI, see the
 ## 1. Install
 
 ```bash
-pip install --pre kvm-pilot
+pip install kvm-pilot
 ```
 
-`kvm-pilot` is a pre-release, so use `--pre`
-([why](troubleshooting.md#which-pip-install-line-should-i-use)). One install
-brings the `kvm-pilot` CLI, the `kvm-pilot-mcp` server, and the bundled Claude
-skill.
+One install brings the `kvm-pilot` CLI, the `kvm-pilot-mcp` server, and the
+bundled Claude skill. (Older docs said `pip install --pre kvm-pilot`; since
+1.0.0 the flag is unnecessary —
+[details](troubleshooting.md#which-pip-install-line-should-i-use).)
 
 The skill ships inside the package; to have **Claude Code** discover it, copy it
 into your skills directory:
@@ -230,7 +231,7 @@ A short list that saves most new users their first few mistakes:
 - **A black screen isn't necessarily "off."** See §6 — confirm with the screen and
   an SSH reachability check, not the power reading alone.
 
-- **Close the loop — this beta runs on community evidence.** After a good first
+- **Close the loop — this project runs on community evidence.** After a good first
   run, `kvm-pilot test-report --profile <p>` probes your device (read-only by
   default) and appends an evidence row you can paste into a two-minute
   [hardware report](https://github.com/DustinTrap/kvm-pilot/issues/new?template=hardware-report.yml).
