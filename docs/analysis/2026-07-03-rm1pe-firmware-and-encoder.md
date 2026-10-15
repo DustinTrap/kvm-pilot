@@ -1,10 +1,15 @@
 # 2026-07-03 — RM1PE: remote firmware update declined; native-res encoder wedge
 
+> **Point-in-time field report (2026-07-03).** It describes the tree, fleet and issue
+> states as they were that day and is kept as a record, not maintained — paths,
+> versions and verdicts may have moved since (the GL driver, for one, moved
+> from `drivers/pikvm.py` to `drivers/glkvm.py` in #140).
+
 *Session-level analysis (see `docs/analysis/`): a field report from a real GL
 
 > Device identifiers in this report are redacted to stable labels (`unit-A`/`unit-B`/`unit-C`); exact addresses live in the operator's private ledger, not in the published repo (#209/#243).
 
-**RM1PE** (unit-B, unit-B, firmware V1.5.1 release2). Two operator-facing
+**RM1PE** (unit-B, firmware V1.5.1 release2). Two operator-facing
 conclusions for anyone running this hardware — **do not remote-flash an RM1PE
 from kvm-pilot yet**, and **keep RM1PE guests at ≤1080p** or you lose stills and
 pin the box at load ~10.*
@@ -25,8 +30,8 @@ its own:
    returns success but flashes nothing on RM1PE — version unchanged, no reboot,
    LEDs solid — and the request bodies are provisional / not vendor-documented.
    This is already recorded in **#94** (false success) and **#95** (start is a
-   no-op); both are open, and the driver path (`drivers/pikvm.py`) is unchanged
-   since. Best case, attempting it repeats the misleading "flash started"; worst
+   no-op); both are open, and the driver path (`drivers/pikvm.py` at the time; the GL
+   code lives in `drivers/glkvm.py` since #140) is unchanged since. Best case, attempting it repeats the misleading "flash started"; worst
    case, a partial flash.
 2. **It fails kvm-pilot's own safety gate.** `healthcheck` reports a **CRITICAL
    `recovery-path`** finding on this unit: ATX `enabled=false`, no GPIO power

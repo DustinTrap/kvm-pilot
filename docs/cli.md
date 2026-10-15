@@ -3,7 +3,8 @@
 Every `kvm-pilot` subcommand in one table. This is the canonical list — if a
 command exists in `cli.py` it must appear here (`kvm-pilot --help` is the
 runtime source of truth for flags). Global flags precede the subcommand:
-`--version`, `-v/--verbose`, `--timeout SECONDS` (HTTP per-request timeout).
+`--version`, `-v/--verbose`, `--timeout SECONDS` (HTTP per-request timeout),
+`--no-hints` (silence the agent-context MCP-twin tips, #228).
 
 Destructive commands (marked ⚡) auto-run the preflight healthcheck first and
 prompt for confirmation; `--dry-run` logs instead of sending, `--yes` skips the

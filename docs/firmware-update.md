@@ -96,10 +96,9 @@ For the GL RM1/RM1PE this is **`risk: high`**, because:
   only sensor/control channel across the reboot.
 - **No A/B rollback**, and an interrupted power cycle bricks onboard storage (GL's own
   warning).
-- **The update can disable the REST API.** A GL update commonly reverts
-  `/etc/kvmd/nginx-kvmd.conf` and re-disables the PiKVM REST API kvm-pilot depends on,
-  and may reset config — so even a *successful* flash can lock the tool out until the
-  API is re-enabled over SSH (`gl-inet/glkvm#13`).
+- **The update can disable the REST API** (`gl-inet/glkvm#13`) and may reset
+  config — so even a *successful* flash can lock the tool out until the API is
+  re-enabled over SSH ([how](troubleshooting.md#every-api-call-returns-404-glkvm)).
 - **Media-mounted flashes corrupt.** A GL flash can start with virtual media still
   mounted, with no warning (`gl-inet/glkvm#120`) — `firmware-update` ejects media first.
 

@@ -1,5 +1,10 @@
 # 2026-07-01 — Top-to-bottom review: narrative
 
+> **Point-in-time field report (2026-07-01).** It describes the tree, fleet and issue
+> states as they were that day and is kept as a record, not maintained — paths,
+> versions and verdicts may have moved since (the GL driver, for one, moved
+> from `drivers/pikvm.py` to `drivers/glkvm.py` in #140).
+
 *This is the first entry in `docs/analysis/` — session-level analysis output
 that is too narrative for `decisions.md` (which records individual judgment
 calls) but worth keeping: what was reviewed, how, what was found, and what
