@@ -127,13 +127,14 @@ Linux/ESXi text installers and GRUB fine, but not a graphical installer.
 This one:
 
 ```bash
-pip install --pre kvm-pilot
+pip install kvm-pilot
 ```
 
-The current release line is a **pre-release**. A bare `pip install kvm-pilot`
-resolves to it today only because pip falls back to pre-releases when no stable
-release exists — the day a stable one ships, the same command silently starts
-picking that instead. `--pre` says what you mean either way.
+Since **1.0.0** (2026-10-15) the line is a stable release and the bare command
+resolves to it. Docs and posts from the `0.1.0a/b/rc` era say
+`pip install --pre kvm-pilot`: that still works (it selects the newest release
+*including* any future pre-release), it is just no longer needed. To stay on the
+stable line even when a `1.1.0rc1` exists, keep the bare form.
 
 (`0.1.0a1` is yanked and ancient — don't pin it.)
 

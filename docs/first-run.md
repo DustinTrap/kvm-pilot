@@ -15,13 +15,11 @@ every output shown is what the command actually prints.
 ## 1. Install
 
 ```bash
-pip install --pre kvm-pilot
+pip install kvm-pilot
 kvm-pilot --version
 ```
 
-`--pre` matters because `kvm-pilot` is a release candidate
-([why](troubleshooting.md#which-pip-install-line-should-i-use)). One install
-brings the `kvm-pilot` CLI, the `kvm-pilot-mcp` server your agent will load in
+One install brings the `kvm-pilot` CLI, the `kvm-pilot-mcp` server your agent will load in
 step 5, and the bundled Claude skill.
 
 ## 2. Meet the stand-in device

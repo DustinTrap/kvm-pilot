@@ -215,7 +215,7 @@ class _Handler(BaseHTTPRequestHandler):
                 "Name": "Intel(r) AMT OptIn Service", "CreationClassName": "IPS_OptInService",
                 "SystemName": "Intel(r) AMT", "SystemCreationClassName": "CIM_ComputerSystem",
                 "OptInRequired": st.optin_required, "OptInState": st.optin_state,
-                "CanModifyOptInPolicy": "1"})
+                "CanModifyOptInPolicy": "1", "OptInCodeTimeout": "120"})
         if cls == "IPS_HostBasedSetupService":
             return _inst("IPS_HostBasedSetupService", {
                 "CurrentControlMode": st.control_mode,

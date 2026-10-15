@@ -54,12 +54,11 @@ power-cycle, and the boot console the agent actually saw:
 
 One install gives you the whole product — the **`kvm-pilot` CLI**, the
 **`kvm-pilot-mcp` MCP server**, and the bundled **Claude skill** — nothing to
-clone. The current release line is a **pre-release**, so install it with
-`--pre` ([why](https://github.com/DustinTrap/kvm-pilot/blob/main/docs/troubleshooting.md#which-pip-install-line-should-i-use)).
+clone.
 
 ```bash
-pip install --pre kvm-pilot                    # CLI + skill + MCP server + WebSocket events
-pip install --pre "kvm-pilot[totp]"            # + 2FA / TOTP support (pyotp)
+pip install kvm-pilot                          # CLI + skill + MCP server + WebSocket events
+pip install "kvm-pilot[totp]"                  # + 2FA / TOTP support (pyotp)
 kvm-pilot install-skill                        # optional: put the bundled skill where Claude Code loads it
 ```
 
@@ -166,13 +165,15 @@ the CLI covers the full surface in [docs/cli.md](https://github.com/DustinTrap/k
 
 ## Status & maturity
 
-> **Status: release candidate.** GA is gated on validation breadth, not code:
-> three of the seven device drivers (`redfish`, `pikvm`, `blikvm`) have never run
-> against real hardware, only emulators. See the
+> **Status: 1.0, general availability** — on the strength of the run ledger,
+> not beyond it. Three device types have run live (GL-RM1PE, Dell R710 over
+> iDRAC6/IPMI, Dell Latitude 5411 over Intel AMT); three of the seven device
+> drivers (`redfish`, `pikvm`, `blikvm`) have only ever run against emulators.
+> See the
 > [Hardware-Compatibility list](https://github.com/DustinTrap/kvm-pilot/wiki/Hardware-Compatibility)
 > for what has actually been exercised — and please add to it. (The exact version lives in the
-> [CHANGELOG](https://github.com/DustinTrap/kvm-pilot/blob/main/CHANGELOG.md);
-> install with `pip install --pre kvm-pilot`.) The core paths have graduated
+> [CHANGELOG](https://github.com/DustinTrap/kvm-pilot/blob/main/CHANGELOG.md).)
+> The core paths have graduated
 > from mocked-only to live-verified: a fleet of GL-RM1PE units has exercised
 > `snapshot`/`healthcheck`/`logs`/`power_state`/`virtual_media`/`info` across
 > two firmware lines — on V1.9.1 the run ledger that ships in the wheel puts
@@ -195,8 +196,9 @@ the CLI covers the full surface in [docs/cli.md](https://github.com/DustinTrap/k
 > [hardware report](https://github.com/DustinTrap/kvm-pilot/issues/new?template=hardware-report.yml)
 > takes two minutes and the hourly ingest does the rest. Anything the
 > [Hardware-Compatibility list](https://github.com/DustinTrap/kvm-pilot/wiki/Hardware-Compatibility)
-> doesn't show as exercised is still unverified: expect some API movement before
-> 1.0, note the remote firmware-flash no-op on GL-RM1PE
+> doesn't show as exercised is still unverified: the 1.x line keeps the public
+> API stable, but a rating only moves when a live run moves it; note the remote
+> firmware-flash no-op on GL-RM1PE
 > ([#94](https://github.com/DustinTrap/kvm-pilot/issues/94)/[#95](https://github.com/DustinTrap/kvm-pilot/issues/95)),
 > and don't point destructive ops at a machine you can't afford to have
 > power-cycled unexpectedly. See [Compatibility](#compatibility).
@@ -320,7 +322,7 @@ ATX adapter wired to the target's front-panel header: on the GL Comet family
 while PiKVM v3/v4 kits include the ATX adapter in the box and BliKVM bundles
 vary by model — check yours. Without ATX wiring, ATX calls return errors from
 the device. Reports of success or failure on *any* hardware are exactly what
-this beta needs — please open a
+this project needs — please open a
 [hardware report](https://github.com/DustinTrap/kvm-pilot/issues/new?template=hardware-report.yml).
 
 ## Architecture
@@ -368,8 +370,9 @@ remotely over WS-Man (`kvm-pilot amt enable-sol` / `enable-kvm`), no MEBx trip.
 
 ## Help shape it — this is where you come in
 
-`kvm-pilot` is built in the open, and the thing standing between it and 1.0 is
-**not code — it's breadth of real hardware**. Three of the seven drivers
+`kvm-pilot` is built in the open. 1.0 shipped on the evidence of three device
+types; what it still needs is **not code — it's breadth of real hardware**.
+Three of the seven drivers
 (`redfish`, `pikvm`, `blikvm`) have never run against a physical device, only
 emulators. Every rating you see is derived from a run ledger that ships inside
 the wheel, never hand-set, so the matrix only grows when someone runs it on real

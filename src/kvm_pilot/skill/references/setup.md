@@ -18,19 +18,17 @@ mean** ("the connected server behind the KVM at `<ip>`", not the KVM appliance
 itself). Don't repeat this for a user who is clearly already experienced.
 
 ```bash
-pip install --pre kvm-pilot               # CLI + this skill + the MCP server
-pip install --pre "kvm-pilot[totp]"       # add if the device has 2FA enabled
+pip install kvm-pilot                     # CLI + this skill + the MCP server
+pip install "kvm-pilot[totp]"             # add if the device has 2FA enabled
 ```
 
-It's a pre-release, so `--pre` (or pinning the exact current version) is required — a bare
-`pip install kvm-pilot` deliberately picks up no pre-release. A single install brings
-the `kvm-pilot` CLI, the `kvm-pilot-mcp` server, and this skill. To make Claude
+A single install brings the `kvm-pilot` CLI, the `kvm-pilot-mcp` server, and this skill. To make Claude
 Code discover the skill, run `kvm-pilot install-skill` (copies it to
 `~/.claude/skills/kvm-pilot`; re-run after upgrading, then restart the session).
 For the latest unreleased tree, install from git:
 
 ```bash
-pip install "kvm-pilot[totp,ws] @ git+https://github.com/DustinTrap/kvm-pilot"
+pip install "kvm-pilot[totp] @ git+https://github.com/DustinTrap/kvm-pilot"
 ```
 
 Credentials resolve from `KVM_PILOT_HOST` / `KVM_PILOT_USER` / `KVM_PILOT_PASSWD`
@@ -112,12 +110,12 @@ Every tool takes an optional `profile` argument to pick a device from
 `~/.config/kvm-pilot/config.toml`; omit it to use the server's default profile.
 
 **To use it:** look for `mcp__kvm-pilot__*` tools (e.g. `mcp__kvm-pilot__snapshot`).
-If they're absent, `pip install --pre kvm-pilot` (which provides `kvm-pilot-mcp`),
+If they're absent, `pip install kvm-pilot` (which provides `kvm-pilot-mcp`),
 then register the server and tell the user to restart the session so the tools
 load:
 
 ```bash
-# pip install --pre kvm-pilot   installs the CLI, the MCP server, and its deps
+# pip install kvm-pilot         installs the CLI, the MCP server, and its deps
 claude mcp add kvm-pilot -s user \
     -e KVM_PILOT_PROFILE=mykvm -e KVM_PILOT_MCP_DRY_RUN=1 -- \
     kvm-pilot-mcp

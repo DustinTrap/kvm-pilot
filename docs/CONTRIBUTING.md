@@ -8,7 +8,7 @@ about what it has and hasn't been tested against, and dependency-light.
 ```bash
 git clone https://github.com/DustinTrap/kvm-pilot
 cd kvm-pilot
-pip install -e ".[dev,totp,ws]"
+pip install -e ".[dev,totp]"
 ```
 
 ## Before you start: find or open an issue
@@ -82,7 +82,7 @@ environment `pypi`). The checklist, in order:
 5. **Run the manual `Registry publish` workflow** (`registry-publish.yml`) so
    the MCP registry entry (`io.github.DustinTrap/kvm-pilot`) picks up the new
    version.
-6. **Verify from the outside**: `pip install --pre "kvm-pilot==X.Y.Z"` in a clean
+6. **Verify from the outside**: `pip install "kvm-pilot==X.Y.Z"` in a clean
    venv, `kvm-pilot --version`, and the registry listing.
 7. **Refresh or delete `RESUME.md`.** It is local-only and `CLAUDE.md` tells
    every session to read it first, so a stale "rcN is released" line misleads

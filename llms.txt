@@ -10,7 +10,7 @@ into boot phases (BIOS/GRUB/installer/login/crash) using Claude or any local
 OpenAI-compatible VLM. Every destructive effect is operator-gated and each act
 needs a per-call approval backed by a signed single-use receipt; per-device
 maturity is derived from a run ledger of real hardware evidence. Python >= 3.11;
-install with `pip install --pre kvm-pilot` (CLI `kvm-pilot`, MCP server
+install with `pip install kvm-pilot` (CLI `kvm-pilot`, MCP server
 `kvm-pilot-mcp`, bundled Claude skill — all in one wheel).
 
 ## Docs

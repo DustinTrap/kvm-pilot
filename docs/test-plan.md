@@ -17,7 +17,7 @@ support matrix.
 > (emulator stack), [#29](https://github.com/DustinTrap/kvm-pilot/issues/29)
 > (a real BMC).
 
-> ⚠️ **Beta.** The *project* is beta; this plan is how we find out what each
+> **The honesty rule.** The project is GA on the strength of the matrix, not beyond it; this plan is how we find out what each
 > device+capability combo actually does, and it is not a claim that any of them
 > works yet. Most device+capability combos are mock-only
 > until a run recorded here promotes them. Be honest in every note: record what

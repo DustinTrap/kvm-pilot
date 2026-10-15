@@ -771,27 +771,28 @@ class AmtDriver(PowerMixin, CapabilityMixin):
         # ("The specified feature is not supported. (subcode e:UnsupportedFeature)"),
         # but firmware phrasing varies and either alone is a clear enough signal.
         if "unsupportedfeature" in detail or "not supported" in detail:
+            rp = self._redirection_port()   # name the port this ME actually serves (#264)
             head = (
                 "The ME refuses to enable the STANDARD VNC PORT (5900) for KVM. Newer "
                 "builds harden that legacy plain-RFB port off permanently and serve KVM "
-                "only over the authenticated redirection port 16994, which kvm-pilot uses "
+                f"only over the authenticated redirection port {rp}, which kvm-pilot uses "
                 "automatically — so this refusal alone does not tell you KVM is broken. "
             )
             serves = self._kvm_redirection_serves()
             if serves is True:
                 return head + (
-                    "CHECKED: KVM IS SERVING over 16994 on this device right now, so there "
+                    f"CHECKED: KVM IS SERVING over {rp} on this device right now, so there "
                     "is nothing to fix — `snapshot` and `console` work. Do not touch MEBx."
                 )
             if serves is False:
                 return head + (
-                    "CHECKED: KVM did NOT answer over 16994 either, so this one is real. "
+                    f"CHECKED: KVM did NOT answer over {rp} either, so this one is real. "
                     "Confirm KVM redirection is enabled in MEBx (a firmware setting no "
                     "remote call can change) and that the redirection listener is on "
                     "(`kvm-pilot amt enable-sol`)."
                 )
             return head + (
-                "The 16994 path could not be tested from here, so this is unresolved: run "
+                f"The {rp} path could not be tested from here, so this is unresolved: run "
                 "`kvm-pilot snapshot` — if it returns an image, KVM is fine and only the "
                 "5900 listener is gone."
             )
@@ -828,11 +829,16 @@ class AmtDriver(PowerMixin, CapabilityMixin):
         opt = self._wsman.get(self._OPTIN)
         required = (findtext(opt, "OptInRequired") or "").strip()
         state = (findtext(opt, "OptInState") or "").strip()
+        timeout = (findtext(opt, "OptInCodeTimeout") or "").strip()
         return {
             "required": required not in ("", "0"),
             "required_raw": required or None,
             "state": self._OPTIN_STATES.get(state, state or None),
             "state_raw": state or None,
+            # Intel's OptInCodeTimeout: the idle window (seconds) AFTER the ME has
+            # accepted the code, before a KVM session must start. (The display
+            # timeout for typing the code back is OptInDisplayTimeout.) From #265.
+            "code_timeout_s": int(timeout) if timeout.isdigit() else None,
             "control_mode": self._control_mode(),
         }
 

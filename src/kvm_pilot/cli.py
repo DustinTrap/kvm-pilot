@@ -731,8 +731,14 @@ def cmd_amt(args) -> int:
               f"control_mode={st['control_mode']}")
     elif args.action == "consent-start":
         kvm.request_consent()
+        try:  # best-effort: the instructions matter more than the timeout figure
+            ttl = kvm.consent_state().get("code_timeout_s")
+        except KVMPilotError:
+            ttl = None
+        window = (f" Once the ME accepts the code, start the KVM session within about {ttl}s."
+                  if ttl else "")
         print(f"Consent requested: the ME is painting a 6-digit code on {kvm.host}'s own display. "
-              "Read it there, then: kvm-pilot amt consent-code --code NNNNNN")
+              f"Read it there, then: kvm-pilot amt consent-code --code NNNNNN{window}")
     else:  # consent-code
         if args.code is None:
             print("consent-code needs --code NNNNNN (the 6 digits shown on the host's display).",

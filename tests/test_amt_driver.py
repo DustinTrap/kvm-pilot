@@ -1575,7 +1575,7 @@ def test_consent_state_reads_the_optin_service(amt_emu):
     amt_emu.state.control_mode = "1"
     st = make(amt_emu).consent_state()
     assert st == {"required": True, "required_raw": "1", "state": "not_started",
-                  "state_raw": "0", "control_mode": "ccm"}
+                  "state_raw": "0", "code_timeout_s": 120, "control_mode": "ccm"}
     amt_emu.state.optin_required = "0"
     assert make(amt_emu).consent_state()["required"] is False
 

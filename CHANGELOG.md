@@ -6,6 +6,40 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.0.0] — 2026-10-15
+
+**General availability.** The release-candidate line (`0.1.0rc1`–`rc4`)
+becomes `1.0.0`. What that claim rests on, stated the way the project has
+always stated it: the run ledger that ships in the wheel. Three device types
+have been exercised live — a GL-RM1PE fleet (`info`/`logs`/`healthcheck`/
+`power_state` at **ga** on V1.9.1, `snapshot` at rc), a Dell PowerEdge R710
+over iDRAC6/IPMI (power, boot device, sensors, SEL, SOL, beta), and a Dell
+Latitude 5411 over Intel AMT (power, boot, SOL, a 1080p BIOS screenshot over
+the KVM tunnel, beta). Stock PiKVM, BliKVM, Redfish BMCs (iLO, iDRAC9,
+OpenBMC) and the SSH-only plane have run against emulators and the conformance
+suites only. The
+[Hardware-Compatibility](https://github.com/DustinTrap/kvm-pilot/wiki/Hardware-Compatibility)
+page remains the source of truth, and `kvm-pilot healthcheck` says on every
+device exactly which of its capabilities have live evidence. Validation breadth
+(#29) stays open as work; it no longer gates the version.
+
+### Changed (release mechanics)
+- **`pip install kvm-pilot`** is the install command; `--pre` is no longer
+  needed (it still works). Every install surface, the bundled skill, the MCP
+  README and `llms.txt` say so, and the docs guard that enforced `--pre` on
+  the pre-release line now rejects it.
+- Trove classifier `Development Status :: 5 - Production/Stable`.
+- Status banners ("beta", "release candidate") replaced by the matrix pointer
+  above; no hardware claim changed.
+
+### Credits
+The fixes below for #254, #261 and #264 were each also implemented
+independently by contributors while the maintainer's own pass was under way —
+@Enard52 (#275, #276, #277) and @torkeldanielsson (#265, who also reported
+#264 with measurements from a CSME 21 desktop). The merged versions are the
+maintainer's; the `OptInCodeTimeout` consent window and the port-aware
+redirection hint text are taken from #265. Thank you both.
+
 ### Fixed
 - **AMT `power off` is now the OS-graceful shutdown (12) and `power off-hard`
   the platform power-down (8)** (#264, reported on a CSME 21 desktop). The

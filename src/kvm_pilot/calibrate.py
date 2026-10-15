@@ -74,7 +74,7 @@ def default_decoder(data: bytes) -> list[list[int]]:
     except ImportError as exc:
         raise CalibrationError(
             "mouse calibration needs Pillow to decode snapshots, and it ships with "
-            "kvm-pilot — this import should not fail. Reinstall (pip install --pre "
+            "kvm-pilot — this import should not fail. Reinstall (pip install "
             "--force-reinstall kvm-pilot), or pass your own decoder=."
         ) from exc
     import io  # noqa: PLC0415
