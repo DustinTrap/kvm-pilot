@@ -61,6 +61,35 @@ driver or CLI dispatch, run what CI runs:
 `pip install "sushy-tools==2.2.0" && pytest tests/integration -m integration`
 (without `sushy-emulator` on PATH those tests silently skip).
 
+## Releasing
+
+Releases are a GitHub Release → `release.yml` → PyPI (Trusted Publishing,
+environment `pypi`). The checklist, in order:
+
+1. **Bump the version everywhere it is pinned**: `src/kvm_pilot/__about__.py`
+   (the source of truth), `mcpb/manifest.json`, `mcpb/pyproject.toml` (its
+   `version` *and* its `kvm-pilot==` dependency) and `server.json` (two
+   places). `tests/test_mcpb_bundle.py` and `tests/test_docs_guards.py` fail on
+   drift, so run `pytest` after the bump.
+2. **Move `CHANGELOG.md` `[Unreleased]`** into a `## [X.Y.Z] — YYYY-MM-DD`
+   section (Keep a Changelog format).
+3. Run the full pre-PR checklist above, including the integration suite, and
+   merge the release PR.
+4. **Publish a GitHub Release** tagged `vX.Y.Z` (mark it a *pre-release* while
+   the line is alpha/beta/rc). `release.yml` re-runs the gates, refuses a tag
+   that disagrees with `__about__.py`, builds the wheel and the `.mcpb` bundle,
+   publishes to PyPI and attaches the bundle to the Release.
+5. **Run the manual `Registry publish` workflow** (`registry-publish.yml`) so
+   the MCP registry entry (`io.github.DustinTrap/kvm-pilot`) picks up the new
+   version.
+6. **Verify from the outside**: `pip install --pre "kvm-pilot==X.Y.Z"` in a clean
+   venv, `kvm-pilot --version`, and the registry listing.
+7. **Refresh or delete `RESUME.md`.** It is local-only and `CLAUDE.md` tells
+   every session to read it first, so a stale "rcN is released" line misleads
+   the next session (#261). `/checkpoint` rewrites it; deleting it is also fine
+   (a session without one falls back to open issues + the CHANGELOG).
+8. Delete the merged release branch.
+
 ## Principles
 
 - **Client/driver code stays stdlib-only at import time**, but `pip install

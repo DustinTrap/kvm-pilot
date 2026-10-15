@@ -15,6 +15,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `ga` row, which all rest on 4 dates). No derived level changed.
 
 ### Changed
+- **Docs hygiene** (#261): `mcpb/manifest.json` said `MIT` — the project is
+  Apache-2.0 everywhere else; the four `docs/analysis/` reports carry a
+  point-in-time banner (and the RM1PE one no longer cites the pre-#140 driver
+  path as current); `docs/CONTRIBUTING.md` gains the release checklist it never
+  had, including "refresh or delete `RESUME.md`"; the GL "REST API ships
+  disabled" block and the `pip install --pre` rationale each live in one place
+  (`troubleshooting.md`) with one-line links from README, getting-started,
+  first-run, firmware-update and glkvm-onboarding; the README's VCS install line
+  drops the no-op `ws` extra.
 - **Docs staleness sweep** (#259): `docs/test-plan.md` §1 no longer quotes
   stale CLI/MCP counts (it names the live sources) and its capability table
   gains the rows that were missing — `wake`, `calibrate-mouse`, BootConfig,
