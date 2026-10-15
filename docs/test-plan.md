@@ -50,8 +50,9 @@ that varies across identical repeats is also a finding (§6).
 
 ## 1. Scope & inventory — organize by capability
 
-Test the whole product surface: **the CLI (30 subcommands)** and **the MCP server
-(~25 tools)**. Organize the plan by **capability**, not by command name, so the
+Test the whole product surface: **every CLI subcommand** (`kvm-pilot --help` is
+the live list) and **every MCP tool** (`src/kvm_pilot/mcp/README.md`; the
+counts in this file drift, the sources don't). Organize the plan by **capability**, not by command name, so the
 same plan maps onto any driver — a Redfish BMC has no `Video`, a GL unit has no
 `Sensors`, and the capability grouping tells you which rows to skip vs. must-test
 for the device in front of you. Capabilities are the `Capability` protocols in
@@ -61,18 +62,23 @@ from `src/kvm_pilot/mcp/README.md`.
 | Capability | CLI subcommands | MCP tools | Notes / known landmines |
 |---|---|---|---|
 | **SystemInfo** | `info`, `capabilities` | `info`, `capabilities`, `support_matrix` | `capabilities` is offline/structural — no device call. |
-| **Power** | `power` ⚡, `power-cycle` ⚡ | `power_state`, `power` ⚡ | **ATX read is unreliable on GLKVM (always off)** — verify state independently. |
-| **HID** | `type` ⚡, `key` ⚡, `mouse-move` ⚡, `click` ⚡, `recover-hid`, `keep-awake` | `type_text` ⚡, `press_key` ⚡, `send_shortcut` ⚡, `ctrl_alt_delete` ⚡, `mouse` ⚡ | Keystrokes land on a live console. Mouse *click* must carry a fresh `observed_frame_ref`. `send_shortcut`/`ctrl_alt_delete` are gated **by effect** (reboot chord ⇒ power gate). |
+| **Power** | `power` ⚡, `power-cycle` ⚡, `wake` | `power_state`, `power` ⚡, `wake` | **ATX read is unreliable on GLKVM (always off)** — verify state independently. `wake` (WoL, #199) is fire-and-forget: confirm with `power_state`/SSH, never trust the send. |
+| **HID** | `type` ⚡, `key` ⚡, `mouse-move` ⚡, `click` ⚡, `calibrate-mouse` ⚡, `recover-hid`, `keep-awake` | `type_text` ⚡, `press_key` ⚡, `send_shortcut` ⚡, `ctrl_alt_delete` ⚡, `mouse` ⚡, `calibrate_mouse` ⚡ | Keystrokes land on a live console. Mouse *click* must carry a fresh `observed_frame_ref`. `send_shortcut`/`ctrl_alt_delete` are gated **by effect** (reboot chord ⇒ power gate). |
 | **Video** | `snapshot`, `classify`, `watch` | `snapshot`, `classify_screen`, `wait_for_state` | **The false-report epicenter.** `snapshot` 503/H.264 while video is fine; check `signal.hdmi_signal` + `unchanged_since_last_snapshot`. |
 | **VirtualMedia** | `media-list`, `mount` ⚡, `eject` ⚡ | `list_virtual_media`, `mount_iso` ⚡, `eject` ⚡ | `mount` verifies the media actually reports online (#77); look for `host_visible_as` (#78) — its absence means not truly inserted. |
 | **Sensors** | `sensors` | — | BMC drivers only; skip on GL/PiKVM. |
 | **Logs** | `logs` | `logs` | The text channel that names a fault a screenshot can't (e.g. stuck encoder behind a 503). |
 | **BootProgress** | `boot-progress` | — | BMC BootProgress; part of the vision/sensing hierarchy for phase. |
-| **FirmwareUpdate** | `firmware-check`, `firmware-update` ⚡ | `file_firmware_report` ⚡ (external write, #190) | **Highest brick risk** — see §7. `firmware-update` plans by default; `--execute` flashes; the flash itself stays CLI-only. Validate #94/#95 no-op detection. |
-| **Events** | `events` | — (CLI only) | WebSocket stream; `websocket-client` is a base dep (bundled). |
+| **BootConfig** | `boot-device` ⚡ (`--show` to read) | `boot_options`, `set_boot_device` ⚡ | Next-boot override (Redfish BootSourceOverride, IPMI, AMT, efibootmgr BootNext over SSH). **Write-only on AMT** — read back is not possible, verify by watching the boot. `bios` is firmware-rejected on some AMT (#215). |
+| **SerialConsole** | `console` | — (CLI only, interactive) | IPMI SOL. iDRAC6 serves SOL on **COM2** (`ttyS1`); binary noise = wrong port, not a broken BMC. |
+| **AMT management** | `amt` (`enable-sol`, `enable-kvm`, `reset-kvm`) ⚡ | `amt_enable` ⚡ (config gate; `consent_off` has its own gate) | WS-Man posture changes on the ME. `enable-kvm` sets the separate 8-char RFB password. **Consent-off is a security posture change** — every run is a receipt. |
+| **FirmwareUpdate** | `firmware-check`, `firmware-update` ⚡ | `firmware_check`, `file_firmware_report` ⚡ (external write, #190) | **Highest brick risk** — see §7. `firmware-update` plans by default; `--execute` flashes; the flash itself stays CLI-only. Validate #94/#95 no-op detection. |
+| **Events** | `events` | `events` (bounded by `count`/`duration`, #233) | WebSocket stream; `websocket-client` is a base dep (bundled). |
 | **RemoteShell / SSH** | `ssh-check`, `ssh-exec` ⚡, `ssh-discover`, `ssh-bootstrap` ⚡ | `ssh_reachable`, `ssh_exec` ⚡, `ssh_discover` | In-band to the **managed host** (behind the KVM), not the appliance. `ssh-discover` is an active scan — opt-in, your networks only. |
 | **Appliance-SSH** (recovery) | `appliance` (loadavg/reboot ⚡), `paths` | `appliance_status`, `access_paths`, `appliance_reboot` ⚡ | SSH to the **KVM's own OS** (`root@<kvm-ip>`). **loadavg is NOT a health signal on RV1126** (self-inflates to ~10 idle). `appliance_reboot` is never automated. |
 | **Health / intake** | `healthcheck` | `healthcheck` | The intake gate (§4, #80). Run **first, on first contact**, always. |
+| **Interface router** (#181) | `benchmark`, `route`, `host-exec` ⚡ | — (the MCP server *is* one interface) | Measures per-command latency across library/ssh/winrm and picks the fastest *capable* one. Test that a stale scorecard re-measures, not that the pick is "right". |
+| **Agent context** | `install-skill`, `test-report` | `session`, `doctrine`, `support_matrix` | No device effect. `session` re-anchors gates/journal mid-conversation (#223); `doctrine` re-serves the skill playbooks; `test-report` is what *fills* the ledger this plan feeds. |
 
 ⚡ = destructive (gated). The CLI marks these with `⚡` in
 [cli.md](cli.md); the MCP tools carry `destructiveHint` and an `ALLOW_*` gate.

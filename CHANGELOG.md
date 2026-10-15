@@ -15,6 +15,18 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `ga` row, which all rest on 4 dates). No derived level changed.
 
 ### Changed
+- **Docs staleness sweep** (#259): `docs/test-plan.md` §1 no longer quotes
+  stale CLI/MCP counts (it names the live sources) and its capability table
+  gains the rows that were missing — `wake`, `calibrate-mouse`, BootConfig,
+  SerialConsole, AMT management, the interface router, the MCP `events` /
+  `firmware_check` / `session` / `doctrine` tools; `.env.example` now lists
+  every `KVM_PILOT_*` variable `configuration.md` documents (MCP gates and
+  TTLs, appliance-SSH, IPMI/AMT/WoL keys); `docs/amt.md` names the real
+  password variable (`KVM_PILOT_PASSWD`); `config.example.toml` lists the
+  `ssh` driver; `docs/cli.md` lists `--no-hints`; `docs/firmware-registry.md`
+  cites the registry's real path. `kvm-pilot --help` no longer says `events`
+  "requires the 'ws' extra" — `websocket-client` has been a base dependency
+  since #142.
 - **MCP tool schemas now describe every parameter** (#278). All 87 parameters
   across the 34 tools carry a schema-level `description` (via
   `Annotated[..., Field(description=...)]`; the shared `profile` / `confirm` /
