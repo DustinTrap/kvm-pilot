@@ -1,0 +1,133 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/DustinTrap/kvm-pilot/tools/dataset/vision-dataset.schema.json",
+  "title": "kvm-pilot boot-phase vision dataset entry",
+  "description": "Schema for one line in a kvm-pilot vision dataset JSONL manifest.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "image",
+    "sha256",
+    "source_sha256",
+    "phase",
+    "split",
+    "source",
+    "license",
+    "capture_params"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "image": {
+      "type": "string",
+      "minLength": 1
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "source_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "phase": {
+      "type": "string",
+      "enum": [
+        "no_signal",
+        "power_off",
+        "post_screen",
+        "bios_menu",
+        "uefi_shell",
+        "grub_menu",
+        "booting",
+        "login_prompt",
+        "desktop",
+        "os_running",
+        "installer_welcome",
+        "installer_partitioning",
+        "installer_progress",
+        "installer_complete",
+        "crash_screen",
+        "unknown"
+      ]
+    },
+    "split": {
+      "type": "string",
+      "enum": ["train", "validation", "test"]
+    },
+    "source": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["kind", "reference"],
+      "properties": {
+        "kind": {
+          "type": "string",
+          "enum": ["synthetic", "real_kvm", "wikimedia", "other"]
+        },
+        "reference": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    "license": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id", "attribution", "redistributable"],
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "attribution": {
+          "type": "string"
+        },
+        "redistributable": {
+          "type": "boolean"
+        }
+      }
+    },
+    "capture_params": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "width",
+        "height",
+        "augmentation",
+        "pillow_version",
+        "seed",
+        "scale",
+        "jpeg_quality",
+        "jpeg_subsampling",
+        "gamma",
+        "brightness",
+        "letterbox_x",
+        "letterbox_y",
+        "scanline_strength",
+        "tear_y",
+        "tear_height",
+        "tear_offset"
+      ],
+      "properties": {
+        "width": {"type": "integer", "minimum": 1},
+        "height": {"type": "integer", "minimum": 1},
+        "augmentation": {"const": "mjpeg_kvm_v1"},
+        "pillow_version": {"type": "string", "minLength": 1},
+        "seed": {"type": "integer"},
+        "scale": {"type": "number", "exclusiveMinimum": 0, "maximum": 1},
+        "jpeg_quality": {"type": "integer", "minimum": 1, "maximum": 95},
+        "jpeg_subsampling": {"type": "integer", "minimum": 0, "maximum": 2},
+        "gamma": {"type": "number", "exclusiveMinimum": 0},
+        "brightness": {"type": "number", "exclusiveMinimum": 0},
+        "letterbox_x": {"type": "integer", "minimum": 0},
+        "letterbox_y": {"type": "integer", "minimum": 0},
+        "scanline_strength": {"type": "integer", "minimum": 0, "maximum": 255},
+        "tear_y": {"type": "integer", "minimum": 0},
+        "tear_height": {"type": "integer", "minimum": 0},
+        "tear_offset": {"type": "integer"}
+      }
+    }
+  }
+}
