@@ -41,6 +41,39 @@ def test_from_config_constructor(cls):
     assert hasattr(cls, "from_config"), f"{cls.__name__} must implement from_config()"
 
 
+def _unanswering(cls, monkeypatch):
+    """``cls`` built against a management plane that does not answer."""
+    import socket
+    import types
+
+    from kvm_pilot.config import HostConfig
+
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()  # nothing listens here now
+    if cls is IpmiDriver:  # shells out to ipmitool: fake its no-BMC exit
+        import kvm_pilot.drivers.ipmi as ipmi_mod
+
+        monkeypatch.setattr(ipmi_mod.shutil, "which", lambda _name: "/usr/bin/ipmitool")
+        monkeypatch.setattr(ipmi_mod.subprocess, "run", lambda *a, **k: types.SimpleNamespace(
+            returncode=1, stdout="", stderr="Error: Unable to establish IPMI v2 / RMCP+ session"))
+    cfg = HostConfig(host="127.0.0.1", port=port, amt_port=port, scheme="http", timeout=1.0)
+    return cls.from_config(cfg, confirm=lambda *_: False)
+
+
+@pytest.mark.parametrize("cls", OOB_DRIVERS, ids=lambda c: c.__name__)
+def test_get_info_raises_when_the_management_plane_does_not_answer(cls, monkeypatch):
+    """The healthcheck's api-reachable check and ``access_paths`` (out-of-band
+    power included) read "get_info() returned" as "the plane answers". So get_info
+    may be best-effort per FIELD, but must RAISE when nothing answers: returning
+    blanks is how #293 reported a dark AMT host as healthy."""
+    from kvm_pilot.errors import KVMPilotError
+
+    with pytest.raises(KVMPilotError):
+        _unanswering(cls, monkeypatch).get_info()
+
+
 def test_amt_hid_accepts_cli_signatures():
     """A driver advertising HID must accept the richer CLI/MCP call signatures
     (``type_text(text, slow=)``, ``mouse_click(button, double=)``,

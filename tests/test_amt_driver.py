@@ -749,16 +749,20 @@ def test_read_timeout_becomes_timeout_error(amt_emu):
         drv.is_powered_on()
 
 
-def test_connection_refused_becomes_connection_error():
+def _dark_driver() -> AmtDriver:
+    """An AmtDriver aimed at a port nothing listens on: the ME is not there."""
     import socket
 
     s = socket.socket()
     s.bind(("127.0.0.1", 0))
     port = s.getsockname()[1]
-    s.close()  # nothing listens here now
-    drv = AmtDriver("127.0.0.1", "admin", "secret", port=port, timeout=1.0, confirm=lambda *_: True)
+    s.close()
+    return AmtDriver("127.0.0.1", "admin", "secret", port=port, timeout=1.0, confirm=lambda *_: True)
+
+
+def test_connection_refused_becomes_connection_error():
     with pytest.raises(ConnectionError):
-        drv.is_powered_on()
+        _dark_driver().is_powered_on()
 
 
 def test_non_xml_body_becomes_protocol_error(amt_emu):
@@ -862,6 +866,77 @@ def test_amt_health_tolerates_total_failure(amt_emu):
     assert h["kvm_5900"] is None
     assert h["control_mode"] is None          # IPS_HostBasedSetupService unreadable
     assert h["kvm_consent_required"] is None  # neither KVM settings nor OptIn readable
+
+
+# -- a dark or refusing management plane is not "reachable" (#293) --------
+
+
+def test_get_info_raises_when_the_me_does_not_answer():
+    """Best-effort is per FIELD. An ME that never answers is not "every field
+    unknown": returning that let the healthcheck call a dark host reachable."""
+    with pytest.raises(ConnectionError):
+        _dark_driver().get_info()
+
+
+def test_get_info_raises_when_the_me_refuses_the_credentials(amt_emu):
+    amt_emu.state.require_auth = True
+    amt_emu.state.reject_auth = True
+    with pytest.raises(AuthError):
+        make(amt_emu).get_info()
+
+
+def test_healthcheck_on_a_dark_me_claims_nothing_it_did_not_read():
+    from kvm_pilot.health import Severity, run_healthcheck
+
+    res = {r.id: r for r in run_healthcheck(_dark_driver()).results}
+    assert res["api-reachable"].severity is Severity.CRITICAL
+    assert "connection to 127.0.0.1" in res["api-reachable"].detail  # the device's own error
+    assert res["amt-provisioning"].severity is not Severity.OK
+    assert res["amt-redirection"].severity is not Severity.OK
+
+
+def test_amt_health_stops_asking_once_the_plane_is_dark():
+    """One plane failure answers every remaining read: a dark ME costs one
+    timeout, not one per field (the b11 MCP calls each took > 120 s)."""
+    drv = _dark_driver()
+    calls: list[tuple] = []
+
+    def dead(*args, **kwargs):
+        calls.append(args)
+        raise ConnectionError("AMT WS-Man connection to 127.0.0.1 failed: [Errno 64] Host is down")
+
+    drv._wsman.get = dead
+    drv._wsman.enumerate = dead
+    h = drv.amt_health()
+    assert len(calls) == 1
+    assert "Host is down" in h["plane_error"]
+    assert h["provisioning_state"] is None and h["control_mode"] is None
+
+
+def test_access_paths_on_a_dark_me_has_no_live_out_of_band_path():
+    from kvm_pilot.health import access_paths
+
+    result = access_paths(_dark_driver())
+    by_path = {p["path"]: p for p in result["paths"]}
+    assert by_path["amt-wsman"]["live"] is False
+    assert by_path["oob-power"]["configured"] is True  # the driver can do it...
+    assert by_path["oob-power"]["live"] is False       # ...but nothing answers right now
+    assert result["summary"]["out_of_band_live"] is False
+    assert result["summary"]["out_of_band"] == "down"  # get the plane back, not "add a path"
+
+
+def test_a_wedged_me_is_not_reachable_either(amt_emu):
+    """The #217 wedge answers every read with not-ready: the plane is unusable, so
+    it must not pass api-reachable or count as live out-of-band power."""
+    from kvm_pilot.health import Severity, access_paths, run_healthcheck
+
+    _wedge(amt_emu)
+    with pytest.raises(WsmanError):
+        make(amt_emu).get_info()
+    res = {r.id: r for r in run_healthcheck(make(amt_emu)).results}
+    assert res["api-reachable"].severity is Severity.CRITICAL
+    assert res["amt-redirection"].severity is Severity.CRITICAL  # the G3 wording survives
+    assert access_paths(make(amt_emu))["summary"]["out_of_band"] == "down"
 
 
 def test_amt_health_reports_valid_rfb_password(amt_emu):
@@ -1901,6 +1976,45 @@ def test_redirection_check_warns_when_both_transports_are_off(amt_emu):
     res = check_amt_redirection(d)
     assert res is not None and res.severity is Severity.WARNING
     assert "16994" in res.detail and "5900" in res.detail
+
+
+@pytest.mark.parametrize("posture", [
+    {"sol_listener": True, "kvm_5900": None, "kvm_sap_enabled": None},  # no KVM route read
+    {"sol_listener": None, "kvm_5900": True},                           # SOL never read
+    {"sol_listener": None, "kvm_5900": None, "kvm_sap_enabled": None},  # nothing read
+])
+def test_unread_listeners_are_never_reported_on(amt_emu, posture):
+    """OK must rest on listeners we READ as on. Each of these used to say
+    "SOL and KVM redirection listeners are on" (#293)."""
+    from kvm_pilot.health import Severity, check_amt_redirection
+
+    d = make(amt_emu)
+    d.amt_health = lambda: posture
+    res = check_amt_redirection(d)
+    assert res is not None and res.severity is Severity.WARNING
+    assert "could not" in res.detail.lower()
+
+
+def test_unreadable_provisioning_state_is_not_a_pass(amt_emu):
+    from kvm_pilot.health import Severity, check_amt_provisioning
+
+    d = make(amt_emu)
+    d.amt_health = lambda: {"provisioning_state": None, "control_mode": None}
+    res = check_amt_provisioning(d)
+    assert res is not None and res.severity is Severity.WARNING
+    assert "could not" in res.detail.lower()
+
+
+def test_amt_checks_quote_the_plane_error_rather_than_guess(amt_emu):
+    from kvm_pilot.health import Severity, check_amt_provisioning, check_amt_redirection
+
+    err = "AMT WS-Man connection to 10.0.1.203 failed: [Errno 64] Host is down"
+    d = make(amt_emu)
+    d.amt_health = lambda: {"plane_error": err, "provisioning_state": None, "sol_listener": None}
+    for check in (check_amt_provisioning, check_amt_redirection):
+        res = check(d)
+        assert res is not None and res.severity is Severity.WARNING
+        assert "Host is down" in res.detail
 
 
 def test_a_broken_probe_never_replaces_the_real_error(amt_emu):

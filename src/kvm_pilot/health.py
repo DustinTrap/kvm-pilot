@@ -528,12 +528,19 @@ def access_paths(driver: Any) -> dict:
     })
 
     rec = check_recovery_path(driver)
-    oob_live = rec is not None and rec.severity is Severity.OK
+    oob_capable = rec is not None and rec.severity is Severity.OK
+    # recovery-path is structural (can this driver reset the host?). Out-of-band
+    # power is issued THROUGH the management plane (BMC, ME, kvmd ATX), so it is
+    # only live while that plane answers — "out-of-band power: YES" next to a
+    # DOWN primary API was #293.
+    oob_live = oob_capable and rest_live is not False
+    detail = rec.detail if rec is not None else "unknown"
+    if oob_capable and rest_live is False:
+        detail += " But the management plane it rides did not answer, so it is not usable now."
     paths.append({
         "path": "oob-power", "domain": "out-of-band", "kind": "out-of-band",
-        "configured": oob_live, "live": oob_live if rec is not None else None,
-        "detail": (rec.detail if rec is not None else "unknown")
-        + " The ONLY path that survives a fully hung appliance/target.",
+        "configured": oob_capable, "live": oob_live if rec is not None else None,
+        "detail": detail + " The ONLY path that survives a fully hung appliance/target.",
     })
 
     hid_fn = getattr(driver, "get_hid_state", None)
@@ -550,12 +557,16 @@ def access_paths(driver: Any) -> dict:
     })
 
     live = [p for p in paths if p["live"]]
+    oob = next(p for p in paths if p["path"] == "oob-power")
     return {
         "paths": paths,
         "summary": {
             "live_count": len(live),
             "independent_domains": len({p["domain"] for p in live}),
-            "out_of_band_live": any(p["path"] == "oob-power" and p["live"] for p in paths),
+            "out_of_band_live": bool(oob["live"]),
+            # "down" = the path exists but the plane it rides is not answering:
+            # get the plane back, rather than add a path ("none") (#293).
+            "out_of_band": "live" if oob["live"] else ("down" if oob["configured"] else "none"),
         },
     }
 
@@ -965,13 +976,31 @@ def check_amt_transport_security(driver: Any) -> CheckResult | None:
                     "on an isolated management VLAN.")
 
 
+def _amt_unread_reason(h: dict) -> str:
+    """Why an AMT posture field is missing: the ME's own error when the plane did
+    not answer or refused us (quoted, not paraphrased — a refusal is not silence),
+    else the field was simply absent from an answer."""
+    if h.get("plane_error"):
+        return f"the read failed: {h['plane_error'].rstrip('.')}"
+    return "the ME's answer did not include it"
+
+
 def check_amt_provisioning(driver: Any) -> CheckResult | None:
     health = getattr(driver, "amt_health", None)
     if health is None:
         return None
     h = health()
     state, mode = h.get("provisioning_state"), h.get("control_mode")
-    if state is not None and state != "post":
+    if state is None:
+        # Unread is not "provisioned" (#293).
+        return CheckResult(
+            id="amt-provisioning", pillar=Pillar.READINESS, severity=Severity.WARNING,
+            title="AMT provisioning",
+            detail=f"Could not read the AMT provisioning state — {_amt_unread_reason(h)}.",
+            remediation="Re-run once the ME answers; `kvm-pilot paths` shows which recovery "
+                        "paths are live meanwhile.",
+            cacheable=False)
+    if state != "post":
         return CheckResult(
             id="amt-provisioning", pillar=Pillar.READINESS, severity=Severity.CRITICAL,
             title="AMT provisioning",
@@ -1024,22 +1053,32 @@ def check_amt_redirection(driver: Any) -> CheckResult | None:
     kvm_via_redirection = sol_on is True and sap_on is True
     if kvm_5900 is False and not kvm_via_redirection:
         off.append("KVM (5900)" if sap_on is not False else "KVM (service disabled)")
-    if not off:
-        detail = ("SOL and KVM redirection listeners are on." if kvm_5900 is not False else
-                  "Redirection listener (16994) is on and the KVM service is enabled — SOL, "
-                  "IDE-R and KVM all ride that port. The legacy KVM port 5900 is off, which "
-                  "newer ME builds enforce and which costs nothing: KVM is served over the "
-                  "redirection session instead.")
+    if off:
         return CheckResult(
-            id="amt-redirection", pillar=Pillar.READINESS, severity=Severity.OK,
-            title="AMT redirection listeners", detail=detail, cacheable=False)
+            id="amt-redirection", pillar=Pillar.READINESS, severity=Severity.WARNING,
+            title="AMT redirection listeners",
+            detail=f"Listener off: {', '.join(off)} — console/snapshot won't work until enabled.",
+            remediation="Run `kvm-pilot amt enable-sol` and/or `enable-kvm` (opens the listeners "
+                        "over WS-Man; no MEBx trip).",
+            cacheable=False)
+    if not (sol_on is True and (kvm_5900 is True or sap_on is True)):
+        # Nothing read as off, but not enough read as ON either: OK must rest on
+        # listeners we actually saw enabled, never on fields we could not read (#293).
+        return CheckResult(
+            id="amt-redirection", pillar=Pillar.READINESS, severity=Severity.WARNING,
+            title="AMT redirection listeners",
+            detail=f"Could not verify the SOL/KVM redirection listeners — {_amt_unread_reason(h)}.",
+            remediation="Re-run once the ME answers; if it answers and this persists, "
+                        "`kvm-pilot amt enable-sol` / `enable-kvm` re-open the listeners.",
+            cacheable=False)
+    detail = ("SOL and KVM redirection listeners are on." if kvm_5900 is not False else
+              "Redirection listener (16994) is on and the KVM service is enabled — SOL, "
+              "IDE-R and KVM all ride that port. The legacy KVM port 5900 is off, which "
+              "newer ME builds enforce and which costs nothing: KVM is served over the "
+              "redirection session instead.")
     return CheckResult(
-        id="amt-redirection", pillar=Pillar.READINESS, severity=Severity.WARNING,
-        title="AMT redirection listeners",
-        detail=f"Listener off: {', '.join(off)} — console/snapshot won't work until enabled.",
-        remediation="Run `kvm-pilot amt enable-sol` and/or `enable-kvm` (opens the listeners "
-                    "over WS-Man; no MEBx trip).",
-        cacheable=False)
+        id="amt-redirection", pillar=Pillar.READINESS, severity=Severity.OK,
+        title="AMT redirection listeners", detail=detail, cacheable=False)
 
 
 def check_amt_kvm_consent(driver: Any) -> CheckResult | None:

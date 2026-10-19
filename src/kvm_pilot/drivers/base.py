@@ -79,7 +79,13 @@ class VideoScope(StrEnum):
 
 @runtime_checkable
 class SystemInfo(Protocol):
-    """Read device / host information."""
+    """Read device / host information.
+
+    ``get_info`` may be best-effort per FIELD, but must raise when the device's
+    management plane does not answer (or refuses the credentials): the
+    healthcheck's api-reachable check and ``access_paths`` read a normal return
+    as "reachable" (#293; enforced for OOB drivers in test_driver_contract.py).
+    """
 
     def get_info(self, fields: list | None = None) -> dict: ...
 

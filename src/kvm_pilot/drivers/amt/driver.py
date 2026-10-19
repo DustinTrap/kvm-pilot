@@ -60,6 +60,17 @@ _CHURN_WINDOW_S = 600.0
 # wedged the management plane and "requested" would be a false all-clear.
 _ME_LIVENESS_S = 15.0
 
+
+def _is_plane_failure(exc: KVMPilotError) -> bool:
+    """A failure of the whole management plane, not of one field: the ME did not
+    answer, refused our credentials, or is wedged not-ready (#217). Best-effort
+    readers swallow per-field faults (a firmware that omits a class) but must not
+    swallow these — doing so made a dark or refusing ME read as "reachable" and
+    "provisioned" (#293)."""
+    return isinstance(exc, (ConnectionError, TimeoutError, AuthError)) or bool(
+        getattr(exc, "me_not_ready", False))
+
+
 if TYPE_CHECKING:
     from ...config import HostConfig
     from .rfb import Rfb
@@ -209,8 +220,15 @@ class AmtDriver(PowerMixin, CapabilityMixin):
     def get_info(self, fields: list | None = None) -> dict:
         """Best-effort AMT identity: chassis make/model/serial, firmware version,
         provisioning state, power, and platform UUID. Each lookup is independent
-        so a firmware that omits one field never blanks the rest."""
-        chassis = self._safe(self._chassis) or {}
+        so a firmware that omits one field never blanks the rest — but the first
+        read doubles as the reachability probe: an ME that does not answer it
+        (or refuses the credentials) raises instead of returning all-None (#293)."""
+        try:
+            chassis = self._chassis()
+        except KVMPilotError as exc:
+            if _is_plane_failure(exc):
+                raise
+            chassis = {}
         powered = self._safe(self.is_powered_on)
         info: dict[str, Any] = {
             "manufacturer": chassis.get("manufacturer"),
@@ -906,16 +924,23 @@ class AmtDriver(PowerMixin, CapabilityMixin):
         checks share ONE set of WS-Man reads — AMT flood-protects rapid bursts."""
         if getattr(self, "_amt_health_cache", None) is None:
             wedged = False
+            plane_error: str | None = None
 
             def _read(fn: Any) -> Any:
-                """Like _safe, but remembers a wedged-ME failure (#217)."""
-                nonlocal wedged
+                """Like _safe, but remembers a wedged-ME failure (#217) and a dark or
+                refusing plane (#293) — after which it stops asking, so a dark ME
+                costs one timeout instead of one per field. (The provisioning and
+                control-mode helpers swallow their own errors, so wrapping them
+                here only adds the skip, never a new plane_error.)"""
+                nonlocal wedged, plane_error
+                if plane_error is not None:
+                    return None
                 try:
                     return fn()
-                except WsmanError as exc:
-                    wedged = wedged or exc.me_not_ready
-                    return None
-                except KVMPilotError:
+                except KVMPilotError as exc:
+                    if _is_plane_failure(exc):
+                        wedged = wedged or bool(getattr(exc, "me_not_ready", False))
+                        plane_error = str(exc)
                     return None
 
             redir = _read(lambda: self._wsman.get(amt("AMT_RedirectionService"), self._REDIR_SVC_SEL))
@@ -940,10 +965,13 @@ class AmtDriver(PowerMixin, CapabilityMixin):
                 consent = bool(policy) or (required is not None and required.strip() != "0")
             self._amt_health_cache = {
                 "me_not_ready": wedged,
+                # The ME's own words when the plane did not answer or refused us —
+                # the checks quote it rather than guess at a cause.
+                "plane_error": plane_error,
                 "tls": self._tls,
                 "redirection_port": self._redirection_port(),
-                "provisioning_state": self._provisioning_state(),
-                "control_mode": self._control_mode(),
+                "provisioning_state": _read(self._provisioning_state),
+                "control_mode": _read(self._control_mode),
                 "sol_listener": _b(redir, "ListenerEnabled"),
                 "kvm_5900": _b(kvm, "Is5900PortEnabled"),
                 # CIM EnabledState: 2 = Enabled, 6 = "Enabled but Offline" (enabled,

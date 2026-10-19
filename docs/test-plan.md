@@ -161,8 +161,9 @@ kvm-pilot paths --profile <name>          # which independent recovery domains a
 `access_paths` labels each path by failure **domain** (`kvmd-rest`,
 `appliance-ssh`, `target-ssh`, `oob-power`, `console-hid`). The only truly
 hardware-independent domain is **out-of-band power** — every in-band path dies
-with the appliance. If `out_of_band_live` is `NONE`, the whole sweep — especially
-firmware — is running without a net; note it loudly.
+with the appliance. If out-of-band power reads `NONE` (no such path) or `DOWN`
+(the path exists but the management plane it rides is not answering, #293), the
+whole sweep — especially firmware — is running without a net; note it loudly.
 
 > ⚠️ The MCP server does **not** auto-run `healthcheck` on connect, and only the
 > destructive CLI subcommands auto-gate on it (`cli.py` `_preflight_gate`). So
@@ -271,7 +272,7 @@ anything, and confirm recovery paths before the destructive phase.
 
 ### Phase A — Intake
 1. `healthcheck` (`--json`) → record pillars, worst severity, any CRITICAL.
-2. `paths` → record live recovery domains; flag `out_of_band_live == NONE`.
+2. `paths` → record live recovery domains; flag out-of-band power `NONE` or `DOWN`.
 3. `capabilities` (offline) → the row list you will and won't test on this driver.
 4. `firmware-check` → current vs. registry.
 

@@ -762,9 +762,13 @@ def cmd_paths(args) -> int:
         status = "live" if p["live"] else ("DOWN" if p["configured"] else "not configured")
         print(f"  [{status:15}] {p['path']:15} ({p['kind']})")
     s = result["summary"]
+    oob = {"live": "YES", "down": "DOWN", "none": "NONE"}[s["out_of_band"]]
     print(f"\n{s['live_count']} path(s) live across {s['independent_domains']} independent "
-          f"failure domain(s); out-of-band power: {'YES' if s['out_of_band_live'] else 'NONE'}")
-    if not s["out_of_band_live"]:
+          f"failure domain(s); out-of-band power: {oob}")
+    if oob == "DOWN":
+        print("  WARNING: out-of-band power is configured but DOWN — the management plane it "
+              "rides is not answering, so nothing can recover this host remotely right now.")
+    elif oob == "NONE":
         print("  WARNING: no out-of-band power — a fully hung appliance/target cannot be "
               "recovered remotely; every live path shares the appliance's fate.")
     return 0
