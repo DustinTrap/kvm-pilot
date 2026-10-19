@@ -1460,6 +1460,24 @@ def test_paths_warns_when_no_out_of_band_power_exists(capsys):
     assert "out-of-band power" in out
 
 
+def test_paths_says_down_not_none_when_the_oob_plane_is_dark(capsys, monkeypatch):
+    """An AMT box CAN power-cycle; when its ME does not answer, out-of-band power
+    is DOWN (get the plane back), not NONE (add a path), and never YES (#293)."""
+    import socket
+
+    s = socket.socket()
+    s.bind(("127.0.0.1", 0))
+    port = s.getsockname()[1]
+    s.close()  # nothing listens here now: a dark ME
+    monkeypatch.setenv("KVM_PILOT_PASSWD", "x")
+    rc = main(["--timeout", "1", "paths", "--driver", "amt", "--host", "127.0.0.1",
+               "--port", str(port), "--user", "admin"])
+    assert rc == 0
+    out = capsys.readouterr().out
+    assert "out-of-band power: DOWN" in out
+    assert "configured but DOWN" in out
+
+
 def test_paths_json_is_machine_readable(capsys):
     rc = main(["paths", "--driver", "fake", "--host", "h", "--json"])
     assert rc == 0

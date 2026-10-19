@@ -6,6 +6,28 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **`healthcheck` and `paths` no longer report an unreachable AMT host as
+  healthy** (#293). Against an ME that did not answer — or refused the
+  credentials — every readiness check passed ("Device API reachable —
+  Authenticated and responding", "Provisioned", "listeners are on") and
+  `paths` said "out-of-band power: YES". Now:
+  - AMT `get_info()` stays best-effort per field, but its first read is the
+    reachability probe: a dark plane, a refused login or the #217 not-ready
+    wedge raises (so `api-reachable` is CRITICAL with the ME's own error, and
+    `info` fails instead of printing all-`null`). The contract that every
+    out-of-band driver's `get_info()` raises on a dead plane is now a
+    cross-driver test.
+  - `amt_health()` records the plane error and stops its own reads after it,
+    and the provisioning and redirection checks report **could not verify**
+    (quoting that error; CRITICAL when the plane failed, WARNING when a field
+    was merely absent) instead of passing on fields they never read.
+  - `paths`: out-of-band power is only *live* while the management plane it
+    rides answers, for every BMC-style driver (AMT, Redfish, IPMI). The summary
+    gains `out_of_band`: `live`, `down` (the path exists but management access
+    to its plane failed) or `none`; the CLI prints `out-of-band power: DOWN` with its own
+    warning, distinct from `NONE`.
+
 ### Added
 - **Vision-dataset augmentation tooling** (#291, refs #15):
   `tools/dataset/augment.py` turns a clean, labeled screenshot into

@@ -980,6 +980,39 @@ def test_access_paths_marks_rest_down_when_the_probe_raises():
     assert result["summary"]["live_count"] == 0
 
 
+def test_oob_power_is_not_live_while_the_management_plane_is_down():
+    """Out-of-band power is issued THROUGH the device's management plane (BMC,
+    ME, kvmd ATX). A driver that can do it is not a live path while that plane
+    does not answer: "out-of-band power: YES" beside a DOWN API was #293."""
+    from kvm_pilot.drivers.base import Capability
+    from kvm_pilot.errors import ConnectionError
+    from kvm_pilot.health import access_paths
+
+    class DarkBmc:  # POWER-capable with no ATX surface: the redfish/ipmi/amt shape
+        host = "h"
+
+        def supports(self, cap):
+            return cap is Capability.POWER
+
+        def get_info(self):
+            raise ConnectionError("Connection error: [Errno 61] Connection refused")
+
+    result = access_paths(DarkBmc())
+    oob = next(p for p in result["paths"] if p["path"] == "oob-power")
+    assert oob["configured"] is True
+    assert oob["live"] is False
+    assert result["summary"]["out_of_band_live"] is False
+    assert result["summary"]["out_of_band"] == "down"
+
+
+def test_out_of_band_summary_distinguishes_live_and_none():
+    from kvm_pilot.health import access_paths
+
+    assert access_paths(FakeDriver())["summary"]["out_of_band"] == "live"
+    no_power = stub(get_info=lambda: {}, supports=lambda cap: False)  # e.g. the SSH-only plane
+    assert access_paths(no_power)["summary"]["out_of_band"] == "none"
+
+
 def test_video_signal_check_treats_a_raising_probe_as_no_signal():
     """A probe that throws must not read as 'signal present' — the whole
     false-report doctrine is that an unanswerable question is not a yes."""
