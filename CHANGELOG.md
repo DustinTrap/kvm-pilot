@@ -6,6 +6,20 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+- **Vision-dataset augmentation tooling** (#291, refs #15):
+  `tools/dataset/augment.py` turns a clean, labeled screenshot into
+  deterministic KVM/MJPEG-style variants (resize softness, JPEG loss,
+  gamma/brightness shifts, letterboxing, scanlines, partial-frame tearing) and
+  writes a JSONL manifest — phase label, source, license, SHA-256 digests and
+  every sampled parameter — described by
+  `tools/dataset/vision-dataset.schema.json`. Repo-only tooling: it is not in
+  the wheel and changes no runtime behaviour.
+
+### Credits
+Thanks to @TomatoYoung for the dataset augmentation tooling (#291) — a first
+building block for the boot-phase vision dataset (#15).
+
 ## [1.0.0] — 2026-10-15
 
 **General availability.** The release-candidate line (`0.1.0rc1`–`rc4`)
