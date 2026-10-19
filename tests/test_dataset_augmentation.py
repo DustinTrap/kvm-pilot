@@ -3,21 +3,32 @@
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import io
 import json
+import sys
 from pathlib import Path
 
 import pytest
 from PIL import Image
-from tools.dataset.augment import (
-    AUGMENTATION_VERSION,
-    augment_image,
-    build_variants,
-    main,
-    sample_params,
-)
 
 from kvm_pilot.vision.base import ALL_PHASES
+
+# tools/ is repo-only tooling (not in the wheel), and plain `pytest` does not put
+# the repo root on sys.path -- load the script by path, as test_build_wiki_hcl does.
+_SPEC = importlib.util.spec_from_file_location(
+    "augment", Path(__file__).parents[1] / "tools" / "dataset" / "augment.py"
+)
+assert _SPEC and _SPEC.loader
+_augment = importlib.util.module_from_spec(_SPEC)
+sys.modules["augment"] = _augment  # dataclasses resolve their module via sys.modules
+_SPEC.loader.exec_module(_augment)
+
+AUGMENTATION_VERSION = _augment.AUGMENTATION_VERSION
+augment_image = _augment.augment_image
+build_variants = _augment.build_variants
+main = _augment.main
+sample_params = _augment.sample_params
 
 
 def _source(path: Path, size: tuple[int, int] = (96, 54)) -> Path:
