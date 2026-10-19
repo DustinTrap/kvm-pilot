@@ -2013,7 +2013,9 @@ def test_amt_checks_quote_the_plane_error_rather_than_guess(amt_emu):
     d.amt_health = lambda: {"plane_error": err, "provisioning_state": None, "sol_listener": None}
     for check in (check_amt_provisioning, check_amt_redirection):
         res = check(d)
-        assert res is not None and res.severity is Severity.WARNING
+        # A failed plane is CRITICAL, like an unprovisioned or wedged ME; a field
+        # merely absent from an answer stays a WARNING (the tests above).
+        assert res is not None and res.severity is Severity.CRITICAL
         assert "Host is down" in res.detail
 
 

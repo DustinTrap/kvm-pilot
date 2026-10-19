@@ -20,11 +20,12 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
     cross-driver test.
   - `amt_health()` records the plane error and stops its own reads after it,
     and the provisioning and redirection checks report **could not verify**
-    (quoting that error) instead of passing on fields they never read.
+    (quoting that error; CRITICAL when the plane failed, WARNING when a field
+    was merely absent) instead of passing on fields they never read.
   - `paths`: out-of-band power is only *live* while the management plane it
     rides answers, for every BMC-style driver (AMT, Redfish, IPMI). The summary
-    gains `out_of_band`: `live`, `down` (the path exists but its plane is not
-    answering) or `none`; the CLI prints `out-of-band power: DOWN` with its own
+    gains `out_of_band`: `live`, `down` (the path exists but management access
+    to its plane failed) or `none`; the CLI prints `out-of-band power: DOWN` with its own
     warning, distinct from `NONE`.
 
 ### Added

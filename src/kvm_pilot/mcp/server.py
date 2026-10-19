@@ -1993,8 +1993,8 @@ def access_paths(profile: Profile = None) -> dict:
     oversold: several live paths that all ride the same appliance are ONE
     independent domain. `summary.out_of_band_live=false` means every path shares
     the appliance's fate — a fully hung box can't be recovered remotely.
-    `summary.out_of_band` is `live`, `down` (the path exists but its management
-    plane is not answering — get it back) or `none` (no such path).
+    `summary.out_of_band` is `live`, `down` (the path exists but management
+    access to its plane failed — restore it) or `none` (no such path).
     """
     with _driver(profile, confirm=deny_all, capability=Capability.SYSTEM_INFO) as (cfg, kvm):
         from kvm_pilot.health import access_paths as _access_paths

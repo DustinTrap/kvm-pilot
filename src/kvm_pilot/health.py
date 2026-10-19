@@ -536,7 +536,7 @@ def access_paths(driver: Any) -> dict:
     oob_live = oob_capable and rest_live is not False
     detail = rec.detail if rec is not None else "unknown"
     if oob_capable and rest_live is False:
-        detail += " But the management plane it rides did not answer, so it is not usable now."
+        detail += " But management access to the plane it rides failed, so it is not usable now."
     paths.append({
         "path": "oob-power", "domain": "out-of-band", "kind": "out-of-band",
         "configured": oob_capable, "live": oob_live if rec is not None else None,
@@ -564,8 +564,8 @@ def access_paths(driver: Any) -> dict:
             "live_count": len(live),
             "independent_domains": len({p["domain"] for p in live}),
             "out_of_band_live": bool(oob["live"]),
-            # "down" = the path exists but the plane it rides is not answering:
-            # get the plane back, rather than add a path ("none") (#293).
+            # "down" = the path exists but management access to the plane it rides
+            # failed: restore access, rather than add a path ("none") (#293).
             "out_of_band": "live" if oob["live"] else ("down" if oob["configured"] else "none"),
         },
     }
@@ -992,9 +992,12 @@ def check_amt_provisioning(driver: Any) -> CheckResult | None:
     h = health()
     state, mode = h.get("provisioning_state"), h.get("control_mode")
     if state is None:
-        # Unread is not "provisioned" (#293).
+        # Unread is not "provisioned" (#293). A failed plane is the unprovisioned
+        # condition below (no management answers): CRITICAL. A field merely absent
+        # from an answer: WARNING.
         return CheckResult(
-            id="amt-provisioning", pillar=Pillar.READINESS, severity=Severity.WARNING,
+            id="amt-provisioning", pillar=Pillar.READINESS,
+            severity=Severity.CRITICAL if h.get("plane_error") else Severity.WARNING,
             title="AMT provisioning",
             detail=f"Could not read the AMT provisioning state — {_amt_unread_reason(h)}.",
             remediation="Re-run once the ME answers; `kvm-pilot paths` shows which recovery "
@@ -1064,8 +1067,10 @@ def check_amt_redirection(driver: Any) -> CheckResult | None:
     if not (sol_on is True and (kvm_5900 is True or sap_on is True)):
         # Nothing read as off, but not enough read as ON either: OK must rest on
         # listeners we actually saw enabled, never on fields we could not read (#293).
+        # CRITICAL when the plane itself failed, as for the wedge above.
         return CheckResult(
-            id="amt-redirection", pillar=Pillar.READINESS, severity=Severity.WARNING,
+            id="amt-redirection", pillar=Pillar.READINESS,
+            severity=Severity.CRITICAL if h.get("plane_error") else Severity.WARNING,
             title="AMT redirection listeners",
             detail=f"Could not verify the SOL/KVM redirection listeners — {_amt_unread_reason(h)}.",
             remediation="Re-run once the ME answers; if it answers and this persists, "

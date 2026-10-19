@@ -162,7 +162,7 @@ kvm-pilot paths --profile <name>          # which independent recovery domains a
 `appliance-ssh`, `target-ssh`, `oob-power`, `console-hid`). The only truly
 hardware-independent domain is **out-of-band power** — every in-band path dies
 with the appliance. If out-of-band power reads `NONE` (no such path) or `DOWN`
-(the path exists but the management plane it rides is not answering, #293), the
+(the path exists but management access to the plane it rides failed, #293), the
 whole sweep — especially firmware — is running without a net; note it loudly.
 
 > ⚠️ The MCP server does **not** auto-run `healthcheck` on connect, and only the
