@@ -12,6 +12,7 @@ import math
 import sys
 from pathlib import Path
 
+from kvm_pilot.errors import VisionError
 from kvm_pilot.vision import ALL_PHASES, VisionBackend, make_backend
 
 
@@ -161,6 +162,12 @@ def evaluate_entries(
         state = backend.classify(image_b64)
         quality = entry.get("capture_params")
         quality = quality.get("jpeg_quality") if isinstance(quality, dict) else None
+        if (
+            isinstance(quality, bool)
+            or not isinstance(quality, (int, float))
+            or not math.isfinite(quality)
+        ):
+            quality = None
         expected = str(entry["phase"])
         results.append(
             {
@@ -213,7 +220,7 @@ def main(argv: list[str] | None = None) -> int:
             _write_results(results, args.results)
         print(json.dumps(summary, indent=2, sort_keys=True))
         return 0
-    except (OSError, ValueError, RuntimeError) as exc:
+    except (OSError, ValueError, RuntimeError, VisionError) as exc:
         print(f"evaluation failed: {exc}", file=sys.stderr)
         return 1
 

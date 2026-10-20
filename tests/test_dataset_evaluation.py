@@ -106,3 +106,35 @@ def test_evaluate_passes_base64_image_and_keeps_confidence(tmp_path):
     assert results[0]["degradation"] == "low"
     backend.classify.assert_called_once()
     assert backend.classify.call_args.args[0]
+
+
+
+def test_evaluate_normalizes_non_finite_quality_for_jsonl(tmp_path):
+    manifest = _manifest(
+        tmp_path,
+        [{"image": "frames/one.jpg", "phase": "booting", "capture_params": {"jpeg_quality": float("nan")}}],
+    )
+    entries = _evaluate.load_manifest(manifest)
+    backend = Mock()
+    backend.classify.return_value = SimpleNamespace(phase="booting", confidence=0.9)
+
+    _, results = _evaluate.evaluate_entries(entries, backend)
+
+    assert results[0]["jpeg_quality"] is None
+    output = tmp_path / "results.jsonl"
+    _evaluate._write_results(results, output)
+    json.loads(output.read_text(encoding="utf-8"), parse_constant=lambda value: pytest.fail(value))
+
+
+def test_main_reports_vision_error_without_traceback(tmp_path, monkeypatch, capsys):
+    manifest = _manifest(tmp_path, [{"image": "frames/one.jpg", "phase": "booting"}])
+    monkeypatch.setattr(
+        _evaluate,
+        "make_backend",
+        Mock(side_effect=_evaluate.VisionError("backend failed")),
+    )
+
+    assert _evaluate.main([str(manifest)]) == 1
+    captured = capsys.readouterr()
+    assert captured.out == ""
+    assert captured.err == "evaluation failed: backend failed\n"
