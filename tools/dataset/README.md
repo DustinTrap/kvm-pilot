@@ -40,3 +40,38 @@ Pillow version produces byte-identical JPEGs and manifest entries.
 
 `--redistributable` is deliberately opt-in. Leaving it off records `false`; it
 does not prevent private evaluation but makes the licensing status explicit.
+
+## Evaluate a labeled manifest
+
+Compare the configured vision backend with the expected `phase` labels in a
+`manifest.jsonl`. Image paths are resolved relative to the manifest file.
+
+For an OpenAI-compatible local backend (LM Studio, Ollama, or vLLM), run from
+the repository root:
+
+```bash
+python tools/dataset/evaluate.py /tmp/kvm-variants/manifest.jsonl \
+  --backend local \
+  --base-url http://127.0.0.1:1234/v1 \
+  --model your-vision-model \
+  --limit 20 \
+  --results /tmp/kvm-evaluation.jsonl
+```
+
+For Anthropic, set `ANTHROPIC_API_KEY` in the environment and use
+`--backend anthropic` (optionally with `--model`). `--dry-run` validates the
+selected manifest rows and reports how many would be evaluated without
+constructing a backend or making any model calls. `--limit N` caps the number
+of classifications, which helps control hosted API cost.
+
+The summary reports overall and per-phase accuracy, an expected-by-predicted
+confusion matrix, and accuracy by recorded JPEG-quality band (low: 40 or less,
+medium: 41–70, high: above 70). Rows without a recorded JPEG quality are grouped
+as `unknown`. The optional results JSONL stores relative image paths, labels,
+confidence, and quality metadata; it does not include image bytes or model
+descriptions.
+
+Classification sends each selected image to the chosen backend. Only use
+screenshots you are allowed to send to that service. Keep real-KVM frames
+private; they can contain hostnames, IP addresses, usernames, and other
+sensitive data.

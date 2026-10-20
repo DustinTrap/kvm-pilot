@@ -37,10 +37,21 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   every sampled parameter — described by
   `tools/dataset/vision-dataset.schema.json`. Repo-only tooling: it is not in
   the wheel and changes no runtime behaviour.
+- **Vision-dataset evaluator** (#292, refs #15, #291):
+  `tools/dataset/evaluate.py` runs a labeled `manifest.jsonl` (the output of
+  `augment.py`) through the configured vision backend and reports overall and
+  per-phase accuracy, an expected-by-predicted confusion matrix, and accuracy
+  by recorded JPEG-quality band. `--limit` and `--dry-run` cap hosted-API cost,
+  and an optional results JSONL captures per-row predictions (paths and labels,
+  no image bytes). kvm-pilot's first measured classifier accuracy. Repo-only
+  tooling: not in the wheel and changes no runtime behaviour.
 
 ### Credits
 Thanks to @TomatoYoung for the dataset augmentation tooling (#291) — a first
 building block for the boot-phase vision dataset (#15).
+
+Thanks to @Vamsi-2581 for the dataset evaluator (#292) — it closes the
+augment → evaluate loop and gives the classifier its first measured accuracy.
 
 ## [1.0.0] — 2026-10-15
 
