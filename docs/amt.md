@@ -28,9 +28,11 @@ and the `amtterm` SOL client.
 >   the Latitude 5411 with a clear error ([#215](https://github.com/DustinTrap/kvm-pilot/issues/215));
 >   pxe/cd/hdd/none work.
 > - **HID** wire format is verified against MeshCommander (standard RFB `KeyEvent`,
->   big-endian X11 keysyms) and emulator-tested, but live keystroke *effect* is
->   `unverified` — the test unit sits at a persistent Dell F1 firmware alert the
->   embedded controller services, which the emulated USB keyboard can't dismiss.
+>   big-endian X11 keysyms) and emulator-tested. On the Latitude 5411 live keystroke
+>   *effect* is `unverified` — the test unit sits at a persistent Dell F1 firmware
+>   alert the embedded controller services, which the emulated USB keyboard can't
+>   dismiss. A contributor's Dell Pro 5 Micro (CSME 21.0.6, TLS 16995) took `key`
+>   and `type` at the Windows sign-in screen and in the UEFI boot menu (#302).
 
 ## Why AMT
 
@@ -197,6 +199,17 @@ protocol (matching MeshCommander's decoder):
   are decoded; RGB565→RGB888 via a precomputed LUT; PNG out via `zlib`/`crc32`.
 - **Single session:** AMT allows one KVM session; a dropped one can wedge the
   port, so `snapshot()` cycles the SAP and retries.
+- **HID delivery (#302):** the ME attaches its keyboard and mice to the host as
+  a USB device (VID 8087, PID 002C) only while a KVM session is open. Events sent
+  before the host has enumerated it are lost, and so are events still queued in
+  the ME when the session closes. The RFB stream gives no signal for the first,
+  so the first event of a session waits `_HID_SETTLE_S` (1 s; Windows 11 needed
+  0.3-0.4 s, a Dell UEFI boot menu 0.3-0.5 s, Ubuntu 20.04 about 0.5 s). For the
+  second, every HID call ends with `Rfb.sync()`: a 1x1 FramebufferUpdateRequest
+  and its reply, which the ME sends only after it has read the events before
+  it, then 4 ms per event for the USB reports still going out to the host (one
+  per 2 ms on AMT 14). The ME also loses events when too many wait for the host
+  (AMT 14 kept 18 in order, not more), so `type_text` syncs every 4 characters.
 
 `snapshot()` returns the platform framebuffer as PNG — a genuine BIOS/POST/GRUB
 screenshot (validated live at 1920×1080); `type_text`/`press_key`/`send_shortcut`/

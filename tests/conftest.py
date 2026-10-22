@@ -130,9 +130,16 @@ def amt_emu():
 
 
 @pytest.fixture
-def amt_rfb():
-    """A running pure-stdlib fake AMT KVM-redirection (RFB/VNC) server."""
-    from amt_rfb_emulator import AmtRfbEmulator
+def amt_rfb(monkeypatch):
+    """A running pure-stdlib fake AMT KVM-redirection (RFB/VNC) server.
 
+    It delivers HID events at once, so the driver's wait for the host to
+    enumerate the ME's USB keyboard (#302) is off here; the tests for that wait
+    set both sides explicitly.
+    """
+    from amt_rfb_emulator import AmtRfbEmulator
+    from kvm_pilot.drivers.amt import driver as amt_driver
+
+    monkeypatch.setattr(amt_driver, "_HID_SETTLE_S", 0.0)
     with AmtRfbEmulator() as e:
         yield e

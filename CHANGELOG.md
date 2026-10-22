@@ -7,6 +7,20 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
+- **AMT `key` / `type` reach the host** (#302). They exited 0 while the host got
+  nothing, on both KVM transports. The ME attaches its keyboard and mice to the
+  host as a USB device only while a KVM session is open: events sent before the
+  host has enumerated it are lost, and so are events still queued when the
+  session closes, which the CLI did right after the key. Every AMT HID call now
+  ends with `Rfb.sync()` (a 1x1 update request and its reply, then 4 ms per
+  event for the USB reports still going out), `type_text` syncs every 4
+  characters because the ME loses events when too many wait, and the first event
+  of a session waits 1 s for the enumeration, which the RFB stream gives no
+  signal for. Measured: Windows 11 on a Dell Pro 5 Micro (CSME 21.0.6, TLS 16995)
+  needed 0.3-0.4 s, its UEFI boot menu 0.3-0.5 s, Ubuntu 20.04 on a Lenovo
+  M90q (AMT 14.0.33, port 5900) about 0.5 s. `type` also takes spaces now (the
+  key lookup stripped a single space to nothing), and maps newline and tab to
+  their keys.
 - **`healthcheck` and `paths` no longer report an unreachable AMT host as
   healthy** (#293). Against an ME that did not answer — or refused the
   credentials — every readiness check passed ("Device API reachable —
