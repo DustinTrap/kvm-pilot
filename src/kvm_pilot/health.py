@@ -1040,9 +1040,12 @@ def check_amt_redirection(driver: Any) -> CheckResult | None:
             cacheable=False)
     sol_on, kvm_5900 = h.get("sol_listener"), h.get("kvm_5900")
     sap_on = h.get("kvm_sap_enabled")
-    off = []
+    port = h.get("redirection_port") or 16994
+    off, lost, fixes = [], [], []
     if sol_on is False:
-        off.append(f"SOL/IDE-R ({h.get('redirection_port') or 16994})")
+        off.append(f"SOL/IDE-R ({port})")
+        lost.append("the SOL console and IDE-R virtual media")
+        fixes.append("`kvm-pilot amt enable-sol`")
     # KVM rides EITHER transport: the legacy plain-RFB listener on 5900, or a
     # KVMR session inside the redirection port. Newer ME builds harden 5900 off
     # permanently and serve KVM only over 16994 — measured on a 5411 @ 14.1.79,
@@ -1056,13 +1059,18 @@ def check_amt_redirection(driver: Any) -> CheckResult | None:
     kvm_via_redirection = sol_on is True and sap_on is True
     if kvm_5900 is False and not kvm_via_redirection:
         off.append("KVM (5900)" if sap_on is not False else "KVM (service disabled)")
+        lost.append("snapshot and keyboard/mouse")
+        fixes.append("`kvm-pilot amt enable-kvm`")
     if off:
+        # Name only what the missing listener costs: with KVM on 5900, SOL off
+        # leaves snapshot and HID working (#303).
         return CheckResult(
             id="amt-redirection", pillar=Pillar.READINESS, severity=Severity.WARNING,
             title="AMT redirection listeners",
-            detail=f"Listener off: {', '.join(off)} — console/snapshot won't work until enabled.",
-            remediation="Run `kvm-pilot amt enable-sol` and/or `enable-kvm` (opens the listeners "
-                        "over WS-Man; no MEBx trip).",
+            detail=f"Listener off: {', '.join(off)} — {' and '.join(lost)} won't work until "
+                   "enabled.",
+            remediation=f"Run {' and '.join(fixes)} (opens the listeners over WS-Man; no MEBx "
+                        "trip).",
             cacheable=False)
     if not (sol_on is True and (kvm_5900 is True or sap_on is True)):
         # Nothing read as off, but not enough read as ON either: OK must rest on
@@ -1077,7 +1085,7 @@ def check_amt_redirection(driver: Any) -> CheckResult | None:
                         "`kvm-pilot amt enable-sol` / `enable-kvm` re-open the listeners.",
             cacheable=False)
     detail = ("SOL and KVM redirection listeners are on." if kvm_5900 is not False else
-              "Redirection listener (16994) is on and the KVM service is enabled — SOL, "
+              f"Redirection listener ({port}) is on and the KVM service is enabled — SOL, "
               "IDE-R and KVM all ride that port. The legacy KVM port 5900 is off, which "
               "newer ME builds enforce and which costs nothing: KVM is served over the "
               "redirection session instead.")

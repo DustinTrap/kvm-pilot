@@ -72,6 +72,8 @@ def _is_plane_failure(exc: KVMPilotError) -> bool:
 
 
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
     from ...config import HostConfig
     from .rfb import Rfb
 
@@ -92,8 +94,10 @@ _ANON = "http://schemas.xmlsoap.org/ws/2004/08/addressing/role/anonymous"
 _POWER = {"on": 2, "off_graceful": 12, "off": 8, "reset": 10, "cycle_soft": 5}
 
 # How long a graceful (12) shutdown may take before "accepted but the host is
-# still on" is reported as what it is. Windows with LMS takes 10-60 s.
-_GRACEFUL_OFF_S = 90.0
+# still on" is reported as what it is. Windows 11 25H2 with LMS on a CSME 21 Dell
+# took 73-77 s from LMS's shutdown event to the kernel's, and about 83 s until
+# the ME reported the host off, with nobody logged in (#303).
+_GRACEFUL_OFF_S = 180.0
 _GRACEFUL_POLL_S = 3.0
 
 # The service instance is selected by its four CIM keys.
@@ -370,9 +374,11 @@ class AmtDriver(PowerMixin, CapabilityMixin):
         churn window (10 min). Feeds the ``amt-reset-churn`` healthcheck."""
         return self._prune_hard_resets(record=False)
 
-    def _request_power(self, state: int, op: str, desc: str, *, wait: bool = True) -> None:
+    def _request_power(self, state: int, op: str, desc: str, *, wait: bool = True) -> bool:
+        """Send the power-state change; True when it also waited for and saw the
+        host reach that state (only the graceful off does, below)."""
         if not self.safety.guard(op, desc):
-            return  # dry-run: gated + skipped
+            return False  # dry-run: gated + skipped
         body = (
             f'<p:RequestPowerStateChange_INPUT xmlns:p="{cim("CIM_PowerManagementService")}" '
             f'xmlns:wsa="{_WSA}" xmlns:wsman="{_WSMAN}">'
@@ -417,6 +423,8 @@ class AmtDriver(PowerMixin, CapabilityMixin):
             # OS may still refuse or hang. Reporting success here would be the
             # false-all-clear class of bug (#251/#264), so wait for the state.
             self._expect_powered_off()
+            return True
+        return False
 
     def _expect_powered_off(self) -> None:
         deadline = time.monotonic() + _GRACEFUL_OFF_S
@@ -446,8 +454,8 @@ class AmtDriver(PowerMixin, CapabilityMixin):
     def power_on(self, wait: bool = True) -> None:
         self._request_power(_POWER["on"], "amt.power_on", f"Power ON {self.host} (AMT)", wait=wait)
 
-    def power_off(self, wait: bool = True) -> None:
-        self._request_power(
+    def power_off(self, wait: bool = True) -> bool:
+        return self._request_power(
             _POWER["off_graceful"], "amt.power_off",
             f"Graceful power OFF {self.host} (AMT 12: the OS shuts down via Intel LMS)",
             wait=wait,
@@ -860,21 +868,32 @@ class AmtDriver(PowerMixin, CapabilityMixin):
             "control_mode": self._control_mode(),
         }
 
-    def _optin_invoke(self, method: str, inner: str = "", hint: str = "") -> None:
+    def _optin_invoke(self, method: str, inner: str = "",
+                      hint: str | Callable[[], str] = "") -> None:
         body = f'<p:{method}_INPUT xmlns:p="{self._OPTIN}">{inner}</p:{method}_INPUT>'
         out = self._wsman.invoke(self._OPTIN, method, body, selectors=self._optin_selectors())
         rv = findtext(out, "ReturnValue")
         if rv not in (None, "0"):
+            why = hint() if callable(hint) else hint
             raise WsmanError(
                 f"AMT IPS_OptInService.{method} on {self.host} returned {rv}"
-                + (f" ({hint})" if hint else "")
+                + (f" ({why})" if why else "")
             )
 
     def request_consent(self) -> None:
         """Ask the ME to paint the 6-digit consent code on the host's display
         (``StartOptIn``). The code is shown only there — read it off the screen
         and pass it to :meth:`send_consent_code` within its validity window."""
-        self._optin_invoke("StartOptIn", hint="is KVM enabled, and is a consent prompt already pending?")
+        self._optin_invoke("StartOptIn", hint=self._start_optin_refusal)
+
+    def _start_optin_refusal(self) -> str:
+        """Why the ME refused StartOptIn, from the opt-in state read afterwards."""
+        st = self._safe(self.consent_state)
+        if st is not None and not st["required"]:
+            return ("this ME requires no user consent (OptInRequired 0), so there is no "
+                    "code to start: KVM sessions open without one")
+        state = (st or {}).get("state") or "unknown"
+        return f"opt-in state: {state}; is KVM enabled, and is a consent prompt already pending?"
 
     def send_consent_code(self, code: int) -> None:
         """Return the on-screen consent code to the ME (``SendOptInCode``)."""

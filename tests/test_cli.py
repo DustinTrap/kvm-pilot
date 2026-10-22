@@ -1043,6 +1043,19 @@ def test_power_on_no_fallback_when_atx_works(monkeypatch):
     assert called == []                   # fallback only fires on CapabilityError
 
 
+@pytest.mark.parametrize(("confirmed", "line"), [
+    (True, "power off: done, the host is off"),
+    (None, "power off: requested"),
+])
+def test_power_off_says_done_only_when_the_driver_saw_it(monkeypatch, capsys, confirmed, line):
+    # AMT's graceful off waits until the host is off and says so; a driver that
+    # only sends the request still prints "requested" (#303).
+    from kvm_pilot.drivers.fake import FakeDriver
+    monkeypatch.setattr(FakeDriver, "power_off", lambda self, wait=True: confirmed)
+    assert main(["power", "off", "--driver", "fake", "--yes"]) == 0
+    assert capsys.readouterr().out.strip().splitlines()[-1] == line
+
+
 def test_power_off_never_falls_back_to_wol(monkeypatch):
     # WoL can only power ON — off/reset must not trigger the fallback even if
     # power_off were to raise.
