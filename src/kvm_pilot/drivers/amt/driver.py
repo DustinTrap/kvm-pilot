@@ -72,6 +72,8 @@ def _is_plane_failure(exc: KVMPilotError) -> bool:
 
 
 if TYPE_CHECKING:
+    from collections.abc import Iterator
+
     from ...config import HostConfig
     from .rfb import Rfb
 
@@ -95,6 +97,18 @@ _POWER = {"on": 2, "off_graceful": 12, "off": 8, "reset": 10, "cycle_soft": 5}
 # still on" is reported as what it is. Windows with LMS takes 10-60 s.
 _GRACEFUL_OFF_S = 90.0
 _GRACEFUL_POLL_S = 3.0
+
+# The ME attaches its keyboard and mice to the host as a USB device only while a
+# KVM session is open, and input sent before the host has enumerated that device
+# is lost. Nothing on the RFB stream says when that is done, so the first event
+# of a session waits this long after the session opened. Measured on a CSME 21
+# Dell: Windows 11 needed 0.3-0.4 s, the UEFI boot menu 0.3-0.5 s (#302).
+_HID_SETTLE_S = 1.0
+
+# The ME also drops events when too many wait to go out to the host: an AMT 14
+# Lenovo kept 9 back-to-back characters (18 events) in order and lost and
+# reordered events after that. So type_text() syncs after every few (#302).
+_TYPE_BATCH = 4
 
 # The service instance is selected by its four CIM keys.
 _PWR_SVC_SEL = {
@@ -176,6 +190,7 @@ class AmtDriver(PowerMixin, CapabilityMixin):
         # Persistent RFB session for HID so move-then-click share a connection
         # (Video snapshot uses its own short-lived session). Lazy; see .rfb.
         self._hid: Any = None
+        self._hid_ready_at = 0.0
 
     @classmethod
     def from_config(cls, cfg: HostConfig, *, confirm: Any = None, dry_run: bool = False) -> AmtDriver:
@@ -1353,7 +1368,19 @@ class AmtDriver(PowerMixin, CapabilityMixin):
     def _hid_session(self) -> Rfb:
         if self._hid is None or getattr(self._hid, "_sock", None) is None:
             self._hid = self._connect_rfb()
+            self._hid_ready_at = time.monotonic() + _HID_SETTLE_S
+        wait = self._hid_ready_at - time.monotonic()
+        if wait > 0:
+            time.sleep(wait)
         return self._hid
+
+    @contextmanager
+    def _hid_events(self) -> Iterator[Rfb]:
+        """The HID session, synced after the caller's events so they are handled
+        before this returns, and so before any close (#302)."""
+        r = self._hid_session()
+        yield r
+        r.sync()
 
     def reset_kvm_session(self) -> None:
         """Force-clear a stuck single KVM session by cycling the SAP (disable→enable).
@@ -1404,18 +1431,23 @@ class AmtDriver(PowerMixin, CapabilityMixin):
             return
         from .rfb import key_to_keysym
 
-        r = self._hid_session()
-        for ch in text:
-            r.tap(key_to_keysym(ch))
-            if slow and delay:
-                time.sleep(delay)
+        syms = [key_to_keysym(ch) for ch in text]
+        with self._hid_events() as r:
+            for i, sym in enumerate(syms, 1):
+                r.tap(sym)
+                if i % _TYPE_BATCH == 0:
+                    r.sync()
+                if slow and delay:
+                    time.sleep(delay)
 
     def press_key(self, key: str) -> None:
         if not self.safety.guard("hid.press_key", f"Press {key!r} on {self.host} (AMT RFB)"):
             return
         from .rfb import key_to_keysym
 
-        self._hid_session().tap(key_to_keysym(key))
+        sym = key_to_keysym(key)
+        with self._hid_events() as r:
+            r.tap(sym)
 
     def send_shortcut(self, keys: str) -> None:
         parts = [k for k in keys.replace("+", ",").split(",") if k.strip()]
@@ -1424,11 +1456,11 @@ class AmtDriver(PowerMixin, CapabilityMixin):
         from .rfb import key_to_keysym
 
         syms = [key_to_keysym(k) for k in parts]
-        r = self._hid_session()
-        for s in syms:
-            r.key(s, True)
-        for s in reversed(syms):
-            r.key(s, False)
+        with self._hid_events() as r:
+            for s in syms:
+                r.key(s, True)
+            for s in reversed(syms):
+                r.key(s, False)
 
     # AMT's RFB pointer is absolute *pixels* (unlike kvmd's centered range), so
     # mouse_move takes real screen pixels and the percent/pixel helpers map onto
@@ -1436,21 +1468,23 @@ class AmtDriver(PowerMixin, CapabilityMixin):
     # Moves are ungated (HID protocol: only keys/clicks are gated).
 
     def mouse_move(self, x: int, y: int) -> None:
-        self._hid_session().pointer(int(x), int(y))
+        with self._hid_events() as r:
+            r.pointer(int(x), int(y))
 
     def mouse_move_pixels(self, x: int, y: int, width: int | None = None,
                           height: int | None = None) -> None:
         # AMT is already pixel-native; width/height are advisory (accepted for
         # KVMClient.mouse_move_pixels parity).
-        self._hid_session().pointer(int(x), int(y))
+        with self._hid_events() as r:
+            r.pointer(int(x), int(y))
 
     def mouse_move_percent(self, x_pct: float, y_pct: float) -> None:
-        r = self._hid_session()
-        w = r.width or 1024
-        h = r.height or 768
-        px = round(max(0.0, min(1.0, x_pct)) * (w - 1))
-        py = round(max(0.0, min(1.0, y_pct)) * (h - 1))
-        r.pointer(px, py)
+        with self._hid_events() as r:
+            w = r.width or 1024
+            h = r.height or 768
+            px = round(max(0.0, min(1.0, x_pct)) * (w - 1))
+            py = round(max(0.0, min(1.0, y_pct)) * (h - 1))
+            r.pointer(px, py)
 
     def mouse_click(self, button: str = "left", hold_ms: int = 50, double: bool = False) -> None:
         if not self.safety.guard(
@@ -1458,7 +1492,7 @@ class AmtDriver(PowerMixin, CapabilityMixin):
         ):
             return
         b = {"left": 1, "middle": 2, "right": 3}.get(button, 1)
-        r = self._hid_session()
-        for _ in range(2 if double else 1):
-            r.click(b)
+        with self._hid_events() as r:
+            for _ in range(2 if double else 1):
+                r.click(b)
 

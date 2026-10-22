@@ -17,7 +17,12 @@ Knobs on the instance model the corners the driver has to survive:
   * handshake failures — not-an-RFB banner (``bad_protocol``), a reason string
     then a drop (``reason_drop``), no VNC-auth on offer (``no_vnc_auth``), a
     non-16-bpp ServerInit (``bad_bpp``);
-  * transport drops — close the first N connections outright (``drop_first``).
+  * transport drops — close the first N connections outright (``drop_first``);
+  * HID delivery as the real ME does it (#302) — events that arrive within
+    ``hid_settle`` seconds of ServerInit are lost (the host has not enumerated
+    the ME's USB keyboard yet), with ``drop_unsynced`` events not followed by
+    a FramebufferUpdateRequest before the client closes are lost too, and with
+    ``hid_queue`` events beyond that many since the last request are lost.
 """
 
 from __future__ import annotations
@@ -25,6 +30,7 @@ from __future__ import annotations
 import socket
 import struct
 import threading
+import time
 import zlib
 
 _ENC_RAW = 0
@@ -70,6 +76,11 @@ class AmtRfbEmulator:
         self.bad_bpp = False            # ServerInit reports a non-16-bpp framebuffer
         # transport drops
         self.drop_first = 0             # close this many connections immediately after accept
+        # HID delivery (#302)
+        self.hid_settle = 0.0           # events this soon after ServerInit are lost
+        self.drop_unsynced = False      # events with no later update request are lost at close
+        self.hid_queue = 0              # >0: events beyond this many since a request are lost
+        self.update_requests = 0
         self._resized = False
         self.keys: list[tuple[int, int]] = []          # (down_flag, keysym)
         self.pointers: list[tuple[int, int, int]] = []  # (button_mask, x, y)
@@ -182,29 +193,55 @@ class AmtRfbEmulator:
                      + struct.pack(">I", len(name)) + name)
         if self.bad_bpp:
             return  # the driver rejects the pixel format before requesting a frame
-        self._loop(conn)
+        self._loop(conn, time.monotonic() + self.hid_settle)
 
-    def _loop(self, conn: socket.socket) -> None:
-        while True:
-            t = self._recv(conn, 1)[0]
-            if t == 0:      # SetPixelFormat (3 pad + 16 format)
-                self._recv(conn, 19)
-            elif t == 2:    # SetEncodings
-                self._recv(conn, 1)
-                n = struct.unpack(">H", self._recv(conn, 2))[0]
-                self._recv(conn, 4 * n)
-            elif t == 3:    # FramebufferUpdateRequest
-                self._recv(conn, 9)
-                conn.sendall(self._framebuffer())
-            elif t == 4:    # KeyEvent
-                d = self._recv(conn, 7)
-                self.keys.append((d[0], struct.unpack(">I", d[3:7])[0]))
-            elif t == 5:    # PointerEvent
-                d = self._recv(conn, 5)
-                self.pointers.append((d[0], struct.unpack(">H", d[1:3])[0],
-                                      struct.unpack(">H", d[3:5])[0]))
-            else:
-                raise OSError(f"unknown RFB client message type {t}")
+    def _loop(self, conn: socket.socket, hid_ready_at: float) -> None:
+        keys: list[tuple[int, int]] = []
+        pointers: list[tuple[int, int, int]] = []
+        queued = 0  # events since the last update request
+
+        def room() -> bool:
+            return not self.hid_queue or queued < self.hid_queue
+
+        def deliver() -> None:
+            self.keys.extend(keys)
+            self.pointers.extend(pointers)
+            keys.clear()
+            pointers.clear()
+
+        try:
+            while True:
+                t = self._recv(conn, 1)[0]
+                if t == 0:      # SetPixelFormat (3 pad + 16 format)
+                    self._recv(conn, 19)
+                elif t == 2:    # SetEncodings
+                    self._recv(conn, 1)
+                    n = struct.unpack(">H", self._recv(conn, 2))[0]
+                    self._recv(conn, 4 * n)
+                elif t == 3:    # FramebufferUpdateRequest
+                    self._recv(conn, 9)
+                    self.update_requests += 1
+                    queued = 0
+                    deliver()
+                    conn.sendall(self._framebuffer())
+                elif t == 4:    # KeyEvent
+                    d = self._recv(conn, 7)
+                    if time.monotonic() >= hid_ready_at and room():
+                        keys.append((d[0], struct.unpack(">I", d[3:7])[0]))
+                    queued += 1
+                elif t == 5:    # PointerEvent
+                    d = self._recv(conn, 5)
+                    if time.monotonic() >= hid_ready_at and room():
+                        pointers.append((d[0], struct.unpack(">H", d[1:3])[0],
+                                         struct.unpack(">H", d[3:5])[0]))
+                    queued += 1
+                else:
+                    raise OSError(f"unknown RFB client message type {t}")
+                if not self.drop_unsynced:
+                    deliver()
+        finally:
+            if not self.drop_unsynced:
+                deliver()
 
     # -- framebuffer responses ------------------------------------------
 

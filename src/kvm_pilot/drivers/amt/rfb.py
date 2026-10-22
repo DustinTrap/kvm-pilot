@@ -184,6 +184,8 @@ _KEYSYM = {
 def key_to_keysym(name: str) -> int:
     """Map a kvmd-style key name (``Enter``, ``F2``, ``KeyA``, ``Digit1``) or a
     single character to an X11 keysym."""
+    if len(name) == 1:  # a literal character, before strip() eats a space
+        return {"\n": 0xFF0D, "\t": 0xFF09}.get(name, ord(name))
     n = name.strip()
     low = n.casefold()
     if low in _KEYSYM:
@@ -213,6 +215,11 @@ _ENC_RLE = 16
 _REDIR_OPEN = 0x40
 _REDIR_OPEN_REPLY = 0x41
 _ENC_DESKTOP_SIZE = -223  # 0xFFFFFF21
+
+# The ME hands each key or pointer event to the host as a USB HID report, one per
+# USB poll: 2 ms apart on an AMT 14 Lenovo under Linux. Nothing on the RFB stream
+# says when the last one went out, so sync() allows twice that per event (#302).
+_HID_REPORT_S = 0.004
 
 
 def _build_rgb565_lut() -> bytes:
@@ -425,6 +432,7 @@ class Rfb:
         self.width = self.height = 0
         self._sock: socket.socket | None = None
         self._last_xy = (0, 0)
+        self._unsynced_events = 0
         # AMT's RLE(16) is a ZRLE-style scheme over ONE zlib stream spanning the
         # whole session — never reset per rect. AMT 14 firmware uses the *standard*
         # zlib format (a 0x78 0x9c header on the first tile), not raw deflate, so
@@ -582,6 +590,19 @@ class Rfb:
         while covered < w * h:
             if time.monotonic() > deadline:
                 raise ProtocolError("AMT RFB: timed out assembling the framebuffer")
+            for _ in range(self._read_update_header()):
+                rx, ry, rw, rh, enc = struct.unpack(">HHHHi", self._recv(12))
+                if enc == _ENC_DESKTOP_SIZE:
+                    self.width, self.height = rw, rh
+                    return False  # caller restarts at the new size
+                self._blit_pixels(canvas, w, rx, ry, rw, rh, self._read_rect_pixels(rw, rh, enc))
+                covered += rw * rh
+        return True
+
+    def _read_update_header(self) -> int:
+        """Skip Bell and ServerCutText messages up to the next FramebufferUpdate and
+        return its rectangle count."""
+        while True:
             msg = self._recv(1)[0]
             if msg == 2:  # Bell — ignore
                 continue
@@ -592,21 +613,36 @@ class Rfb:
             if msg != 0:  # 0 = FramebufferUpdate
                 raise ProtocolError(f"AMT RFB: unexpected server message {msg}")
             self._recv(1)  # pad
-            for _ in range(struct.unpack(">H", self._recv(2))[0]):
-                rx, ry, rw, rh, enc = struct.unpack(">HHHHi", self._recv(12))
-                if enc == _ENC_DESKTOP_SIZE:
-                    self.width, self.height = rw, rh
-                    return False  # caller restarts at the new size
-                if enc == _ENC_RAW:
-                    vals: Sequence[int] = struct.unpack(f"<{rw * rh}H", self._recv(rw * rh * 2))
-                elif enc == _ENC_RLE:
-                    dlen = struct.unpack(">I", self._recv(4))[0]
-                    vals = _decode_zrle_tile(self._zlib.decompress(self._recv(dlen)), rw, rh)
-                else:
-                    raise ProtocolError(f"AMT RFB: unsupported encoding {enc}")
-                self._blit_pixels(canvas, w, rx, ry, rw, rh, vals)
-                covered += rw * rh
-        return True
+            return int(struct.unpack(">H", self._recv(2))[0])
+
+    def _read_rect_pixels(self, rw: int, rh: int, enc: int) -> Sequence[int]:
+        if enc == _ENC_RAW:
+            return struct.unpack(f"<{rw * rh}H", self._recv(rw * rh * 2))
+        if enc == _ENC_RLE:
+            dlen = struct.unpack(">I", self._recv(4))[0]
+            return _decode_zrle_tile(self._zlib.decompress(self._recv(dlen)), rw, rh)
+        raise ProtocolError(f"AMT RFB: unsupported encoding {enc}")
+
+    def sync(self) -> None:
+        """Return once the host has had every key and pointer event sent so far.
+
+        Closing the session earlier drops them: the ME detaches its USB keyboard
+        and mice from the host with the session (#302). The ME handles client
+        messages in order, so the reply to an update request sent after the
+        events means it has read them; it then still sends them to the host as
+        USB reports, so this waits ``_HID_REPORT_S`` per event on top. The
+        request is non-incremental for a 1x1 region, so the ME always answers,
+        with one small tile.
+        """
+        self._send(struct.pack(">BBHHHH", 3, 0, 0, 0, 1, 1))
+        for _ in range(self._read_update_header()):
+            _rx, _ry, rw, rh, enc = struct.unpack(">HHHHi", self._recv(12))
+            if enc == _ENC_DESKTOP_SIZE:
+                self.width, self.height = rw, rh
+            else:
+                self._read_rect_pixels(rw, rh, enc)
+        time.sleep(self._unsynced_events * _HID_REPORT_S)
+        self._unsynced_events = 0
 
     def _blit_pixels(
         self, canvas: bytearray, cw: int, x: int, y: int, w: int, h: int, vals: Sequence[int]
@@ -629,6 +665,7 @@ class Rfb:
 
     def key(self, keysym: int, down: bool) -> None:
         self._send(struct.pack(">BBHI", 4, 1 if down else 0, 0, keysym))
+        self._unsynced_events += 1
 
     def tap(self, keysym: int) -> None:
         self.key(keysym, True)
@@ -637,6 +674,7 @@ class Rfb:
     def pointer(self, x: int, y: int, mask: int = 0) -> None:
         self._last_xy = (x, y)
         self._send(struct.pack(">BBHH", 5, mask & 0xFF, x, y))
+        self._unsynced_events += 1
 
     def click(self, button: int = 1) -> None:
         x, y = self._last_xy

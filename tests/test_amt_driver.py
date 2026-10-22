@@ -583,6 +583,57 @@ def test_mouse_move_percent_maps_onto_framebuffer(amt_rfb):
     assert amt_rfb.pointers[1] == (0, 0, 0)   # pixel-native passthrough
 
 
+@pytest.mark.parametrize(("settle", "landed"), [(0.0, False), (0.3, True)])
+def test_hid_waits_for_the_host_to_enumerate_the_me_keyboard(amt_rfb, monkeypatch, settle, landed):
+    # The ME's USB keyboard reaches the host some time after the session opens,
+    # and a key sent before that is lost (#302).
+    from kvm_pilot.drivers.amt import driver as amt_driver
+
+    amt_rfb.hid_settle = 0.2
+    monkeypatch.setattr(amt_driver, "_HID_SETTLE_S", settle)
+    make_rfb(amt_rfb).press_key("Enter")
+    assert amt_rfb.keys == ([(1, 0xFF0D), (0, 0xFF0D)] if landed else [])
+
+
+def test_hid_settle_is_paid_once_per_session(amt_rfb, monkeypatch):
+    from kvm_pilot.drivers.amt import driver as amt_driver
+
+    monkeypatch.setattr(amt_driver, "_HID_SETTLE_S", 0.3)
+    drv = make_rfb(amt_rfb)
+    drv.press_key("Enter")
+    start = time.monotonic()
+    drv.press_key("Enter")
+    assert time.monotonic() - start < 0.3
+    assert len(amt_rfb.keys) == 4
+
+
+def test_hid_events_are_handled_before_an_immediate_close(amt_rfb):
+    # The ME drops events still queued when the session closes; every HID call
+    # ends with an update-request round trip, so closing right after loses
+    # nothing (#302). The Bell and ServerCutText before the reply are skipped.
+    amt_rfb.drop_unsynced = True
+    amt_rfb.inject_control = True
+    drv = make_rfb(amt_rfb)
+    drv.type_text("hi")
+    drv.send_shortcut("Ctrl+Alt+Delete")
+    drv.mouse_move(10, 20)
+    drv.close()
+    assert amt_rfb.keys[:4] == [(1, ord("h")), (0, ord("h")), (1, ord("i")), (0, ord("i"))]
+    assert len(amt_rfb.keys) == 10
+    assert amt_rfb.pointers == [(0, 10, 20)]
+    assert amt_rfb.update_requests == 3
+
+
+def test_type_text_syncs_before_the_me_queue_overflows(amt_rfb):
+    # The ME loses events once too many wait to go out to the host; type_text
+    # syncs every few characters so a long text arrives whole and in order (#302).
+    amt_rfb.hid_queue = 18
+    text = "the quick brown fox 0123456789"
+    make_rfb(amt_rfb).type_text(text)
+    assert [k for d, k in amt_rfb.keys if d == 1] == [ord(c) for c in text]
+    assert amt_rfb.update_requests == len(text) // 4 + 1
+
+
 def test_hid_dry_run_sends_nothing(amt_rfb):
     make_rfb(amt_rfb, dry_run=True).press_key("Enter")
     assert not _wait_for(lambda: len(amt_rfb.keys) >= 1, timeout=0.3)
@@ -628,6 +679,11 @@ def test_key_to_keysym_named_and_literal():
     assert key_to_keysym("Enter") == 0xFF0D
     assert key_to_keysym("F2") == 0xFFBF
     assert key_to_keysym("a") == ord("a")
+    # type_text maps every character: a space is not stripped away, and a
+    # newline or tab is the key (#302)
+    assert key_to_keysym(" ") == 0x20
+    assert key_to_keysym("\n") == 0xFF0D
+    assert key_to_keysym("\t") == 0xFF09
 
 
 # -- ZRLE tile decode (AMT RLE(16), the hybrid-GPU path) -------------------
