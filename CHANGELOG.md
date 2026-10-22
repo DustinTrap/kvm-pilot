@@ -7,6 +7,17 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
+- **AMT follow-ups from a 1.0.0 run on CSME 21 and AMT 14** (#303):
+  - the `amt-redirection` healthcheck names the port the ME serves (16995 under
+    `amt_tls`) in its OK text, not a hard-coded 16994;
+  - with KVM on 5900 and the SOL listener off, the warning says the SOL console
+    and IDE-R won't work, not "console/snapshot", and suggests only `enable-sol`;
+  - the graceful-off wait is 180 s (was 90 s): Windows 11 took 73-77 s to shut
+    down through LMS, and the ME reported it off about 83 s after the request;
+  - a refused `amt consent-start` says when the ME requires no consent
+    (`OptInRequired` 0) instead of guessing at a pending prompt;
+  - `power off` prints `done, the host is off` when the driver waited and saw
+    it off (AMT's graceful off); `Power.power_off` may return True for that.
 - **`healthcheck` and `paths` no longer report an unreachable AMT host as
   healthy** (#293). Against an ME that did not answer — or refused the
   credentials — every readiness check passed ("Device API reachable —

@@ -251,6 +251,9 @@ class _Handler(BaseHTTPRequestHandler):
                 st.power_state = "2" if st.last_power_request == "2" else "8"
         elif method == "StartOptIn":
             st.optin_requests.append("StartOptIn")
+            if st.optin_required == "0":
+                # Measured on CSME 21 in ACM with consent off: the ME refuses (#303).
+                return _body(_inst("StartOptIn_OUTPUT", {"ReturnValue": "2"}))
             st.optin_state = "2"
         elif method == "SendOptInCode":
             code = _text(req, "OptInCode")

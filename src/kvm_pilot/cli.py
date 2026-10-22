@@ -503,8 +503,8 @@ def cmd_power(args) -> int:
         "off-hard": kvm.power_off_hard,
         "reset": kvm.reset_hard,
     }[args.action]
-    action()
-    print(f"power {args.action}: requested")
+    done = action()
+    print(f"power {args.action}: {'done, the host is off' if done else 'requested'}")
     return 0
 
 

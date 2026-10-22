@@ -108,8 +108,17 @@ def test_graceful_off_with_unreadable_state_does_not_claim_still_on(amt_emu, mon
 def test_graceful_off_returns_once_the_host_is_off(amt_emu):
     amt_emu.state.power_state = "2"
     d = make(amt_emu)
-    d.power_off()            # the emulator reflects the new state at once
+    assert d.power_off() is True   # waited and saw it off; the emulator reflects it at once
     assert d.is_powered_on() is False
+    assert d.power_off(wait=False) is False  # fired only: nothing was confirmed
+
+
+def test_graceful_off_window_covers_a_measured_windows_shutdown():
+    # Windows 11 took 73-77 s from LMS's shutdown event to the kernel's, and the
+    # ME reported the host off about 83 s after the request (#303).
+    from kvm_pilot.drivers.amt import driver as mod
+
+    assert mod._GRACEFUL_OFF_S >= 2 * 83
 
 
 def test_hard_off_is_the_one_that_counts_as_churn(amt_emu):
@@ -1667,6 +1676,25 @@ def test_consent_flow_start_then_code(amt_emu):
     assert amt_emu.state.optin_state == "0"
 
 
+def test_consent_start_without_required_consent_says_so(amt_emu):
+    # ACM with consent off: the ME refuses StartOptIn (2), and the reason is that
+    # there is nothing to consent to, not a pending prompt (#303).
+    amt_emu.state.optin_required = "0"
+    with pytest.raises(WsmanError) as ei:
+        make(amt_emu).request_consent()
+    msg = str(ei.value)
+    assert "returned 2" in msg and "requires no user consent" in msg
+    assert "already pending" not in msg
+    assert amt_emu.state.optin_state == "0"
+
+
+def test_consent_start_refusal_with_consent_required_names_the_state(amt_emu):
+    amt_emu.state.nonzero_methods = {"StartOptIn"}
+    with pytest.raises(WsmanError) as ei:
+        make(amt_emu).request_consent()
+    assert "opt-in state:" in str(ei.value) and "already pending" in str(ei.value)
+
+
 def test_wrong_consent_code_is_a_named_refusal(amt_emu):
     d = make(amt_emu)
     d.request_consent()
@@ -1976,6 +2004,33 @@ def test_redirection_check_warns_when_both_transports_are_off(amt_emu):
     res = check_amt_redirection(d)
     assert res is not None and res.severity is Severity.WARNING
     assert "16994" in res.detail and "5900" in res.detail
+    assert "SOL console" in res.detail and "snapshot" in res.detail
+
+
+def test_sol_off_with_kvm_on_5900_does_not_say_snapshot_breaks(amt_emu):
+    """AMT 14 with KVM on 5900 and the SOL listener off: snapshot and HID work,
+    only SOL and IDE-R need the listener (#303)."""
+    from kvm_pilot.health import Severity, check_amt_redirection
+
+    d = make(amt_emu)
+    d.amt_health = lambda: {"sol_listener": False, "kvm_5900": True, "kvm_sap_enabled": True}
+    res = check_amt_redirection(d)
+    assert res is not None and res.severity is Severity.WARNING
+    assert "SOL console and IDE-R" in res.detail and "snapshot" not in res.detail
+    assert res.remediation is not None
+    assert "enable-sol" in res.remediation and "enable-kvm" not in res.remediation
+
+
+def test_redirection_check_names_the_tls_port(amt_emu):
+    """A TLS-only ME serves redirection on 16995 and refuses 16994 (#303)."""
+    from kvm_pilot.health import Severity, check_amt_redirection
+
+    d = make(amt_emu)
+    d.amt_health = lambda: {"sol_listener": True, "kvm_5900": False, "kvm_sap_enabled": True,
+                            "redirection_port": 16995}
+    res = check_amt_redirection(d)
+    assert res is not None and res.severity is Severity.OK
+    assert "16995" in res.detail and "16994" not in res.detail
 
 
 @pytest.mark.parametrize("posture", [

@@ -65,7 +65,8 @@ and POSTs them over `urllib` with HTTP **Digest** auth, parsing responses with
   `CIM_PowerManagementService.RequestPowerStateChange`. Codes (#264): on `2`,
   **`power off` = `12`** (Off-Soft *Graceful*: the OS shuts down, carried out by
   Intel LMS in the host OS — a refusal names LMS, and an accepted request with
-  the host still on after 90 s raises rather than reporting success),
+  the host still on after 180 s raises rather than reporting success; once it
+  sees the host off, the CLI prints `power off: done, the host is off`),
   **`power off-hard` = `8`** (CIM "Power Off - Soft": the platform forces ACPI
   S5, the OS is not asked — Windows logs Kernel-Power 41), master-bus-reset
   `10`. `6` is in neither of Intel's supported lists and is no longer sent.
