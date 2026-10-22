@@ -1093,7 +1093,7 @@ def cmd_firmware_update(args) -> int:
     if latest:
         line += f", latest known {latest}"
     if status.get("image_size"):
-        line += f", staged image {status['image_size'] // (1024 * 1024)} MB"
+        line += f", image {status['image_size'] // (1024 * 1024)} MB"
     print(line)
 
     # Steer to the known-good path when the device's quirks say the API flash

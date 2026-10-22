@@ -193,14 +193,31 @@ def test_glkvm_get_available_update_none_without_endpoint():
 
 def test_get_upgrade_status_aggregates_the_read_endpoints():
     d = GLKVMDriver("h")
-    d._http = _FakeHTTP({
+    class ReadOnlyHTTP(_FakeHTTP):
+        def get(self, path, **kw):
+            assert path != "/api/upgrade/download", "GET /download starts a download"
+            return super().get(path, **kw)
+
+    d._http = ReadOnlyHTTP({
         "/api/upgrade/status": {"enabled": True},
         "/api/upgrade/version": {"model": "RM1PE", "version": "V1.5.1 release2"},
-        "/api/upgrade/download": {"size": 307581578},
+        "/api/upgrade/download_info": {"size": 12345, "total_size": 307581578},
     })
     assert d.get_upgrade_status() == {
         "enabled": True, "current": "V1.5.1 release2",
         "model": "RM1PE", "image_size": 307581578}
+
+
+@pytest.mark.parametrize("download_info", [None, {}, {"size": 0, "total_size": 0}])
+def test_upgrade_status_tolerates_missing_or_idle_download_info(download_info):
+    d = GLKVMDriver("h")
+    d._http = _FakeHTTP({
+        "/api/upgrade/status": {"enabled": True},
+        "/api/upgrade/version": {"model": "RM1PE", "version": "V1.10.1 release2"},
+        "/api/upgrade/download_info": download_info,
+    })
+    assert d.get_upgrade_status() == {
+        "enabled": True, "current": "V1.10.1 release2", "model": "RM1PE"}
 
 
 def test_get_upgrade_status_disabled_when_subsystem_absent():

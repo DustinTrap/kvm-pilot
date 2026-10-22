@@ -507,10 +507,12 @@ class GLKVMDriver(PiKVMDriver):
     def get_upgrade_status(self) -> dict:
         """Read-only view of GL's remote-upgrade subsystem — never flashes.
 
-        Aggregates GET ``/api/upgrade/{status,version,download}``:
+        Aggregates GET ``/api/upgrade/{status,version,download_info}``:
         ``{enabled, current, model, image_size}``. Sub-endpoints missing on older
         firmware are skipped, so the shape degrades gracefully; ``enabled`` is
-        ``False`` when the subsystem is absent.
+        ``False`` when the subsystem is absent. ``image_size`` is the advertised
+        download total, not proof that an image is fully staged. Never probe
+        ``/download`` here: despite using GET, it starts a firmware download.
         """
         out: dict = {"enabled": False}
         try:
@@ -527,9 +529,9 @@ class GLKVMDriver(PiKVMDriver):
         except KVMPilotError:
             pass
         try:
-            dl = self._http.get("/api/upgrade/download")
-            if isinstance(dl, dict) and dl.get("size"):
-                out["image_size"] = dl["size"]
+            dl = self._http.get("/api/upgrade/download_info")
+            if isinstance(dl, dict) and dl.get("total_size"):
+                out["image_size"] = dl["total_size"]
         except KVMPilotError:
             pass
         return out
@@ -576,7 +578,7 @@ class GLKVMDriver(PiKVMDriver):
         failed flash needs physical U-Boot recovery — callers must vet the reliability
         (registry ``profile.remote_update``) and recovery path first. With ``image``,
         a local firmware file is uploaded first (POST ``/api/upgrade/upload``); without
-        it, the already-staged image (GET ``/api/upgrade/download``) is flashed. Then
+        it, an image previously staged through the vendor UI is flashed. Then
         POST ``/api/upgrade/start``; the device auto-reboots.
 
         A non-error ``start`` response is NOT trusted (#94: on a real RM1PE it can
