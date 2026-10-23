@@ -65,7 +65,8 @@ request bodies as **provisional** and feature-detect via `/api/upgrade/status`.
 | `/api/upgrade/status` | GET | `{"enabled": true}` — is the subsystem available |
 | `/api/upgrade/version` | GET | `{"model","version"}` — installed version (also used by `get_firmware_info`) |
 | `/api/upgrade/compare` | GET | GL's online check (installed vs GL's server); needs internet, and 502'd on the probed unit. Feeds `get_available_update`. |
-| `/api/upgrade/download` | GET | `{"size": …}` — size of the available/staged image (~293 MB observed) |
+| `/api/upgrade/download_info` | GET | `{"size", "total_size", "error"}` — download progress; the total does not prove an image is fully staged |
+| `/api/upgrade/download` | GET | **Starts a firmware download**; not a read-only status probe |
 | `/api/upgrade/upload` | POST | upload a local firmware image |
 | `/api/upgrade/start` | POST | begin the flash; the device auto-reboots |
 | `/api/upgrade/reboot` | GET | action-shaped status (`{"status":"Reboot started"}`) — **not** used by kvm-pilot |
@@ -73,6 +74,11 @@ request bodies as **provisional** and feature-detect via `/api/upgrade/status`.
 `get_upgrade_status()` aggregates the three read endpoints. `apply_firmware_update()`
 optionally uploads (`--image`) then POSTs `/api/upgrade/start`; it is routed through
 `safety.guard("firmware.flash", …)` and defaults to `dry_run=True`.
+
+The download/status distinction was checked against the vendor web client on
+RM1PE V1.7.1 and `/download_info` on V1.10.1 release2 (2026-09-23). The latter
+returned `{"error": null, "size": 0, "total_size": 0}` when idle. This corrects
+the earlier provisional mapping tracked in #95.
 
 ## Reliability assessment
 

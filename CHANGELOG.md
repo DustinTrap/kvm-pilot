@@ -7,6 +7,13 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 ## [Unreleased]
 
 ### Fixed
+- **GL `firmware-update` dry run no longer starts a firmware download** (#300).
+  `get_upgrade_status()`, the read-only probe behind the dry run, sent
+  `GET /api/upgrade/download`, which is the request GL's web client uses to
+  *start* the image download (~256 MB onto the device). It now reads the
+  download progress from `GET /api/upgrade/download_info` and takes
+  `image_size` from its `total_size`; `/api/upgrade/download` is never called.
+  `docs/firmware-update.md` lists both endpoints.
 - **`healthcheck` and `paths` no longer report an unreachable AMT host as
   healthy** (#293). Against an ME that did not answer — or refused the
   credentials — every readiness check passed ("Device API reachable —

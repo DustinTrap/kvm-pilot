@@ -211,8 +211,9 @@ class _Handler(BaseHTTPRequestHandler):
                 self._json(st)
             elif path == "/api/upgrade/version":
                 self._json(self._state.upgrade_version)
-            elif path == "/api/upgrade/download":
-                self._json({"size": self._state.upgrade_image_size})
+            elif path == "/api/upgrade/download_info":
+                self._json({"size": self._state.upgrade_image_size,
+                            "total_size": self._state.upgrade_image_size})
             else:
                 self._json({}, ok=False, status=404)
         else:
