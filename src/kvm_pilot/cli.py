@@ -1705,7 +1705,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--iso", help="Image path/URL for the virtual_media probe")
     p.add_argument("--image",
                    help="Local firmware image for the firmware_update probe (omit to "
-                        "flash the device's staged image)")
+                        "flash an image already staged through the vendor UI)")
     p.add_argument("--ledger",
                    help="Ledger JSONL to append to (default $KVM_PILOT_TEST_LEDGER, "
                         "else ~/.config/kvm-pilot/test_runs.jsonl)")
