@@ -134,6 +134,31 @@ def test_schema_phase_enum_tracks_runtime_taxonomy():
     assert schema["properties"]["phase"]["enum"] == ALL_PHASES
 
 
+def test_manifest_keys_match_the_schema(tmp_path):
+    """Every key build_variants writes is declared in the schema, and every key the
+    schema requires is written. The schema rejects undeclared properties, so a
+    renamed or added AugmentationParams field must change both (CodeRabbit on #291)."""
+    schema_path = Path(__file__).parents[1] / "tools/dataset/vision-dataset.schema.json"
+    schema = json.loads(schema_path.read_text(encoding="utf-8"))
+    (row,) = build_variants(
+        _source(tmp_path / "source.png"),
+        tmp_path / "out",
+        phase="booting",
+        count=1,
+        seed=0,
+        split="train",
+        source_kind="synthetic",
+        source_reference="fixture",
+        license_id="Apache-2.0",
+        attribution="",
+        redistributable=False,
+    )
+    assert set(row) == set(schema["required"]) == set(schema["properties"])
+    for key in ("source", "license", "capture_params"):
+        sub = schema["properties"][key]
+        assert set(row[key]) == set(sub["required"]) == set(sub["properties"]), key
+
+
 def test_tiny_image_and_zero_width_are_handled(tmp_path):
     source = _source(tmp_path / "tiny.png", size=(1, 1))
     with Image.open(source) as image:
