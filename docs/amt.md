@@ -146,7 +146,8 @@ Notes and limits:
 ### Remote SOL / KVM enablement (no MEBx trip)
 
 MEBx *provisions* SOL and KVM, but their network **listeners** can be toggled
-over WS-Man — so `enable_sol()` and `enable_kvm()` open ports 16994 and 5900
+over WS-Man — so `enable_sol()` opens 16994 and `enable_kvm()` enables KVM (on
+5900, or tunnelled on the redirection port where newer ME builds keep 5900 off)
 remotely (this is how MeshCommander / Intel's rpc-go work). Both are gated.
 
 - `enable_sol()` — full-object PUT to `AMT_RedirectionService`
@@ -252,7 +253,8 @@ write-only on AMT (`CIM_BootConfigSetting` returns no `BootOrder`), so
 2. `kvm-pilot healthcheck --driver amt --host <host> --user admin` (intake gate);
    `kvm-pilot info` confirms identity + power over WS-Man.
 3. Enable the other channels over WS-Man (no MEBx trip): `kvm-pilot amt enable-sol`
-   opens 16994; `kvm-pilot amt enable-kvm` opens 5900 (set an 8-char
+   opens 16994; `kvm-pilot amt enable-kvm` enables KVM (5900 where the ME still
+   offers it, else over the redirection port; set an 8-char
    `amt_kvm_password` first). Also available as the MCP `amt_enable` tool and the
    library `enable_sol()` / `enable_kvm()` methods.
 4. `snapshot` (BIOS/POST/GRUB screenshot — a *graphical* screen) → gated `power` /

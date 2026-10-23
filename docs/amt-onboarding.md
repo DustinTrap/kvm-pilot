@@ -26,7 +26,7 @@ kvm-pilot's AMT driver gives you, all pure-stdlib over AMT's native ports:
 | Power (on/off/reset), inventory, one-time boot override | WS-Man (HTTP Digest) | 16992 / TLS 16993 |
 | Serial console (SOL) | AMT redirection via `amtterm` | 16994 / TLS 16995 |
 | Virtual media — boot from a local ISO (IDE-R) | AMT redirection | 16994 / TLS 16995 |
-| Screenshot (BIOS/POST/GRUB) + keyboard/mouse (KVM) | RFB / KVM-redirection | 5900 |
+| Screenshot (BIOS/POST/GRUB) + keyboard/mouse (KVM) | RFB / KVM-redirection | 5900, or tunnelled on the redirection port 16994 / TLS 16995 (newer ME builds keep 5900 off) |
 
 ---
 
@@ -34,12 +34,15 @@ kvm-pilot's AMT driver gives you, all pure-stdlib over AMT's native ports:
 
 AMT is powerful but quirky. Calibrate before you rely on it:
 
-- **Pre-boot keyboard (HID) may not take effect on laptops.** On the validation
-  unit (Dell Latitude 5411) the ME *accepts* keystrokes but the firmware never
-  consumes them at BIOS/GRUB — video works, keyboard does not. **Test it; don't
-  assume.** If you must drive firmware menus, you may still need a physical
-  keyboard. (For booting alternate media without a keyboard, use **IDE-R** or
-  **PXE** instead.)
+- **Keyboard/mouse (HID) is unproven on hardware — test it; don't assume.** On the
+  validation unit (Dell Latitude 5411) the ME *accepted* keystrokes but nothing
+  reached BIOS/GRUB. A contributor later found why input goes missing (#302): the
+  ME attaches its USB keyboard and mice only while a KVM session is open, so
+  events sent before the host has enumerated them, or still queued when the CLI
+  closes the session, are lost. Through 1.0.1 that can drop keys on any AMT host,
+  so the Latitude result says nothing about its firmware; a retest is pending. If
+  you must drive firmware menus today, keep a physical keyboard at hand. (For
+  booting alternate media without a keyboard, use **IDE-R** or **PXE** instead.)
 - **Video captures *graphical* screens only** — BIOS / POST / GRUB / a GUI — **not
   legacy VGA text mode** (AMT resets instead of sending a text-mode frame). On
   some laptops it also won't render the OS's own framebuffer (e.g. the GDM login),
@@ -132,7 +135,7 @@ this is the step people forget:
 
 ```bash
 kvm-pilot amt enable-sol --profile mybox                 # opens 16994 (SOL + IDE-R)
-kvm-pilot amt enable-kvm --profile mybox                 # opens 5900 (video + HID), consent ON
+kvm-pilot amt enable-kvm --profile mybox                 # enables KVM (video + HID), consent ON
 kvm-pilot amt enable-kvm --no-consent --profile mybox    # …or silent (needs Admin Control Mode)
 ```
 
@@ -230,7 +233,7 @@ virtual media over AMT ≥ 11 was never a firmware limitation, it's client tooli
 | Every WS-Man call times out (`HTTP 500 e:TimedOut`); null inventory | ME wedged after a firmware update / reset churn (#217) | Full **G3 power cycle**, then `enable-sol`/`enable-kvm`. kvm-pilot names this for you: the error carries the G3 instruction, and `healthcheck` reports `amt-redirection` **CRITICAL** ("management stack is not ready") rather than an ordinary listener warning |
 | `enable-kvm` → `HTTP 400`; 5900 stays closed | KVM redirection reset by a firmware update, or ME not ready | Power-cycle; if it persists, re-check via MEBx that KVM redirection is enabled |
 | `power`/`info` reports **off** while the OS is clearly up (SSH open) | ME degraded/still initializing — power *read* is stale | Power *control* often still works; give the ME time or power-cycle |
-| Keystrokes have no effect at BIOS/GRUB | Pre-boot HID not effective on this platform (some laptops) | Use **IDE-R** or **PXE** for media; physical keyboard for MEBx |
+| Keystrokes have no effect at BIOS/GRUB | Through 1.0.1, most likely the CLI (#302): keys sent before the host enumerates the ME's USB keyboard, or still queued when the session closes, are lost while the call reports success. A platform that ignores pre-boot HID is possible but unproven | Use **IDE-R** or **PXE** for media; physical keyboard for MEBx; retest once the #302 fix ships |
 | `snapshot` returns a blank / idle overlay | Display asleep, in text mode, or the OS framebuffer (not captured) | Send a key to wake it; remember AMT captures *graphical* firmware screens only |
 | Box unreachable — no ping, no AMT, no SSH | Host idle-suspended (GNOME-on-AC will do this) | Send **Wake-on-LAN** first; then disable idle-suspend on always-on hosts (`systemctl mask sleep.target …`) |
 | `boot-device bios` rejected | Boot-to-BIOS-setup is firmware-dependent (#215) | Boot a source instead (`pxe`/`cd`/`hdd`) |
