@@ -6,6 +6,8 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [1.0.1] — 2026-10-23
+
 ### Fixed
 - **GL `firmware-update` dry run no longer starts a firmware download** (#300).
   `get_upgrade_status()`, the read-only probe behind the dry run, sent
@@ -59,6 +61,9 @@ building block for the boot-phase vision dataset (#15).
 
 Thanks to @Vamsi-2581 for the dataset evaluator (#292) — it closes the
 augment → evaluate loop and gives the classifier its first measured accuracy.
+
+Thanks to @torkeldanielsson for finding and fixing the GL dry-run download
+(#300, PR #301), measured on a GL-RM1PE at V1.10.1 release2.
 
 ## [1.0.0] — 2026-10-15
 
@@ -1982,7 +1987,10 @@ user feedback. **Not validated on real hardware** — see Notes.
   feedback are the explicit goals of this alpha. Reports welcome in the issue
   tracker.
 
-[Unreleased]: https://github.com/DustinTrap/kvm-pilot/compare/v0.1.0rc3...HEAD
+[Unreleased]: https://github.com/DustinTrap/kvm-pilot/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/DustinTrap/kvm-pilot/compare/v1.0.0...v1.0.1
+[1.0.0]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v1.0.0
+[0.1.0rc4]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0rc4
 [0.1.0rc3]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0rc3
 [0.1.0rc2]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0rc2
 [0.1.0rc1]: https://github.com/DustinTrap/kvm-pilot/releases/tag/v0.1.0rc1
