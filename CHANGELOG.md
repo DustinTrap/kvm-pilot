@@ -6,6 +6,15 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+- **One healthcheck reads the device identity once** (#295). `get_info()` and
+  `get_firmware_info()` were re-read by every check that used them: on AMT
+  that was about six firmware-identity lookups per run, and a dark ME paid a
+  socket timeout for each. A healthcheck (and a `preflight`, across its
+  stable and volatile passes) now memoizes both calls, result or error, for
+  that run only, so the next run still reads live power state. On the AMT
+  emulator: 27 → 14 WS-Man reads on a healthy ME, 20 → 7 on a dark one.
+
 ## [1.0.1] — 2026-10-23
 
 ### Fixed
