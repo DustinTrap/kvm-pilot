@@ -126,8 +126,14 @@ has to survive the reset that boots from it. So:
   Put settings → `SetBootConfigRole` → force the CD/DVD source) and reports
   `use_ider: true`. Without a served disc the CD/DVD source means the *physical*
   optical drive.
+- Some MEs refuse `UseIDER=true` together with the forced CD/DVD source
+  (`ChangeBootOrder` returns 4; observed on a Latitude 5411 @ 14.1.79, #298).
+  There the CD/DVD source alone boots the redirected disc, so `boot-device cd`
+  retries without `UseIDER` and reports `use_ider: false, useider_rejected: true`
+  (quirk `ider-useider-rejected`). The target is still the served disc.
 - **Do not loop `mount → cd → reset`.** Verify `media-list` shows
-  `connected: true` and `boot-device` reported `use_ider: true`, reset once, and
+  `connected: true` and `boot-device` reported `use_ider: true` (or
+  `useider_rejected: true`), reset once, and
   stop after two failed attempts (PXE or in-band `boot-device --via ssh` next).
   Rapid session churn plus hard resets wedged an ME so that every AMT port went
   dark and only a G3 power cycle recovered it (#251); `healthcheck` warns

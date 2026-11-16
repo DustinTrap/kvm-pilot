@@ -6,6 +6,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **AMT `boot-device cd` works on MEs that refuse `UseIDER` with a forced CD/DVD
+  source** (#298). On a Latitude 5411 @ 14.1.79, `ChangeBootOrder(Force CD/DVD)`
+  returned 4 whenever `UseIDER=true`, so the IDE-R recipe (`mount` → `boot-device
+  cd` → `reset`) raised. That ME boots the redirected disc from the CD/DVD source
+  alone, so the driver now retries without `UseIDER` and reports
+  `use_ider: false, useider_rejected: true`. New quirk `ider-useider-rejected`.
+
 ## [1.0.1] — 2026-10-23
 
 ### Fixed
