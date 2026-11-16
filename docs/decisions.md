@@ -671,6 +671,13 @@ a `mc info`/chassis-status parser overfit to Dell would surface here. It didn't 
   confident wrong "update available" findings. The healthcheck says *currency
   unknown* for such devices instead of staying quiet; tracking the BIOS version
   separately is a different feature, not a registry fix.
+- **The WS-Man `OperationTimeout` ignores `--timeout` below 30 s (#294).**
+  It is sent as `max(30, timeout)`, so `--timeout 10` gives a 10 s socket
+  timeout and a `PT30S` header. This looks like an ignored setting, but it is
+  intentional. An AMT 14.1.79 ME faults every request under `PT30S` with
+  `e:TimedOut`, the same fault as the #217 wedge. With the floor in place, an
+  `e:TimedOut` can only come from an ME that is not ready, so the G3 hint
+  stays honest. Don't "fix" the header to follow the socket timeout.
 - **The churn log is per process, not persisted.** Three hard resets in ten
   minutes from *this* process is what #251 measured; a cross-process ledger
   would be speculative generality.

@@ -50,6 +50,13 @@ _PULL = "http://schemas.xmlsoap.org/ws/2004/09/enumeration/Pull"
 
 _REDACTION = "***REDACTED***"
 
+# The WS-Man OperationTimeout is a floor, not the socket timeout (#294). A Dell
+# Latitude 5411 (AMT 14.1.79) faults every request whose OperationTimeout is
+# under PT30S with HTTP 500 e:TimedOut, the same fault the #217 wedge raises.
+# Sending at least PT30S keeps --timeout a client-side knob only, so an
+# e:TimedOut can only mean the ME itself is not ready.
+_MIN_OPERATION_TIMEOUT_S = 30
+
 
 def cim(cls: str) -> str:
     """Resource URI for a ``CIM_`` class."""
@@ -106,6 +113,7 @@ class Wsman:
         self._user = user
         self._passwd = passwd
         self._timeout = timeout
+        self._operation_timeout_s = max(_MIN_OPERATION_TIMEOUT_S, int(timeout))
         scheme = "https" if tls else "http"
         self._url = f"{scheme}://{_bracket(host)}:{port}/wsman"
         # urllib's digest handler performs the 401 -> Authorization dance and
@@ -228,7 +236,7 @@ class Wsman:
             f'<wsman:ResourceURI s:mustUnderstand="true">{resource_uri}</wsman:ResourceURI>'
             f"<wsa:MessageID>uuid:{uuid.uuid4()}</wsa:MessageID>"
             f"<wsa:ReplyTo><wsa:Address>{_ANON}</wsa:Address></wsa:ReplyTo>"
-            f"<wsman:OperationTimeout>PT{int(self._timeout)}S</wsman:OperationTimeout>"
+            f"<wsman:OperationTimeout>PT{self._operation_timeout_s}S</wsman:OperationTimeout>"
             '<wsman:MaxEnvelopeSize s:mustUnderstand="true">153600</wsman:MaxEnvelopeSize>'
             f"{_selector_xml(selectors)}"
             "</s:Header>"
