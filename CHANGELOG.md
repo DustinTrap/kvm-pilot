@@ -6,6 +6,14 @@ to follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+- **A short `--timeout` no longer makes a healthy AMT ME look wedged** (#294).
+  The WS-Man `OperationTimeout` header carried the socket timeout, and an
+  AMT 14.1.79 ME faults every request under `PT30S` with HTTP 500
+  `e:TimedOut`, which the driver reports as the #217 wedge ("needs a G3
+  power drain"). The header now never goes below `PT30S`; `--timeout` still
+  sets the client's socket timeout, and values above 30 still reach the ME.
+
 ## [1.0.1] — 2026-10-23
 
 ### Fixed

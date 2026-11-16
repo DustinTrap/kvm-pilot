@@ -13,7 +13,7 @@ import time
 import pytest
 
 from kvm_pilot.drivers.amt import AmtDriver
-from kvm_pilot.drivers.amt.wsman import WsmanError, amt
+from kvm_pilot.drivers.amt.wsman import Wsman, WsmanError, amt
 from kvm_pilot.drivers.base import Capability
 from kvm_pilot.errors import (
     AuthError,
@@ -1441,6 +1441,29 @@ def test_wedged_me_error_names_the_power_cycle(amt_emu):
     assert "TimedOut" in msg                 # #216's fault surfacing still shows
     assert "power cycle" in msg and "G3" in msg   # ... plus the actionable cause
     assert "warm reboot" in msg.lower()
+
+
+# -- OperationTimeout is a floor, not the socket timeout (#294) -------------
+
+# AMT 14.1.79 faults e:TimedOut on any OperationTimeout under PT30S, which the
+# driver would report as the #217 wedge ("needs a G3 drain"). A short --timeout
+# must stay a client-side knob and never reach the ME below the floor.
+
+
+def test_short_timeout_does_not_fault_an_me_that_needs_pt30s(amt_emu):
+    amt_emu.state.min_operation_timeout_s = 30
+    amt_emu.state.power_state = "2"
+    assert make(amt_emu, timeout=10).is_powered_on() is True
+
+
+def test_operation_timeout_never_drops_below_pt30s():
+    short = Wsman("h", "u", "p", timeout=10)._envelope("a", "r")
+    assert "<wsman:OperationTimeout>PT30S</wsman:OperationTimeout>" in short
+
+
+def test_longer_timeout_still_reaches_the_me():
+    long_ = Wsman("h", "u", "p", timeout=120)._envelope("a", "r")
+    assert "<wsman:OperationTimeout>PT120S</wsman:OperationTimeout>" in long_
 
 
 def test_enable_kvm_on_a_wedged_me_is_actionable(amt_emu):

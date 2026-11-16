@@ -10,6 +10,7 @@ after. No Docker, no third-party deps.
 
 from __future__ import annotations
 
+import re
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -62,6 +63,9 @@ class AmtState:
         self.error_body: str | None = None     # body for http_status (defaults to a fault of fault_reason)
         self.garbage_body = False               # 200 with a non-XML body -> ProtocolError
         self.delay = 0.0                         # sleep before responding (drives a read timeout)
+        # Fault e:TimedOut when the request's OperationTimeout is under this many
+        # seconds, as AMT 14.1.79 does under PT30S (#294). None = accept any.
+        self.min_operation_timeout_s: int | None = None
         # -- method / enumeration behaviour ---------------------------------
         self.nonzero_methods: set[str] = set()  # Invoke methods that return ReturnValue != 0
         self.enum_no_context = False             # Enumerate omits the EnumerationContext
@@ -121,6 +125,12 @@ class _Handler(BaseHTTPRequestHandler):
         if st.garbage_body:
             self._send("this is not XML at all >>>")
             return
+
+        if st.min_operation_timeout_s is not None:
+            m = re.search(rb"<wsman:OperationTimeout>PT(\d+)S<", raw)
+            if m is None or int(m.group(1)) < st.min_operation_timeout_s:
+                self._send(_TIMED_OUT_FAULT, 500)
+                return
 
         req = ET.fromstring(raw)  # nosec B314 - test input
         action = _text(req, "Action") or ""
@@ -283,6 +293,18 @@ class _Handler(BaseHTTPRequestHandler):
 
 def _body(inner: str) -> str:
     return f'<s:Envelope xmlns:s="{_S}"><s:Body>{inner}</s:Body></s:Envelope>'
+
+
+# The fault a real ME answers with HTTP 500 for e:TimedOut (#217, #294).
+_TIMED_OUT_FAULT = (
+    '<?xml version="1.0" encoding="UTF-8"?>'
+    f'<s:Envelope xmlns:s="{_S}" xmlns:a="{_S}" '
+    'xmlns:e="http://schemas.dmtf.org/wbem/wsman/1/wsman.xsd"><s:Body>'
+    "<s:Fault><s:Code><s:Value>a:Receiver</s:Value>"
+    "<s:Subcode><s:Value>e:TimedOut</s:Value></s:Subcode></s:Code>"
+    "<s:Reason><s:Text>The operation has timed out.</s:Text></s:Reason>"
+    "</s:Fault></s:Body></s:Envelope>"
+)
 
 
 def _fault(reason: str) -> str:
