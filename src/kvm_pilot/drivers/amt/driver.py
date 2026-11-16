@@ -552,11 +552,12 @@ class AmtDriver(PowerMixin, CapabilityMixin):
             self._apply_boot_override(key, use_ider=use_ider)
         except WsmanError as e:
             # Some MEs (Latitude 5411 @ 14.1.79, #298) refuse UseIDER=true together
-            # with the forced CD/DVD source — ChangeBootOrder returns 4, or the Put
-            # fails with HTTP 400 InvalidRepresentation — yet with UseIDER=false the
-            # forced CD/DVD source alone boots the *redirected* disc there. So retry
-            # without UseIDER; any other fault is real and propagates.
-            if not use_ider or not (e.status_code == 400 or "returned 4" in str(e)):
+            # with the forced CD/DVD source: in Intel's order (clear, Put, role,
+            # force) ChangeBootOrder returns 4. With UseIDER=false the forced CD/DVD
+            # source alone boots the *redirected* disc there, so retry without
+            # UseIDER. Any other fault, including a 400 on the Put, is real and
+            # propagates.
+            if not use_ider or "returned 4" not in str(e):
                 raise
             self._apply_boot_override(key, use_ider=False)
             return self.get_boot_options() | {"use_ider": False, "useider_rejected": True}
