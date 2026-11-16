@@ -32,6 +32,9 @@ class AmtState:
         self.bios_setup = "false"
         self.use_ider = "false"          # AMT_BootSettingData.UseIDER (boot the redirected disc)
         self.ider_boot_device = "0"      # 0 = floppy, 1 = CD/DVD
+        # #298 (14.1.79): UseIDER=true and a forced CD/DVD source can't coexist —
+        # ChangeBootOrder(CD) returns 4 under UseIDER, and the Put is a 400 under CD.
+        self.ider_cd_exclusive = False
         # redirection / KVM enablement knobs
         self.redir_listener = "false"   # AMT_RedirectionService.ListenerEnabled
         self.redir_state = "32771"      # EnabledState 32771 = IDER+SOL both
@@ -138,6 +141,10 @@ class _Handler(BaseHTTPRequestHandler):
         elif action.endswith("/transfer/Get"):
             self._send(_body(self._instance_xml(resource)))
         elif action.endswith("/transfer/Put"):
+            if (st.ider_cd_exclusive and resource.endswith("AMT_BootSettingData")
+                    and _text(req, "UseIDER") == "true" and "CD/DVD" in st.boot_order):
+                self._send(_fault("d:InvalidRepresentation"), 400)
+                return
             self._record_put(resource, req)
             self._send(_body(self._instance_xml(resource)))
         else:  # a custom method invocation (…/<Method>)
@@ -267,6 +274,9 @@ class _Handler(BaseHTTPRequestHandler):
             # pick the source selector specifically (empty for none/bios).
             sels = [c.text for c in req.iter() if c.tag.rsplit("}", 1)[-1] == "Selector"]
             st.boot_order = next((s for s in sels if s and "Force" in s), "")
+            if st.ider_cd_exclusive and "CD/DVD" in st.boot_order and st.use_ider == "true":
+                st.boot_order = ""
+                return _body(_inst("ChangeBootOrder_OUTPUT", {"ReturnValue": "4"}))
         elif method == "RequestStateChange" and resource.rsplit("/", 1)[-1] == "CIM_KVMRedirectionSAP":
             st.kvm_sap_requested = _text(req, "RequestedState")
             if st.kvm_sap_requested is not None:

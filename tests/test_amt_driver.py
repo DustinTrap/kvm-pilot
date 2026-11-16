@@ -2077,6 +2077,41 @@ def test_set_boot_follows_intels_order_clear_put_role_source(amt_emu):
     assert "Force PXE Boot" in amt_emu.state.boot_order  # the final one forced the source
 
 
+def _serving_disc(drv):
+    from types import SimpleNamespace
+
+    drv._ider = SimpleNamespace(alive=True)  # a live IDE-R session, as `mount` leaves it
+    return drv
+
+
+def test_set_boot_cd_with_a_served_disc_sets_useider(amt_emu):
+    out = _serving_disc(make(amt_emu)).set_boot_device("cd")
+    assert out["use_ider"] is True and "useider_rejected" not in out
+    assert amt_emu.state.use_ider == "true" and amt_emu.state.ider_boot_device == "1"
+    assert "Force CD/DVD Boot" in amt_emu.state.boot_order
+
+
+def test_set_boot_cd_falls_back_when_the_me_refuses_useider_with_cd(amt_emu):
+    """#298: AMT 14.1.79 returns 4 from ChangeBootOrder(CD/DVD) while UseIDER=true,
+    yet the forced CD/DVD source alone boots the redirected disc there. The driver
+    retries without UseIDER and says so, rather than failing the IDE-R recipe."""
+    amt_emu.state.ider_cd_exclusive = True
+    out = _serving_disc(make(amt_emu)).set_boot_device("cd")
+    assert out["use_ider"] is False and out["useider_rejected"] is True
+    assert amt_emu.state.use_ider == "false"
+    assert "Force CD/DVD Boot" in amt_emu.state.boot_order
+
+
+def test_set_boot_cd_does_not_mask_other_faults_as_the_useider_quirk(amt_emu):
+    amt_emu.state.nonzero_methods = {"ChangeBootOrder"}  # ReturnValue 1, not 4
+    with pytest.raises(WsmanError, match="returned 1"):
+        _serving_disc(make(amt_emu)).set_boot_device("cd")
+
+
+def test_useider_rejected_quirk_is_registered(amt_emu):
+    assert "ider-useider-rejected" in {q.id for q in make(amt_emu).known_quirks(firmware="14.1.79")}
+
+
 # -- power: the ME must survive its own reset (#251) --------------------------
 
 

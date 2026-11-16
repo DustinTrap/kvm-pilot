@@ -548,6 +548,22 @@ class AmtDriver(PowerMixin, CapabilityMixin):
         )
         if not self.safety.guard("amt.set_boot_device", desc):
             return self.get_boot_options() | {"use_ider": use_ider}  # dry-run
+        try:
+            self._apply_boot_override(key, use_ider=use_ider)
+        except WsmanError as e:
+            # Some MEs (Latitude 5411 @ 14.1.79, #298) refuse UseIDER=true together
+            # with the forced CD/DVD source: in Intel's order (clear, Put, role,
+            # force) ChangeBootOrder returns 4. With UseIDER=false the forced CD/DVD
+            # source alone boots the *redirected* disc there, so retry without
+            # UseIDER. Any other fault, including a 400 on the Put, is real and
+            # propagates.
+            if not use_ider or "returned 4" not in str(e):
+                raise
+            self._apply_boot_override(key, use_ider=False)
+            return self.get_boot_options() | {"use_ider": False, "useider_rejected": True}
+        return self.get_boot_options() | {"use_ider": use_ider}
+
+    def _apply_boot_override(self, key: str, *, use_ider: bool) -> None:
         # Intel's order: clear any forced source first (AMT rejects UseIDER=true
         # with InvalidValues while one is still active), write the settings, claim
         # the single-use role, then force the source.
@@ -556,7 +572,6 @@ class AmtDriver(PowerMixin, CapabilityMixin):
         self._set_boot_config_role(single_use=True)
         source_id = None if key in ("bios", "none") else _BOOT_SOURCE[key]
         self._change_boot_order(source_id)
-        return self.get_boot_options() | {"use_ider": use_ider}
 
     def _rmw_put(
         self, uri: str, root_name: str, overrides: dict[str, str],
@@ -1054,6 +1069,15 @@ class AmtDriver(PowerMixin, CapabilityMixin):
                   workaround="set_boot_device('bios') raises a clear CapabilityError there; boot a "
                              "source (pxe/cd/hdd) instead.",
                   source="observed"),
+            Quirk(id="ider-useider-rejected",
+                  summary="Some firmware refuses UseIDER=true together with the forced CD/DVD "
+                          "boot source (ChangeBootOrder returns 4; the reverse order fails the "
+                          "Put with InvalidRepresentation), but the forced CD/DVD source alone "
+                          "boots the redirected IDE-R disc (Latitude 5411 @ 14.1.79, #298).",
+                  workaround="set_boot_device('cd') retries with UseIDER=false and reports "
+                             "use_ider=false, useider_rejected=true — the redirected disc is "
+                             "still the target. Nothing to do.",
+                  source="observed"),
             Quirk(id="me-wedge-on-redirection-churn",
                   summary="Rapid redirection-session churn (repeated IDE-R mounts, KVM "
                           "connects) interleaved with hard resets — 3 mounts + 3 resets in 12 "
@@ -1062,7 +1086,8 @@ class AmtDriver(PowerMixin, CapabilityMixin):
                           "update wedge. Observed on a Latitude 5411 @ 14.1.79 (#251).",
                   workaround="Do NOT loop mount→boot-device→reset. One attempt: confirm "
                              "`media-list` shows the IDE-R session connected and `boot-device "
-                             "cd` reported use_ider=true, then reset once. If the host still "
+                             "cd` reported use_ider=true (or useider_rejected=true), then "
+                             "reset once. If the host still "
                              "boots its disk, stop after two tries and use PXE or in-band "
                              "`boot-device` over SSH. The healthcheck warns at 3 hard resets in "
                              "10 min; a reset the ME accepts but then goes silent after is "
