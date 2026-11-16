@@ -33,7 +33,9 @@ import enum
 import json
 import os
 import time
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
@@ -177,8 +179,52 @@ def _driver_kind(driver: Any) -> str:
     return "pikvm"
 
 
+# One healthcheck reads each driver identity call once, however many checks
+# consume it (#295): AMT flood-protects request bursts, and against a host that
+# drops packets every repeat is another full socket timeout. The memo lives for
+# one run_healthcheck / preflight only: get_info() carries live power state, and
+# the power flows poll the same driver across an ME reboot, so it must not
+# outlive the run.
+_RUN_MEMO: ContextVar[dict[tuple[int, str], Any] | None] = ContextVar("kvm_pilot_health_run", default=None)
+
+
+def _once(driver: Any, name: str) -> Callable[[], Any] | None:
+    """``getattr(driver, name, None)``, memoized (result or KVMPilotError) for
+    the current healthcheck run; the plain method outside one."""
+    fn = getattr(driver, name, None)
+    memo = _RUN_MEMO.get()
+    if fn is None or memo is None:
+        return fn
+    key = (id(driver), name)
+
+    def call() -> Any:
+        if key not in memo:
+            try:
+                memo[key] = fn()
+            except KVMPilotError as exc:
+                memo[key] = exc
+        got = memo[key]
+        if isinstance(got, KVMPilotError):
+            raise got
+        return got
+
+    return call
+
+
+@contextmanager
+def _one_read_per_run() -> Iterator[None]:
+    if _RUN_MEMO.get() is not None:  # nested inside preflight: share its memo
+        yield
+        return
+    token = _RUN_MEMO.set({})
+    try:
+        yield
+    finally:
+        _RUN_MEMO.reset(token)
+
+
 def _firmware_of(driver: Any) -> str | None:
-    fn = getattr(driver, "get_firmware_info", None)
+    fn = _once(driver, "get_firmware_info")
     if fn is None:
         return None
     try:
@@ -201,7 +247,7 @@ def _result(result: Any) -> dict[str, Any]:
 
 def check_api_reachable(driver: Any) -> CheckResult | None:
     """The device answers and authenticates. Volatile: re-probe live."""
-    get_info = getattr(driver, "get_info", None)
+    get_info = _once(driver, "get_info")
     if get_info is None:
         return None
     try:
@@ -487,7 +533,7 @@ def access_paths(driver: Any) -> dict:
     """
     paths: list[dict] = []
 
-    get_info = getattr(driver, "get_info", None)
+    get_info = _once(driver, "get_info")
     rest_live: bool | None = None
     if get_info is not None:
         try:
@@ -912,7 +958,7 @@ def check_default_creds(driver: Any) -> CheckResult | None:
 
 
 def check_exposed_services(driver: Any) -> CheckResult | None:
-    get_info = getattr(driver, "get_info", None)
+    get_info = _once(driver, "get_info")
     if get_info is None:
         return None
     try:
@@ -1162,7 +1208,7 @@ def check_amt_reset_churn(driver: Any) -> CheckResult | None:
 
 
 def check_firmware_report(driver: Any) -> CheckResult | None:
-    fn = getattr(driver, "get_firmware_info", None)
+    fn = _once(driver, "get_firmware_info")
     if fn is None:
         return None
     try:
@@ -1265,7 +1311,7 @@ def _firmware_remediation(entry: dict, source: str) -> str:
 
 def check_firmware_currency(driver: Any) -> CheckResult | None:
     """Flag known-bad firmware or an available update, via the firmware registry."""
-    fn = getattr(driver, "get_firmware_info", None)
+    fn = _once(driver, "get_firmware_info")
     if fn is None:
         return None
     try:
@@ -1363,7 +1409,7 @@ def check_capability_profile(driver: Any) -> CheckResult | None:
     is all-good; WARNING when any axis is degraded, since those directly shape
     what the operator can expect (and whether it's safe to automate).
     """
-    fn = getattr(driver, "get_firmware_info", None)
+    fn = _once(driver, "get_firmware_info")
     if fn is None:
         return None
     try:
@@ -1422,7 +1468,7 @@ def check_support_evidence(driver: Any) -> CheckResult | None:
     as ssh-reachable). WARNING only when a recorded live attempt actually
     FAILED on this firmware (e.g. RM1PE V1.5.1 firmware_update, #94/#95).
     """
-    fn = getattr(driver, "get_firmware_info", None)
+    fn = _once(driver, "get_firmware_info")
     if fn is None:
         return None
     try:
@@ -1551,6 +1597,7 @@ CHECKS: list[Check] = [
 ]
 
 
+@_one_read_per_run()
 def run_healthcheck(driver: Any, *, checks: Iterable[Check] | None = None) -> HealthReport:
     """Run every applicable check against ``driver`` and return a report."""
     results: list[CheckResult] = []
@@ -1779,6 +1826,7 @@ def _firmware_delta_result(
     )
 
 
+@_one_read_per_run()
 def preflight(
     driver: Any,
     *,

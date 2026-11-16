@@ -8,6 +8,7 @@ autouse network guard in conftest).
 
 from __future__ import annotations
 
+import collections
 import time
 
 import pytest
@@ -2220,3 +2221,81 @@ def test_hard_reset_accounting_survives_concurrent_calls(amt_emu):
     for t in threads:
         t.join()
     assert drv.hard_resets_recent() == 8
+
+
+# -- healthcheck request budget (#295) ---------------------------------------
+# AMT flood-protects request bursts, and against a host that drops packets every
+# read is a full socket timeout. So one healthcheck calls get_info() and
+# get_firmware_info() once each, however many checks consume them. (Before
+# #295: 27 reads on a healthy emulated ME, 20 on a dark one.)
+
+
+def _spy_identity(drv: AmtDriver) -> collections.Counter:
+    """Count the driver's identity calls and every WS-Man read it sends."""
+    seen: collections.Counter = collections.Counter()
+    for name in ("get_info", "get_firmware_info"):
+        real = getattr(drv, name)
+
+        def method(*a, _real=real, _name=name, **kw):
+            seen[_name] += 1
+            return _real(*a, **kw)
+
+        setattr(drv, name, method)
+    for name in ("get", "enumerate"):
+        real = getattr(drv._wsman, name)
+
+        def read(*a, _real=real, **kw):
+            seen["wsman"] += 1
+            return _real(*a, **kw)
+
+        setattr(drv._wsman, name, read)
+    return seen
+
+
+def test_healthcheck_reads_the_identity_once(amt_emu):
+    from kvm_pilot.health import run_healthcheck
+
+    drv = make(amt_emu)
+    seen = _spy_identity(drv)
+    run_healthcheck(drv)
+    assert seen["get_info"] == 1
+    assert seen["get_firmware_info"] == 1
+    assert seen["wsman"] <= 14
+
+
+def test_healthcheck_on_a_dark_me_does_not_rediscover_it_per_check():
+    from kvm_pilot.health import run_healthcheck
+
+    drv = _dark_driver()
+
+    def dead(*args, **kwargs):
+        raise ConnectionError("AMT WS-Man connection to 127.0.0.1 failed: [Errno 64] Host is down")
+
+    drv._wsman.get = dead
+    drv._wsman.enumerate = dead
+    seen = _spy_identity(drv)
+    run_healthcheck(drv)
+    assert seen["get_info"] == 1  # api-reachable's failure answers exposed-services too
+    assert seen["get_firmware_info"] == 1
+    assert seen["wsman"] <= 7
+
+
+def test_preflight_shares_one_identity_read_across_its_runs(amt_emu):
+    from kvm_pilot.health import preflight
+
+    drv = make(amt_emu)
+    seen = _spy_identity(drv)
+    preflight(drv, enforce=False)
+    assert seen["get_firmware_info"] == 1
+
+
+def test_identity_is_read_fresh_outside_a_healthcheck(amt_emu):
+    """The memo is per run: get_info() carries live power state, and the power
+    flows poll the same driver across an ME reboot."""
+    from kvm_pilot.health import run_healthcheck
+
+    drv = make(amt_emu)
+    seen = _spy_identity(drv)
+    run_healthcheck(drv)
+    run_healthcheck(drv)
+    assert seen["get_info"] == 2
